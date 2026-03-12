@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Invoice - The Clouds Academy</title>
+  <style>
+    body { font-family: Arial, sans-serif; }
+    .container { max-width: 700px; margin: auto; padding: 30px; border: 1px solid #e5e7eb; }
+    .header { display: flex; justify-content: space-between; align-items: start; border-bottom: 2px solid #2563eb; padding-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th { background: #f3f4f6; padding: 10px; text-align: left; }
+    td { padding: 10px; border-bottom: 1px solid #f3f4f6; }
+    .total { font-size: 18px; font-weight: bold; color: #2563eb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1 style="color: #2563eb; margin: 0;">The Clouds Academy</h1>
+        <p style="color: #6b7280; margin: 5px 0;">School Management Platform</p>
+      </div>
+      <div style="text-align: right;">
+        <h2>INVOICE</h2>
+        <p>#{{invoice.invoice_number}}</p>
+        <p>Due: {{invoice.due_date}}</p>
+      </div>
+    </div>
+    <table>
+      <tr><th>Description</th><th>Amount</th></tr>
+      <tr><td>School SaaS Subscription</td><td>Rs. {{invoice.amount}}</td></tr>
+      <tr><td>Tax</td><td>Rs. {{invoice.tax}}</td></tr>
+      <tr><td class="total">Total</td><td class="total">Rs. {{invoice.total}}</td></tr>
+    </table>
+    <p style="margin-top: 30px; color: #6b7280; font-size: 13px;">Thank you for using The Clouds Academy.</p>
+  </div>
+</body>
+</html>

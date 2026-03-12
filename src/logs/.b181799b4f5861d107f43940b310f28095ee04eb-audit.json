@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "g:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\.b181799b4f5861d107f43940b310f28095ee04eb-audit.json",
+    "files": [
+        {
+            "date": 1772843777047,
+            "name": "g:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\error-2026-03-07.log",
+            "hash": "c08a702681b65f42b0b91f2f6252520b4babee1e5711627cb6958f9970586a4d"
+        }
+    ],
+    "hashType": "sha256"
+}

@@ -1,0 +1,25 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/.88b684932b7d7116c2e69606ecce98a35a87f19b-audit.json",
+    "files": [
+        {
+            "date": 1773040782826,
+            "name": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/combined-2026-03-09.log",
+            "hash": "8be49dfa649b148beed784d4c51b976deed524506cbd1ce0d9b89b724fb857ab"
+        },
+        {
+            "date": 1773097270215,
+            "name": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/combined-2026-03-10.log",
+            "hash": "25d6b65c519b1c8be319f62b911b20b0ad88aa3fee020b921bb4284a90a88b87"
+        },
+        {
+            "date": 1773180745397,
+            "name": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/combined-2026-03-11.log",
+            "hash": "25456e96db43c50346625bb3042631c69d6b0cb265b9ed5c89cd4e87070a7e02"
+        }
+    ],
+    "hashType": "sha256"
+}

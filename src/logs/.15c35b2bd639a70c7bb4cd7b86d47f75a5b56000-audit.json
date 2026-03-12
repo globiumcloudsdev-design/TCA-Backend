@@ -1,0 +1,25 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/.15c35b2bd639a70c7bb4cd7b86d47f75a5b56000-audit.json",
+    "files": [
+        {
+            "date": 1773040782827,
+            "name": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/exceptions-2026-03-09.log",
+            "hash": "4cde0c4421bda4c062ebc1a9f85e2c52b312511f011e8a54cfd9126056ee1c7c"
+        },
+        {
+            "date": 1773097270222,
+            "name": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/exceptions-2026-03-10.log",
+            "hash": "69928803668522d2d976404d0030e7c77bfe77cee65d62bd83007ab21d1e1b46"
+        },
+        {
+            "date": 1773189756087,
+            "name": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/exceptions-2026-03-11.log",
+            "hash": "4c019f56172efb3716970c435438294ac9aff65982ea2894ded4d4ec33a7ff22"
+        }
+    ],
+    "hashType": "sha256"
+}

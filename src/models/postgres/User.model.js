@@ -1,0 +1,140 @@
+/**
+ * The Clouds Academy - User Model (Polymorphic)
+ *
+ * Single unified User table for all user types:
+ *   MASTER_ADMIN | INSTITUTE_ADMIN | TEACHER | STUDENT | PARENT | STAFF
+ *
+ * Type-specific data is stored in the 'details' JSONB field:
+ *   - studentDetails:  { classId, sectionId, rollNo, grNumber, fatherName,
+ *                        motherName, dateOfBirth, gender, bloodGroup,
+ *                        address, admissionDate, documents: [...] }
+ *   - teacherDetails:  { employeeId, qualification, specialization,
+ *                        subjects, joiningDate, salary, documents: [...] }
+ *   - parentDetails:   { relation, occupation, cnic, childrenIds: [...],
+ *                        documents: [...] }
+ *   - staffDetails:    { designation, department, joiningDate, documents: [...] }
+ *
+ * Students can log in with 'registration_no' instead of email.
+ */
+
+import { DataTypes } from 'sequelize';
+import sequelize from '../../config/database.js';
+
+const User = sequelize.define(
+  'User',
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+
+    school_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'institutes', key: 'id' },
+      onDelete: 'SET NULL',
+      comment: 'FK to institutes.id — NULL for MASTER_ADMIN, set for all other user types',
+    },
+
+    role_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'roles', key: 'id' },
+      onDelete: 'SET NULL',
+      comment: 'FK to roles — permissions resolved by role + user_type combination',
+    },
+
+    user_type: {
+      type: DataTypes.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF'),
+      allowNull: false,
+      defaultValue: 'STAFF',
+    },
+
+    staff_type: {
+      type: DataTypes.ENUM('Accounatant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper'),
+      allowNull: true,
+      comment: 'Optional sub-type for STAFF users to distinguish teaching vs non-teaching staff',
+    },
+
+    first_name: { type: DataTypes.STRING(100), allowNull: false },
+    last_name: { type: DataTypes.STRING(100), allowNull: false },
+
+    email: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: 'Optional for STUDENT (use registration_no instead)',
+    },
+
+    registration_no: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      comment: 'Student registration / GR number — used as login credential for STUDENT type',
+    },
+
+    phone: { type: DataTypes.STRING(20) },
+    password_hash: { type: DataTypes.STRING, allowNull: false },
+
+    details: {
+      type: DataTypes.JSONB,
+      defaultValue: {},
+      comment: 'Type-specific data: studentDetails | teacherDetails | parentDetails | staffDetails',
+    },
+
+    avatar_url: { type: DataTypes.STRING },
+    avatar_public_id: { type: DataTypes.STRING },
+    is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+    last_login_at: { type: DataTypes.DATE },
+    password_reset_token: { type: DataTypes.STRING },
+    password_reset_expires: { type: DataTypes.DATE },
+    email_verified: { type: DataTypes.BOOLEAN, defaultValue: false },
+
+    created_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'UUID of the admin who created this account',
+    },
+    updated_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'UUID of the admin who last updated this account',
+    },
+     // Documents Array - specifically for your requirement
+    documents: {
+      type: DataTypes.JSONB,
+      defaultValue: [],
+      comment: '[{ type: "id_card", url: "...", filename: "...", uploaded_at: "..." }]'
+    },
+  },
+  {
+    tableName: 'users',
+    defaultScope: {
+      attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] },
+    },
+    scopes: {
+      // Override default excludes so password_hash is included for auth checks
+      withPassword: { attributes: { exclude: [] } },
+    },
+    indexes: [
+      { fields: ['school_id'] },
+      { fields: ['user_type'] },
+      { fields: ['role_id'] },
+    ],
+  }
+);
+
+// Helper method to add document
+User.prototype.addDocument = function(docType, url, filename) {
+  const docs = this.documents || [];
+  docs.push({
+    id: uuidv4(),
+    type: docType,
+    url,
+    filename,
+    uploaded_at: new Date()
+  });
+  return this.update({ documents: docs });
+};
+
+User.associate = (models) => {
+  User.belongsTo(models.School, { foreignKey: 'school_id', as: 'School' });
+  User.belongsTo(models.Role, { foreignKey: 'role_id', as: 'Role' });
+};
+
+export default User;
