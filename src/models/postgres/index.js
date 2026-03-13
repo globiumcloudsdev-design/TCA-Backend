@@ -6,7 +6,7 @@
 import sequelize from '../../config/database.js';
 
 // Import all models
-import Institute from './Institute.modal.js';
+import Institute from './Institute.model.js';
 import InstituteType from './InstituteType.model.js';
 import User from './User.model.js';
 import Role from './Role.model.js';
@@ -24,12 +24,15 @@ import SchoolSubscription from './SchoolSubscription.model.js';
 import Invoice from './Invoice.model.js';
 import Notification from './Notification.model.js';
 import AuditLog from './AuditLog.model.js';
+import Timetable from './Timetable.model.js';
+import FeeTemplate from './FeeTemplate.model.js';
+import Branch from './Branch.model.js';
 
 const models = {
   sequelize,
   Institute,
   InstituteType,
-  // Backward-compat alias: any model association that still says models.School
+  // Backward-compat alias: any model association that still says models.School 
   // will resolve to the Institute model during the transition
   School: Institute,
   User,
@@ -48,6 +51,9 @@ const models = {
   Invoice,
   Notification,
   AuditLog,
+  Timetable,
+  FeeTemplate,
+  Branch
 };
 
 // Run associations — deduplicate so alias School: Institute doesn't call associate twice

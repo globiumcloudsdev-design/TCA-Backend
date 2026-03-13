@@ -87,6 +87,7 @@ export const updateCompleteClass = async (id, instituteId, updateData, options =
   // Update basic fields
   if (updateData.name !== undefined) classData.name = updateData.name;
   if (updateData.description !== undefined) classData.description = updateData.description || '';
+  if (updateData.academic_year_id !== undefined) classData.academic_year_id = updateData.academic_year_id;
   if (updateData.is_active !== undefined) {
     classData.is_active = updateData.is_active === true || updateData.is_active === 'true';
   }
@@ -228,6 +229,28 @@ export const getAllClasses = async (filters = {}, pagination = {}) => {
       totalPages: Math.ceil(count / limit)
     }
   };
+};
+
+export const getClassOptions = async (instituteId, academicYearId) => {
+  const where = {
+    school_id: instituteId,
+    is_active: true
+  };
+
+  if (academicYearId) {
+    where.academic_year_id = academicYearId;
+  }
+
+  const classes = await Class.findAll({
+    where,
+    attributes: ['id', 'name'],
+    order: [['name', 'ASC']]
+  });
+
+  return classes.map((c) => ({
+    value: c.id,
+    label: c.name
+  }));
 };
 
 export const getClassById = async (id, instituteId) => {

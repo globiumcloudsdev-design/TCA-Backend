@@ -15,6 +15,9 @@ import attendanceRoutes from './attendance.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import subscriptionPlanRoutes from './subscriptionPlan.routes.js';
 import masterAdminRoutes from './masterAdmin.routes.js';
+import teacherRoutes from './teacher.routes.js'; // ✅ Import teacher routes
+import timetableRoutes from './timetable.routes.js'; // ✅ Yahan import karo
+import feeTemplateRoutes from './feeTemplate.routes.js'; // ✅ Yahan import karo
 
 const router = Router();
 
@@ -38,6 +41,14 @@ router.use('/roles', roleRoutes);
 
 // ── Students ───────────────────────────────────────────────────────────────
 router.use('/students', studentRoutes);
+
+// ── Teachers ───────────────────────────────────────────────────────────────
+router.use('/teachers', teacherRoutes); // ✅ Mount teacher routes
+
+// ── Timetable ───────────────────────────────────────────────────────────────
+router.use('/timetable', timetableRoutes); // ✅ Yahan use karo
+
+router.use('/fee-templates', feeTemplateRoutes); // legacy alias, remove later
 
 // ── Fee Management ─────────────────────────────────────────────────────────
 router.use('/fees', feeRoutes);

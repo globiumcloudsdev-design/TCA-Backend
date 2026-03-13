@@ -281,6 +281,27 @@ export const getAllClasses = async (req, res) => {
 };
 
 /**
+ * GET - Class options for dropdown
+ * GET /api/v1/classes/options
+ */
+export const getClassOptions = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    if (!instituteId) return sendError(res, 'Institute ID not found', 400);
+
+    const options = await classService.getClassOptions(
+      instituteId,
+      req.query.academic_year_id
+    );
+
+    return sendSuccess(res, options, 'Class options fetched successfully');
+  } catch (error) {
+    console.error('❌ Get class options error:', error);
+    return sendError(res, error.message || 'Failed to fetch class options');
+  }
+};
+
+/**
  * GET - Class by ID
  * GET /api/v1/classes/:id
  */
@@ -322,5 +343,25 @@ export const deleteClass = async (req, res) => {
       return sendNotFound(res, error.message);
     }
     return sendError(res, error.message || 'Failed to delete class');
+  }
+};
+
+/**
+ * TOGGLE STATUS
+ * PATCH /api/v1/classes/:id/toggle-status
+ */
+export const toggleStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body;
+    const instituteId = getInstituteId(req);
+
+    if (!instituteId) return sendError(res, 'Institute ID not found', 400);
+
+    const updatedClass = await classService.updateCompleteClass(id, instituteId, { is_active });
+    return sendSuccess(res, updatedClass, `Class ${is_active ? 'activated' : 'deactivated'} successfully`);
+  } catch (error) {
+    console.error('❌ Toggle status error:', error);
+    return sendError(res, error.message || 'Failed to toggle status');
   }
 };

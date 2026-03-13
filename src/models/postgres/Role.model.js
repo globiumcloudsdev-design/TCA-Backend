@@ -7,7 +7,7 @@
  * Special value ['ALL'] grants full access for that user type.
  *
  * Platform template roles (is_template = true) have school_id = NULL.
- * Custom institute roles have school_id pointing to the owning institute.
+ * Custom institute roles have institute_id pointing to the owning institute.
  */
 
 import { DataTypes } from 'sequelize';

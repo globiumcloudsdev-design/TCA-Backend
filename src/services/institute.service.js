@@ -265,7 +265,7 @@
 import { Op } from 'sequelize';
 import bcrypt from 'bcryptjs';
 import sequelize from '../config/database.js';
-import Institute from '../models/postgres/Institute.modal.js';
+import Institute from '../models/postgres/Institute.model.js';
 import InstituteType from '../models/postgres/InstituteType.model.js';
 import SubscriptionPlan from '../models/postgres/SubscriptionPlan.model.js';
 import Role from '../models/postgres/Role.model.js';

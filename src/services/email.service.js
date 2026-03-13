@@ -5,6 +5,56 @@
 import { sendEmail } from '../config/email.js';
 import config from '../config/index.js';
 import logger from '../config/logger.js';
+import { generateQRCodeBuffer } from '../utils/qrCodeGenerator.js';
+
+/**
+ * Send welcome email with credentials
+ */
+/**
+ * Send welcome email with credentials and QR code
+ */
+export const sendWelcomeEmailWithCredentials = async (user, password, instituteName, qrCodeUrl) => {
+  try {
+    const loginUrl = `${config.frontendUrl}/login`;
+    const name = `${user.first_name} ${user.last_name}`;
+    
+    // Generate QR code for attachment
+    const qrBuffer = await generateQRCodeBuffer(user);
+    
+    // Get full URL for QR code
+    const fullQrUrl = qrCodeUrl ? `${config.baseUrl}${qrCodeUrl}` : null;
+    
+    await sendEmail({
+      to: user.email,
+      subject: `Welcome to ${instituteName} - Your Account Credentials`,
+      template: 'welcome-credentials',
+      context: {
+        name,
+        email: user.email,
+        password,
+        loginUrl,
+        userType: user.user_type,
+        registrationNo: user.registration_no,
+        instituteName,
+        qrCodeUrl: fullQrUrl,
+        year: new Date().getFullYear()
+      },
+      attachments: [
+        {
+          filename: `qr_code_${user.id}.png`,
+          content: qrBuffer,
+          contentType: 'image/png',
+          cid: 'qrcode' // Content ID for embedding in email
+        }
+      ]
+    });
+    
+    logger.info(`✅ Welcome email sent to ${user.email}`);
+  } catch (error) {
+    logger.error('❌ Welcome email failed:', error);
+    throw error;
+  }
+};
 
 export const sendWelcomeEmail = async (to, name) => {
   try {
@@ -52,4 +102,5 @@ export default {
   sendPasswordResetEmail,
   sendFeeReminderEmail,
   sendInvoiceEmail,
+  sendWelcomeEmailWithCredentials
 };

@@ -41,6 +41,16 @@ router.get(
 );
 
 /**
+ * GET - Class options for dropdown
+ * GET /api/v1/classes/options
+ */
+router.get(
+  '/options',
+  hasPermission('classes.read'),
+  classController.getClassOptions
+);
+
+/**
  * GET - Class by ID
  * GET /api/v1/classes/:id
  */
@@ -69,6 +79,16 @@ router.delete(
   '/:id',
   hasPermission('classes.delete'),
   classController.deleteClass
+);
+
+/**
+ * TOGGLE STATUS
+ * PATCH /api/v1/classes/:id/toggle-status
+ */
+router.patch(
+  '/:id/toggle-status',
+  hasPermission('classes.update'),
+  classController.toggleStatus
 );
 
 export default router;

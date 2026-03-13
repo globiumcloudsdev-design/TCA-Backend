@@ -12,7 +12,7 @@
 import crypto from 'crypto';
 import User from '../models/postgres/User.model.js';
 import Role from '../models/postgres/Role.model.js';
-import Institute from '../models/postgres/Institute.modal.js';
+import Institute from '../models/postgres/Institute.model.js';
 import InstituteType from '../models/postgres/InstituteType.model.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../config/auth.js';
 import { AppError } from '../utils/lib/AppError.js';

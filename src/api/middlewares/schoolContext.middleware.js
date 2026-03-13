@@ -19,7 +19,7 @@
 
 import { AppError } from '../../utils/lib/AppError.js';
 import catchAsync from '../../utils/lib/catchAsync.js';
-import Institute from '../../models/postgres/Institute.modal.js';
+import Institute from '../../models/postgres/Institute.model.js';
 
 export const schoolContext = catchAsync(async (req, res, next) => {
   // Master Admin doesn't need institute context
