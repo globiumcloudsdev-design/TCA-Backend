@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "C:\\Users\\GC Abdul Rehman CEO\\Desktop\\GC Web app\\TCA-Backend\\src\\logs\\.af650188bcbc171c6535e9dd1bc08008e3c74eb2-audit.json",
+    "files": [
+        {
+            "date": 1773724724545,
+            "name": "C:\\Users\\GC Abdul Rehman CEO\\Desktop\\GC Web app\\TCA-Backend\\src\\logs\\exceptions-2026-03-17.log",
+            "hash": "0f15f76dc409a18d1c5cb33f295f3251a5cf613d1c3c020d43d4bedc15f6676c"
+        }
+    ],
+    "hashType": "sha256"
+}
