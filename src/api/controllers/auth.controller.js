@@ -61,3 +61,8 @@ export const getMe = catchAsync(async (req, res) => {
 });
 
 export default { login, logout, refreshToken, forgotPassword, resetPassword, getMe };
+
+
+
+
+

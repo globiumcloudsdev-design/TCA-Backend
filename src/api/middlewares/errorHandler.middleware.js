@@ -40,11 +40,11 @@ const handleJWTExpiredError = () => new AppError('Token expired. Please login ag
  * Send error in development (full details)
  */
 const sendErrorDev = (err, res) => {
-  res.status(err.statusCode).json({
+  res.status(err.statusCode || 500).json({
     success: false,
     status: err.status,
     message: err.message,
-    errors: err.errors,
+    errors: err.errors || err.details, // Joi puts details in error.details
     stack: err.stack,
   });
 };
@@ -67,7 +67,7 @@ const sendErrorProd = (err, res) => {
 };
 
 export const errorHandler = (err, req, res, next) => {
-  let error = { ...err };
+  let error = err; // Use direct reference to keep the prototype chain
   error.message = err.message;
   error.statusCode = err.statusCode || 500;
   error.isOperational = err.isOperational ?? false;

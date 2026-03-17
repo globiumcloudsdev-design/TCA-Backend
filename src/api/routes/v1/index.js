@@ -18,6 +18,9 @@ import masterAdminRoutes from './masterAdmin.routes.js';
 import teacherRoutes from './teacher.routes.js'; // ✅ Import teacher routes
 import timetableRoutes from './timetable.routes.js'; // ✅ Yahan import karo
 import feeTemplateRoutes from './feeTemplate.routes.js'; // ✅ Yahan import karo
+import staffRoutes from './staff.routes.js'; // ✅ Yahan import karo
+import branchRoutes from './branch.routes.js'
+import portalRoutes from './portal/index.js'; // ✅ Portal routes aggregator
 
 const router = Router();
 
@@ -48,6 +51,13 @@ router.use('/teachers', teacherRoutes); // ✅ Mount teacher routes
 // ── Timetable ───────────────────────────────────────────────────────────────
 router.use('/timetable', timetableRoutes); // ✅ Yahan use karo
 
+// ── Staff Management ───────────────────────────────────────────────────────
+router.use('/staff', staffRoutes);
+
+// ── Branch Management ──────────────────────────────────────────────────────
+router.use('/branches', branchRoutes); // ✅ Yahan use karo
+
+// ── Fee Management ───────────────────────────────────────────────────────
 router.use('/fee-templates', feeTemplateRoutes); // legacy alias, remove later
 
 // ── Fee Management ─────────────────────────────────────────────────────────
@@ -64,6 +74,9 @@ router.use('/subscription-plans', subscriptionPlanRoutes);
 
 // ── Master Admin (institutes CRUD + lookups) ───────────────────────────────
 router.use('/master-admin', masterAdminRoutes);
+
+// ── Portal Routes / Teacher, Student, Parent ──────────────────────────────────────────────────────────────
+router.use('/portal', portalRoutes);
 
 // V1 health
 router.get('/ping', (req, res) => res.json({ ok: true, version: 'v1' }));

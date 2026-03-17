@@ -87,6 +87,7 @@ const Institute = sequelize.define(
             defaultValue: {
                 has_branches: false,
                 enable_parent_portal: true,
+                enable_teacher_portal: true,
                 enable_student_portal: true,
                 enable_sms_notifications: false
             }

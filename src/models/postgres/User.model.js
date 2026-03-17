@@ -1,24 +1,18 @@
+
+// // backend/src/models/User.model.js
+
 // /**
 //  * The Clouds Academy - User Model (Polymorphic)
 //  *
 //  * Single unified User table for all user types:
 //  *   MASTER_ADMIN | INSTITUTE_ADMIN | TEACHER | STUDENT | PARENT | STAFF
 //  *
-//  * Type-specific data is stored in the 'details' JSONB field:
-//  *   - studentDetails:  { classId, sectionId, rollNo, grNumber, fatherName,
-//  *                        motherName, dateOfBirth, gender, bloodGroup,
-//  *                        address, admissionDate, documents: [...] }
-//  *   - teacherDetails:  { employeeId, qualification, specialization,
-//  *                        subjects, joiningDate, salary, documents: [...] }
-//  *   - parentDetails:   { relation, occupation, cnic, childrenIds: [...],
-//  *                        documents: [...] }
-//  *   - staffDetails:    { designation, department, joiningDate, documents: [...] }
-//  *
-//  * Students can log in with 'registration_no' instead of email.
+//  * Type-specific data is stored in the 'details' JSONB field
 //  */
 
 // import { DataTypes } from 'sequelize';
 // import sequelize from '../../config/database.js';
+// import { v4 as uuidv4 } from 'uuid';
 
 // const User = sequelize.define(
 //   'User',
@@ -42,13 +36,13 @@
 //     },
 
 //     user_type: {
-//       type: DataTypes.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF'),
+//       type: DataTypes.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF', 'BRANCH_ADMIN' ),
 //       allowNull: false,
 //       defaultValue: 'STAFF',
 //     },
 
 //     staff_type: {
-//       type: DataTypes.ENUM('Accounatant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper'),
+//       type: DataTypes.ENUM('Accountant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper', 'BRANCH_HEAD'),
 //       allowNull: true,
 //       comment: 'Optional sub-type for STAFF users to distinguish teaching vs non-teaching staff',
 //     },
@@ -71,6 +65,13 @@
 //     phone: { type: DataTypes.STRING(20) },
 //     password_hash: { type: DataTypes.STRING, allowNull: false },
 
+//     // 🔥 NEW: Store resolved permissions from role
+//     permissions: {
+//       type: DataTypes.JSONB,
+//       defaultValue: [],
+//       comment: 'Resolved permissions from assigned role (cached for quick access)',
+//     },
+
 //     details: {
 //       type: DataTypes.JSONB,
 //       defaultValue: {},
@@ -79,6 +80,9 @@
 
 //     avatar_url: { type: DataTypes.STRING },
 //     avatar_public_id: { type: DataTypes.STRING },
+//     qr_code_url: { type: DataTypes.STRING, comment: 'URL to generated QR code' },
+//     qr_code_public_id: { type: DataTypes.STRING, comment: 'Cloudinary public ID for QR code' },
+    
 //     is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
 //     last_login_at: { type: DataTypes.DATE },
 //     password_reset_token: { type: DataTypes.STRING },
@@ -95,7 +99,8 @@
 //       allowNull: true,
 //       comment: 'UUID of the admin who last updated this account',
 //     },
-//      // Documents Array - specifically for your requirement
+
+//     // Documents Array
 //     documents: {
 //       type: DataTypes.JSONB,
 //       defaultValue: [],
@@ -108,13 +113,14 @@
 //       attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] },
 //     },
 //     scopes: {
-//       // Override default excludes so password_hash is included for auth checks
 //       withPassword: { attributes: { exclude: [] } },
 //     },
 //     indexes: [
 //       { fields: ['school_id'] },
 //       { fields: ['user_type'] },
 //       { fields: ['role_id'] },
+//       { fields: ['email'] },
+//       { fields: ['registration_no'] },
 //     ],
 //   }
 // );
@@ -132,19 +138,23 @@
 //   return this.update({ documents: docs });
 // };
 
+// // Helper to get role permissions
+// User.prototype.getRolePermissions = async function(models) {
+//   if (!this.role_id) return [];
+  
+//   const role = await models.Role.findByPk(this.role_id);
+//   if (!role) return [];
+  
+//   // Get permissions for this user type
+//   return role.permissions[this.user_type.toLowerCase()] || [];
+// };
+
 // User.associate = (models) => {
-//   User.belongsTo(models.School, { foreignKey: 'school_id', as: 'School' });
+//   User.belongsTo(models.Institute, { foreignKey: 'school_id', as: 'Institute' });
 //   User.belongsTo(models.Role, { foreignKey: 'role_id', as: 'Role' });
 // };
 
 // export default User;
-
-
-
-
-
-
-
 
 
 
@@ -154,7 +164,7 @@
  * The Clouds Academy - User Model (Polymorphic)
  *
  * Single unified User table for all user types:
- *   MASTER_ADMIN | INSTITUTE_ADMIN | TEACHER | STUDENT | PARENT | STAFF
+ *   MASTER_ADMIN | INSTITUTE_ADMIN | BRANCH_ADMIN | TEACHER | STUDENT | PARENT | STAFF
  *
  * Type-specific data is stored in the 'details' JSONB field
  */
@@ -176,6 +186,14 @@ const User = sequelize.define(
       comment: 'FK to institutes.id — NULL for MASTER_ADMIN, set for all other user types',
     },
 
+    branch_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'branches', key: 'id' },
+      onDelete: 'SET NULL',
+      comment: 'FK to branches.id — for users assigned to specific branch',
+    },
+
     role_id: {
       type: DataTypes.UUID,
       allowNull: true,
@@ -185,15 +203,15 @@ const User = sequelize.define(
     },
 
     user_type: {
-      type: DataTypes.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF'),
+      type: DataTypes.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF'),
       allowNull: false,
       defaultValue: 'STAFF',
     },
 
     staff_type: {
-      type: DataTypes.ENUM('Accountant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper'),
+      type: DataTypes.ENUM('Accountant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper', 'Branch Head'),
       allowNull: true,
-      comment: 'Optional sub-type for STAFF users to distinguish teaching vs non-teaching staff',
+      comment: 'Optional sub-type for STAFF users to distinguish roles',
     },
 
     first_name: { type: DataTypes.STRING(100), allowNull: false },
@@ -214,11 +232,11 @@ const User = sequelize.define(
     phone: { type: DataTypes.STRING(20) },
     password_hash: { type: DataTypes.STRING, allowNull: false },
 
-    // 🔥 NEW: Store resolved permissions from role
+    // 🔥 Store resolved permissions from role OR custom permissions
     permissions: {
       type: DataTypes.JSONB,
       defaultValue: [],
-      comment: 'Resolved permissions from assigned role (cached for quick access)',
+      comment: 'Resolved permissions from assigned role or custom permissions',
     },
 
     details: {
@@ -266,6 +284,7 @@ const User = sequelize.define(
     },
     indexes: [
       { fields: ['school_id'] },
+      { fields: ['branch_id'] },
       { fields: ['user_type'] },
       { fields: ['role_id'] },
       { fields: ['email'] },
@@ -299,8 +318,11 @@ User.prototype.getRolePermissions = async function(models) {
 };
 
 User.associate = (models) => {
-  User.belongsTo(models.Institute, { foreignKey: 'school_id', as: 'Institute' });
+  User.belongsTo(models.Institute, { foreignKey: 'school_id', as: 'institute' });
+  User.belongsTo(models.Branch, { foreignKey: 'branch_id', as: 'branch' });
   User.belongsTo(models.Role, { foreignKey: 'role_id', as: 'Role' });
+  User.belongsTo(models.User, { foreignKey: 'created_by', as: 'creator' });
+  User.belongsTo(models.User, { foreignKey: 'updated_by', as: 'updater' });
 };
 
 export default User;

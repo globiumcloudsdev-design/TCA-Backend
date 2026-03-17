@@ -27,6 +27,8 @@ import AuditLog from './AuditLog.model.js';
 import Timetable from './Timetable.model.js';
 import FeeTemplate from './FeeTemplate.model.js';
 import Branch from './Branch.model.js';
+import Assignment from './Assignment.model.js';
+import AssignmentSubmission from './AssignmentSubmission.model.js';
 
 const models = {
   sequelize,
@@ -53,7 +55,9 @@ const models = {
   AuditLog,
   Timetable,
   FeeTemplate,
-  Branch
+  Branch,
+  Assignment,
+  AssignmentSubmission
 };
 
 // Run associations — deduplicate so alias School: Institute doesn't call associate twice

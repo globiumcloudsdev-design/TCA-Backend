@@ -9,7 +9,6 @@
 
 import { DataTypes } from 'sequelize';
 import sequelize from '../../config/database.js';
-import { v4 as uuidv4 } from 'uuid';
 
 const Branch = sequelize.define(
   'Branch',
@@ -69,20 +68,7 @@ const Branch = sequelize.define(
       comment: 'Shahar'
     },
 
-    // Head/Manager
-    head_name: {
-      type: DataTypes.STRING(200),
-      allowNull: true,
-      comment: 'Branch head/manager ka naam'
-    },
-
-    head_user_id: {
-      type: DataTypes.UUID,
-      allowNull: true,
-      references: { model: 'users', key: 'id' },
-      onDelete: 'SET NULL',
-      comment: 'Branch head ka user ID'
-    },
+    // 🔥 REMOVED: head_name and head_user_id
 
     // Statistics
     student_count: {
@@ -103,6 +89,18 @@ const Branch = sequelize.define(
       comment: 'Kitni classes hain is branch mein'
     },
 
+    // Location
+    location: {
+      type: DataTypes.JSONB,
+      defaultValue: {
+        latitude: null,
+        longitude: null,
+        place_id: null,
+        formatted_address: null
+      },
+      comment: 'Branch ki location coordinates'
+    },
+
     // Settings
     settings: {
       type: DataTypes.JSONB,
@@ -111,7 +109,19 @@ const Branch = sequelize.define(
         has_transport: false,
         has_library: true,
         has_lab: true,
-        has_playground: false
+        has_playground: false,
+        has_cafeteria: false,
+        has_mosque: false,
+        has_parking: false,
+        working_hours: {
+          monday: { open: '08:00', close: '16:00' },
+          tuesday: { open: '08:00', close: '16:00' },
+          wednesday: { open: '08:00', close: '16:00' },
+          thursday: { open: '08:00', close: '16:00' },
+          friday: { open: '08:00', close: '12:30' },
+          saturday: { open: null, close: null },
+          sunday: { open: null, close: null }
+        }
       },
       comment: 'Branch-specific settings'
     },
@@ -156,15 +166,13 @@ const Branch = sequelize.define(
       { fields: ['code'], unique: true },
       { fields: ['is_active'] },
       { fields: ['is_main'] },
-      { fields: ['city'] },
-      { fields: ['head_user_id'] }
+      { fields: ['city'] }
     ]
   }
 );
 
 Branch.associate = (models) => {
   Branch.belongsTo(models.Institute, { foreignKey: 'institute_id', as: 'institute' });
-  Branch.belongsTo(models.User, { foreignKey: 'head_user_id', as: 'head' });
   Branch.belongsTo(models.User, { foreignKey: 'created_by', as: 'creator' });
   Branch.belongsTo(models.User, { foreignKey: 'updated_by', as: 'updater' });
   

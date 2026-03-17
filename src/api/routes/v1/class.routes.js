@@ -41,16 +41,6 @@ router.get(
 );
 
 /**
- * GET - Class options for dropdown
- * GET /api/v1/classes/options
- */
-router.get(
-  '/options',
-  hasPermission('classes.read'),
-  classController.getClassOptions
-);
-
-/**
  * GET - Class by ID
  * GET /api/v1/classes/:id
  */

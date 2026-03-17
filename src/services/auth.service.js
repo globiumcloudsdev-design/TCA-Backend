@@ -1,3 +1,5 @@
+// backend/src/services/auth.service.js
+
 /**
  * The Clouds Academy - Auth Service
  * Handles login, register, token refresh, password reset
@@ -23,10 +25,11 @@ import logger from '../config/logger.js';
 const USER_TYPE_TO_KEY = {
   MASTER_ADMIN:    'master',
   INSTITUTE_ADMIN: 'instituteAdmin',
+  BRANCH_ADMIN:    'branchAdmin',      // ✅ Added for branch admins
   TEACHER:         'teacher',
   STUDENT:         'student',
   PARENT:          'parent',
-  STAFF:           'instituteAdmin',
+  STAFF:           'staff',            // ✅ Added for staff members
 };
 
 /**
@@ -61,24 +64,30 @@ export const loginService = async (loginId, password) => {
   await user.update({ last_login_at: new Date() });
 
   // ------------------------------------------------------------------
-  // 4. Resolve permissions from role JSONB
+  // 4. Resolve permissions from role JSONB or direct permissions
   // ------------------------------------------------------------------
   let roleData = null;
   let permissions = [];
 
-  if (user.role_id) {
+  // 🔥 FIX: If user has direct permissions (branch_admin/staff with custom perms)
+  if (user.permissions && user.permissions.length > 0) {
+    permissions = user.permissions;
+  }
+  // Otherwise get from role
+  else if (user.role_id) {
     const role = await Role.findByPk(user.role_id);
     if (role) {
       roleData = { id: role.id, name: role.name, code: role.code };
+      
+      // Get the correct permission key based on user_type
       const typeKey = USER_TYPE_TO_KEY[user.user_type] ?? 'instituteAdmin';
       const perms = role.permissions?.[typeKey] ?? [];
+      
       // Expand 'ALL' flag into explicit list; keep as-is otherwise
       permissions = perms.includes('ALL') ? ['ALL'] : perms;
     }
   }
 
-  // ------------------------------------------------------------------
-  // 5. Sign tokens
   // ------------------------------------------------------------------
   // 5. Load institute with its type (for non-master users)
   // ------------------------------------------------------------------
@@ -126,15 +135,17 @@ export const loginService = async (loginId, password) => {
     refreshToken,
     user: {
       id:             user.id,
-      firstName:      user.first_name,
-      lastName:       user.last_name,
+      first_name:     user.first_name,
+      last_name:      user.last_name,
       email:          user.email,
-      registrationNo: user.registration_no,
-      userType:       user.user_type,
-      schoolId:       user.school_id,
+      registration_no: user.registration_no,
+      user_type:      user.user_type,
+      staff_type:     user.staff_type,           // ✅ Important for branch heads
+      school_id:      user.school_id,
+      branch_id:      user.branch_id,             // ✅ Important for branch users
       role:           roleData,
-      permissions,
-      avatarUrl:      user.avatar_url,
+      permissions,                                 // ✅ Now properly populated
+      avatar_url:     user.avatar_url,
       institute:      instituteData,
     },
   };
@@ -207,4 +218,3 @@ export const resetPasswordService = async (token, newPassword) => {
 };
 
 export default { loginService, refreshTokenService, forgotPasswordService, resetPasswordService };
-

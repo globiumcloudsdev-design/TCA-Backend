@@ -14,4 +14,4 @@ export const uploadMultiple = (fieldName = 'files', maxCount = 10) =>
 // Multiple fields
 export const uploadFields = (fields) => upload.fields(fields);
 
-export default { uploadSingle, uploadMultiple, uploadFields };
+export default upload;
