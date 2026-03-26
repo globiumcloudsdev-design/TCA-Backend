@@ -137,6 +137,56 @@ const Assignment = sequelize.define('Assignment', {
   updated_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW
+  },
+  // Add to the model definition:
+  allow_late_submission: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  late_submission_penalty: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    comment: 'Percentage penalty for late submission'
+  },
+  max_file_size: {
+    type: DataTypes.INTEGER,
+    defaultValue: 50,
+    comment: 'Max file size in MB'
+  },
+  allowed_file_types: {
+    type: DataTypes.JSONB,
+    defaultValue: ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'mp4', 'zip'],
+    comment: 'Allowed file extensions'
+  },
+  max_files: {
+    type: DataTypes.INTEGER,
+    defaultValue: 10,
+    comment: 'Maximum number of files per submission'
+  },
+  peer_review_enabled: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  plagiarism_check: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  rubric: {
+    type: DataTypes.JSONB,
+    defaultValue: null,
+    comment: 'Grading rubric structure'
+  },
+  feedback_template: {
+    type: DataTypes.TEXT,
+    comment: 'Template for teacher feedback'
+  },
+  estimated_time: {
+    type: DataTypes.INTEGER,
+    comment: 'Estimated time in minutes'
+  },
+  difficulty_level: {
+    type: DataTypes.ENUM('beginner', 'intermediate', 'advanced', 'expert'),
+    defaultValue: 'intermediate'
   }
 }, {
   tableName: 'assignments',

@@ -1,35 +1,71 @@
-/**
- * The Clouds Academy - Student Routes
- */
-
 import { Router } from 'express';
-import {
-  createStudentController,
-  getStudentsController,
-  getStudentController,
-  updateStudentController,
-  deleteStudentController,
-} from '../../controllers/student.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 import { hasPermission } from '../../middlewares/permission.middleware.js';
-import { schoolContext } from '../../middlewares/schoolContext.middleware.js';
-import { requireActiveSubscription } from '../../middlewares/subscription.middleware.js';
-import { uploadSingle } from '../../middlewares/upload.middleware.js';
 import { auditLog } from '../../middlewares/audit.middleware.js';
+import { uploadFields } from '../../middlewares/upload.middleware.js';
+import * as studentController from '../../controllers/student.controller.js';
 
 const router = Router();
 
-router.use(protect, schoolContext, requireActiveSubscription, auditLog);
+// All routes require authentication
+router.use(protect, auditLog);
 
-router
-  .route('/')
-  .get(hasPermission('student.read'), getStudentsController)
-  .post(hasPermission('student.create'), uploadSingle('photo'), createStudentController);
+/**
+ * CREATE - Student
+ * POST /api/v1/students
+ */
+router.post(
+  '/',
+  hasPermission('students.create'),
+  uploadFields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'documents', maxCount: 10 }
+  ]),
+  studentController.createStudent
+);
 
-router
-  .route('/:id')
-  .get(hasPermission('student.read'), getStudentController)
-  .put(hasPermission('student.update'), uploadSingle('photo'), updateStudentController)
-  .delete(hasPermission('student.delete'), deleteStudentController);
+/**
+ * GET - All students
+ * GET /api/v1/students
+ */
+router.get(
+  '/',
+  hasPermission('students.read'),
+  studentController.getAllStudents
+);
+
+/**
+ * GET - Student by ID
+ * GET /api/v1/students/:id
+ */
+router.get(
+  '/:id',
+  hasPermission('students.read'),
+  studentController.getStudentById
+);
+
+/**
+ * UPDATE - Student
+ * PUT /api/v1/students/:id
+ */
+router.put(
+  '/:id',
+  hasPermission('students.update'),
+  uploadFields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'documents', maxCount: 10 }
+  ]),
+  studentController.updateStudent
+);
+
+/**
+ * DELETE - Student
+ * DELETE /api/v1/students/:id
+ */
+router.delete(
+  '/:id',
+  hasPermission('students.delete'),
+  studentController.deleteStudent
+);
 
 export default router;

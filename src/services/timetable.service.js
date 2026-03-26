@@ -1,3 +1,4 @@
+
 // backend/src/services/timetable.service.js
 
 /**
@@ -8,6 +9,7 @@
  * - Timetable create/update/delete
  * - Teacher conflict check
  * - Slots management
+ * - Days configuration
  */
 
 import models from '../models/postgres/index.js';
@@ -161,10 +163,13 @@ export const createTimetable = async (data, options = {}) => {
     type: p.type || (p.is_break ? 'break' : 'study')
   }));
 
+  // ✅ FIX: Days ko properly save karo
   const period_config = {
     total_periods: data.period_config.total_periods || validatedPeriods.length,
     periods: validatedPeriods,
-    breaks: data.period_config.breaks || []
+    breaks: data.period_config.breaks || [],
+    days: data.period_config.days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+    days_count: data.period_config.days?.length || 5
   };
 
   // Slots create karo agar diye gaye hain
@@ -235,7 +240,7 @@ export const updateTimetable = async (id, instituteId, updateData, options = {})
     }
   });
 
-  // Period config update karo agar diya gaya ho
+  // ✅ FIX: Period config update karo agar diya gaya ho (with days)
   if (updateData.period_config) {
     const validatedPeriods = updateData.period_config.periods.map(p => ({
       ...p,
@@ -245,62 +250,70 @@ export const updateTimetable = async (id, instituteId, updateData, options = {})
     timetable.period_config = {
       total_periods: updateData.period_config.total_periods || validatedPeriods.length,
       periods: validatedPeriods,
-      breaks: updateData.period_config.breaks || []
+      breaks: updateData.period_config.breaks || [],
+      // ✅ IMPORTANT: Days ko bhi update karo
+      days: updateData.period_config.days || timetable.period_config?.days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      days_count: updateData.period_config.days?.length || timetable.period_config?.days?.length || 5
     };
     timetable.changed('period_config', true);
   }
 
-  // Slots update karo agar diye gaye hain
+  // ✅ FIX: Slots update karte waqt invalid days remove karo
   if (updateData.slots !== undefined) {
     const existingSlots = timetable.slots || [];
     const existingMap = {};
     existingSlots.forEach(s => { existingMap[s.id] = s; });
 
-    const updatedSlots = updateData.slots.map(slot => {
-      if (slot.id && existingMap[slot.id]) {
-        // Existing slot update karo
-        return {
-          ...existingMap[slot.id],
-          day: slot.day ?? existingMap[slot.id].day,
-          period: slot.period ?? existingMap[slot.id].period,
-          start_time: slot.start_time ?? existingMap[slot.id].start_time,
-          end_time: slot.end_time ?? existingMap[slot.id].end_time,
-          subject_id: slot.subject_id ?? existingMap[slot.id].subject_id,
-          subject_name: slot.subject_name ?? existingMap[slot.id].subject_name,
-          teacher_id: slot.teacher_id ?? existingMap[slot.id].teacher_id,
-          teacher_name: slot.teacher_name ?? existingMap[slot.id].teacher_name,
-          room_no: slot.room_no ?? existingMap[slot.id].room_no,
-          is_break: slot.is_break ?? existingMap[slot.id].is_break,
-          break_name: slot.break_name ?? existingMap[slot.id].break_name,
-          updated_at: new Date().toISOString()
-        };
-      } else {
-        // Naya slot
-        return {
-          id: slot.id || uuidv4(),
-          day: slot.day,
-          period: slot.period,
-          start_time: slot.start_time,
-          end_time: slot.end_time,
-          subject_id: slot.subject_id || null,
-          subject_name: slot.subject_name || '',
-          teacher_id: slot.teacher_id || null,
-          teacher_name: slot.teacher_name || '',
-          room_no: slot.room_no || '',
-          is_break: slot.is_break || false,
-          break_name: slot.break_name || null,
-          created_at: slot.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-      }
-    });
+    // Active days ki list
+    const activeDays = timetable.period_config?.days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+
+    const updatedSlots = updateData.slots
+      .filter(slot => activeDays.includes(slot.day)) // Sirf active days ke slots rakho
+      .map(slot => {
+        if (slot.id && existingMap[slot.id]) {
+          // Existing slot update karo
+          return {
+            ...existingMap[slot.id],
+            day: slot.day ?? existingMap[slot.id].day,
+            period: slot.period ?? existingMap[slot.id].period,
+            start_time: slot.start_time ?? existingMap[slot.id].start_time,
+            end_time: slot.end_time ?? existingMap[slot.id].end_time,
+            subject_id: slot.subject_id ?? existingMap[slot.id].subject_id,
+            subject_name: slot.subject_name ?? existingMap[slot.id].subject_name,
+            teacher_id: slot.teacher_id ?? existingMap[slot.id].teacher_id,
+            teacher_name: slot.teacher_name ?? existingMap[slot.id].teacher_name,
+            room_no: slot.room_no ?? existingMap[slot.id].room_no,
+            is_break: slot.is_break ?? existingMap[slot.id].is_break,
+            break_name: slot.break_name ?? existingMap[slot.id].break_name,
+            updated_at: new Date().toISOString()
+          };
+        } else {
+          // Naya slot
+          return {
+            id: slot.id || uuidv4(),
+            day: slot.day,
+            period: slot.period,
+            start_time: slot.start_time,
+            end_time: slot.end_time,
+            subject_id: slot.subject_id || null,
+            subject_name: slot.subject_name || '',
+            teacher_id: slot.teacher_id || null,
+            teacher_name: slot.teacher_name || '',
+            room_no: slot.room_no || '',
+            is_break: slot.is_break || false,
+            break_name: slot.break_name || null,
+            created_at: slot.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+        }
+      });
 
     timetable.slots = updatedSlots;
     timetable.changed('slots', true);
   }
 
   timetable.updated_at = new Date();
-  timetable.updated_by = updateData.updated_by;
+  timetable.updated_by = updateData.updated_by || timetable.updated_by;
 
   await timetable.save({ transaction });
 
@@ -488,6 +501,36 @@ export const checkTeacherConflict = async (instituteId, teacherId, day, period, 
   return false;
 };
 
+/**
+ * 9. validateTimetableDays(timetable)
+ * ------------------------------------
+ * Validate karta hai ke saare slots active days mein hain
+ */
+export const validateTimetableDays = async (id, instituteId) => {
+  const timetable = await Timetable.findOne({
+    where: { id, school_id: instituteId }
+  });
+
+  if (!timetable) {
+    throw new Error('❌ Timetable nahi mila');
+  }
+
+  const activeDays = timetable.period_config?.days || [];
+  const invalidSlots = (timetable.slots || []).filter(slot => 
+    !activeDays.includes(slot.day)
+  );
+
+  if (invalidSlots.length > 0) {
+    console.log(`⚠️ ${invalidSlots.length} slots invalid days mein hain`);
+  }
+
+  return {
+    valid: invalidSlots.length === 0,
+    invalidSlots,
+    activeDays
+  };
+};
+
 export default {
   getTimetableEntities,
   createTimetable,
@@ -496,5 +539,6 @@ export default {
   getTimetableById,
   deleteTimetable,
   toggleTimetableStatus,
-  checkTeacherConflict
+  checkTeacherConflict,
+  validateTimetableDays
 };

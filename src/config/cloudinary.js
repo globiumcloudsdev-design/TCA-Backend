@@ -70,5 +70,65 @@ export const deleteFromCloudinary = async (publicId, resourceType = 'raw') => {
   }
 };
 
+/**
+ * Get folder size from Cloudinary
+ * @param {string} folderPath - Path to folder (e.g., "the-clouds-academy/institute-id")
+ * @returns {Promise<{total_bytes: number, total_files: number, resources: array}>}
+ */
+export const getCloudinaryFolderSize = async (folderPath) => {
+  try {
+    let totalBytes = 0;
+    let totalFiles = 0;
+    let nextCursor = null;
+    const allResources = [];
+    
+    do {
+      const result = await cloudinary.api.resources({
+        type: 'upload',
+        prefix: folderPath,
+        max_results: 500,
+        next_cursor: nextCursor
+      });
+      
+      const resources = Array.isArray(result?.resources) ? result.resources : [];
+      resources.forEach(resource => {
+        totalBytes += resource.bytes;
+        totalFiles++;
+        allResources.push({
+          public_id: resource.public_id,
+          bytes: resource.bytes,
+          format: resource.format,
+          created_at: resource.created_at
+        });
+      });
+      
+      nextCursor = result.next_cursor;
+    } while (nextCursor);
+    
+    return {
+      total_bytes: totalBytes,
+      total_files: totalFiles,
+      resources: allResources,
+      formatted_size: formatBytes(totalBytes)
+    };
+  } catch (error) {
+    console.error('❌ Error getting folder size:', error);
+    return {
+      total_bytes: 0,
+      total_files: 0,
+      resources: [],
+      formatted_size: '0 B'
+    };
+  }
+};
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 export { cloudinary };
 export default cloudinary;

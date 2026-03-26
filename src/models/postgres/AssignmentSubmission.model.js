@@ -66,6 +66,52 @@ const AssignmentSubmission = sequelize.define('AssignmentSubmission', {
   metadata: {
     type: DataTypes.JSONB,
     defaultValue: {}
+  },
+  // backend/src/models/postgres/AssignmentSubmission.model.js
+  // Add these fields
+
+  submission_text: {
+    type: DataTypes.TEXT,
+    comment: 'Text response from student'
+  },
+  submission_type: {
+    type: DataTypes.ENUM('text', 'file', 'mixed'),
+    defaultValue: 'mixed'
+  },
+  plagiarism_score: {
+    type: DataTypes.FLOAT,
+    defaultValue: 0,
+    comment: 'Plagiarism detection score (0-100)'
+  },
+  teacher_comments: {
+    type: DataTypes.JSONB,
+    defaultValue: [],
+    comment: 'Inline comments on submission'
+  },
+  reviewed_by_peer: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    comment: 'Student ID who reviewed this submission'
+  },
+  peer_review_score: {
+    type: DataTypes.FLOAT,
+    allowNull: true
+  },
+  peer_review_comments: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  resubmission_deadline: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  auto_graded: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  auto_grade_score: {
+    type: DataTypes.FLOAT,
+    allowNull: true
   }
 }, {
   tableName: 'assignment_submissions',

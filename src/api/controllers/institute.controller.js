@@ -5,7 +5,7 @@
  */
 
 import catchAsync from '../../utils/lib/catchAsync.js';
-import { sendSuccess, sendCreated, sendNoContent } from '../../utils/helpers/response.helper.js';
+import { sendSuccess, sendCreated, sendNoContent, sendPaginated } from '../../utils/helpers/response.helper.js';
 import * as instituteService from '../../services/institute.service.js';
 import { getInvoiceSummary } from '../../utils/subscriptionUtils.js';
 
@@ -139,4 +139,98 @@ export const getSubscriptionHistory = catchAsync(async (req, res) => {
 export const getAllInvoices = catchAsync(async (req, res) => {
   const result = await instituteService.getAllInvoices(req.query);
   sendSuccess(res, result, 'All invoices fetched successfully');
+});
+
+
+// backend/src/controllers/institute.controller.js
+// Add these new functions
+
+/**
+ * Get institute storage usage from Cloudinary
+ */
+export const getInstituteStorage = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  
+  const storage = await instituteService.getInstituteStorageUsage(id);
+  
+  sendSuccess(res, storage, 'Storage usage fetched');
+});
+
+/**
+ * Get institute dashboard stats with real counts
+ */
+export const getInstituteDashboardStats = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  
+  const stats = await instituteService.getInstituteDashboardStats(id);
+  
+  sendSuccess(res, stats, 'Dashboard stats fetched');
+});
+
+/**
+ * Get real institute students
+ */
+export const getInstituteStudents = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { page = 1, limit = 10, search, status } = req.query;
+  
+  const result = await instituteService.getInstituteStudents(id, {
+    page: parseInt(page),
+    limit: parseInt(limit),
+    search,
+    status
+  });
+  
+  sendPaginated(res, result.data, result.pagination, 'Students fetched');
+});
+
+/**
+ * Get real institute teachers
+ */
+export const getInstituteTeachers = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { page = 1, limit = 10, search, status } = req.query;
+  
+  const result = await instituteService.getInstituteTeachers(id, {
+    page: parseInt(page),
+    limit: parseInt(limit),
+    search,
+    status
+  });
+  
+  sendPaginated(res, result.data, result.pagination, 'Teachers fetched');
+});
+
+/**
+ * Get real institute parents
+ */
+export const getInstituteParents = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { page = 1, limit = 10, search, status } = req.query;
+  
+  const result = await instituteService.getInstituteParents(id, {
+    page: parseInt(page),
+    limit: parseInt(limit),
+    search,
+    status
+  });
+  
+  sendPaginated(res, result.data, result.pagination, 'Parents fetched');
+});
+
+/**
+ * Get real institute staff
+ */
+export const getInstituteStaff = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { page = 1, limit = 10, search, status } = req.query;
+  
+  const result = await instituteService.getInstituteStaff(id, {
+    page: parseInt(page),
+    limit: parseInt(limit),
+    search,
+    status
+  });
+  
+  sendPaginated(res, result.data, result.pagination, 'Staff fetched');
 });

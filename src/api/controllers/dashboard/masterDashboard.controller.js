@@ -1,7 +1,7 @@
 // backend/src/controllers/dashboard/masterDashboard.controller.js
 
 import * as masterDashboardService from '../../../services/dashboard/masterDashboard.service.js';
-import { sendSuccess } from '../../../utils/helpers/response.helper.js';
+import { sendSuccess, sendError } from '../../../utils/helpers/response.helper.js';
 
 export const getMasterDashboard = async (req, res) => {
   try {

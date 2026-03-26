@@ -120,6 +120,7 @@ export const getMyAssignments = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
     const filters = {
+      type: req.query.type,
       subject: req.query.subject,
       status: req.query.status
     };

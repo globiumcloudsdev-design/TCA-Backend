@@ -81,7 +81,18 @@ const Institute = sequelize.define(
             comment: 'Whether this institute has ever used a trial (prevents multiple trials)'
         },
 
-        // Settings
+        // // Settings
+        // settings: {
+        //     type: DataTypes.JSONB,
+        //     defaultValue: {
+        //         has_branches: false,
+        //         enable_parent_portal: true,
+        //         enable_teacher_portal: true,
+        //         enable_student_portal: true,
+        //         enable_sms_notifications: false
+        //     }
+        // },
+           // ✅ FIXED: Settings with getter/setter to handle string JSON
         settings: {
             type: DataTypes.JSONB,
             defaultValue: {
@@ -90,6 +101,44 @@ const Institute = sequelize.define(
                 enable_teacher_portal: true,
                 enable_student_portal: true,
                 enable_sms_notifications: false
+            },
+            get() {
+                const rawValue = this.getDataValue('settings');
+                // If it's a string, parse it
+                if (typeof rawValue === 'string') {
+                    try {
+                        return JSON.parse(rawValue);
+                    } catch (e) {
+                        console.error('Error parsing settings JSON:', e);
+                        return {
+                            has_branches: false,
+                            enable_parent_portal: true,
+                            enable_teacher_portal: true,
+                            enable_student_portal: true,
+                            enable_sms_notifications: false
+                        };
+                    }
+                }
+                // If it's already an object, return as is
+                return rawValue;
+            },
+            set(value) {
+                // Always store as object, Sequelize will handle JSONB conversion
+                if (typeof value === 'string') {
+                    try {
+                        value = JSON.parse(value);
+                    } catch (e) {
+                        console.error('Error parsing settings before save:', e);
+                        value = {
+                            has_branches: false,
+                            enable_parent_portal: true,
+                            enable_teacher_portal: true,
+                            enable_student_portal: true,
+                            enable_sms_notifications: false
+                        };
+                    }
+                }
+                this.setDataValue('settings', value);
             }
         },
     },

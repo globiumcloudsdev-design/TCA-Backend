@@ -180,3 +180,35 @@ export const getCurrentAcademicYear = async (instituteId) => {
   });
   return academicYear;
 };
+
+/**
+ * GET ACADEMIC YEAR OPTIONS FOR DROPDOWN
+ * Yeh function frontend dropdown ke liye hai
+ */
+export const getAcademicYearOptions = async (instituteId, onlyActive = true) => {
+  const where = { institute_id: instituteId };
+  
+  if (onlyActive) {
+    where.is_active = true;
+  }
+
+  const academicYears = await AcademicYear.findAll({
+    where,
+    attributes: ['id', 'name', 'start_date', 'end_date', 'is_current', 'is_active'],
+    order: [['start_date', 'DESC']],
+  });
+
+  // Format for dropdown: { value: id, label: name }
+  const options = academicYears.map(year => ({
+    value: year.id,
+    label: year.name,
+    is_current: year.is_current,
+    start_date: year.start_date,
+    end_date: year.end_date
+  }));
+
+  return {
+    data: options,
+    total: options.length
+  };
+};

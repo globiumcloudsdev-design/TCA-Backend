@@ -48,7 +48,7 @@ export const getAvailableRoles = async (instituteId) => {
 
   // Extract staff permissions from the role's JSONB
   const staffPermissions = instituteRole.permissions?.staff || [];
-  
+
   // Create role objects for each staff type
   const availableRoles = STAFF_TYPES.map(type => ({
     id: `staff-${type.toLowerCase()}`,
@@ -70,7 +70,7 @@ export const getAvailableRoles = async (instituteId) => {
 
   // Merge virtual and custom roles
   const allRoles = [...availableRoles];
-  
+
   customStaffRoles.forEach(customRole => {
     const existingIndex = allRoles.findIndex(r => r.code === customRole.code);
     if (existingIndex >= 0) {
@@ -160,21 +160,21 @@ export const getStaffById = async (id, instituteId) => {
 // ─── Upload documents to Cloudinary ─────────────────────────────────────────
 const uploadDocuments = async (files, instituteId, staffId) => {
   const uploadedDocs = [];
-  
+
   if (!files?.length) return uploadedDocs;
-  
+
   for (const file of files) {
     try {
       // ✅ Institute-specific folder: the-clouds-academy/{instituteId}/staff/{staffId}/documents
       const folder = `the-clouds-academy/${instituteId}/staff/${staffId}/documents`;
-      
+
       const result = await uploadToCloudinary(file.path, folder, {
         resource_type: 'auto',
         use_filename: true,
         unique_filename: true,
         transformation: [{ quality: 'auto' }]
       });
-      
+
       uploadedDocs.push({
         id: uuidv4(),
         type: 'document',
@@ -186,247 +186,23 @@ const uploadDocuments = async (files, instituteId, staffId) => {
         public_id: result.public_id,
         uploaded_at: new Date()
       });
-      
+
       console.log(`✅ Document uploaded: ${result.url}`);
-      
+
     } catch (error) {
       console.error('❌ Document upload failed:', error);
     } finally {
       // Clean up temp file
-      try { 
+      try {
         if (fs.existsSync(file.path)) {
-          await fs.promises.unlink(file.path); 
+          await fs.promises.unlink(file.path);
         }
       } catch { /* ignore */ }
     }
   }
-  
+
   return uploadedDocs;
 };
-
-// // ─── Create new staff member ─────────────────────────────────────────────────
-// export const createStaff = async (instituteId, data, createdBy, file = null, documentFiles = []) => {
-//   let avatarUrl = null;
-//   let avatarPublicId = null;
-//   let qrCodeUrl = null;
-//   let qrCodePublicId = null;
-
-//   // Upload avatar if provided
-//   if (file) {
-//     try {
-//       const folder = `the-clouds-academy/${instituteId}/staff/avatars`;
-//       const result = await uploadToCloudinary(file.path, folder, {
-//         transformation: [{ width: 300, height: 300, crop: 'thumb' }, { quality: 'auto' }],
-//       });
-//       avatarUrl = result.url;
-//       avatarPublicId = result.public_id;
-//     } finally {
-//       try { 
-//         if (fs.existsSync(file.path)) {
-//           await fs.promises.unlink(file.path); 
-//         }
-//       } catch {}
-//     }
-//   }
-
-//   const t = await sequelize.transaction();
-
-//   try {
-//     // Check if email already exists (if provided)
-//     if (data.email) {
-//       const existingEmail = await User.findOne({
-//         where: { email: data.email.toLowerCase() },
-//         transaction: t
-//       });
-//       if (existingEmail) {
-//         throw new AppError('Email already exists', 409);
-//       }
-//     }
-
-//     // Check if registration_no already exists (if provided)
-//     if (data.registration_no) {
-//       const existingRegNo = await User.findOne({
-//         where: { 
-//           registration_no: data.registration_no,
-//           school_id: instituteId
-//         },
-//         transaction: t
-//       });
-//       if (existingRegNo) {
-//         throw new AppError('Registration number already exists', 409);
-//       }
-//     }
-
-//     // Generate password if not provided
-//     // const password = data.password || generateRandomPassword(10);
-//     const password = data.password || generateNumericPassword(6);
-//     const passwordHash = await bcrypt.hash(password, 12);
-
-//     // Parse staff details if it's a string
-//     let staffDetails = {};
-//     if (data.staff_details) {
-//       try {
-//         staffDetails = typeof data.staff_details === 'string' 
-//           ? JSON.parse(data.staff_details) 
-//           : data.staff_details;
-//       } catch (e) {
-//         staffDetails = {};
-//       }
-//     }
-
-//     // Parse permissions if it's a string
-//     let permissions = [];
-//     if (data.permissions) {
-//       try {
-//         permissions = typeof data.permissions === 'string'
-//           ? JSON.parse(data.permissions)
-//           : data.permissions;
-//       } catch (e) {
-//         permissions = [];
-//       }
-//     }
-
-//     // Parse documents if it's a string
-//     let documents = [];
-//     if (data.documents) {
-//       try {
-//         documents = typeof data.documents === 'string'
-//           ? JSON.parse(data.documents)
-//           : data.documents;
-//       } catch (e) {
-//         documents = [];
-//       }
-//     }
-
-//     // Upload documents if any
-//     if (documentFiles?.length) {
-//       console.log(`📎 Uploading ${documentFiles.length} documents for staff`);
-//       const uploadedDocs = await uploadDocuments(documentFiles, instituteId, 'temp');
-//       documents = [...documents, ...uploadedDocs];
-//     }
-
-//     // Prepare staff details object
-//     const finalStaffDetails = {
-//       employee_id: data.employee_id || staffDetails.employee_id,
-//       cnic: data.cnic || staffDetails.cnic,
-//       dob: data.dob || staffDetails.dob,
-//       gender: data.gender || staffDetails.gender,
-//       blood_group: data.blood_group || staffDetails.blood_group,
-//       religion: data.religion || staffDetails.religion,
-//       nationality: data.nationality || staffDetails.nationality || 'Pakistani',
-//       present_address: data.present_address || staffDetails.present_address,
-//       permanent_address: data.permanent_address || staffDetails.permanent_address,
-//       city: data.city || staffDetails.city,
-//       alternate_phone: data.alternate_phone || staffDetails.alternate_phone,
-//       qualification: data.qualification || staffDetails.qualification,
-//       specialization: data.specialization || staffDetails.specialization,
-//       experience_years: data.experience_years || staffDetails.experience_years,
-//       previous_institution: data.previous_institution || staffDetails.previous_institution,
-//       designation: data.designation || staffDetails.designation,
-//       department: data.department || staffDetails.department,
-//       employment_type: data.employment_type || staffDetails.employment_type,
-//       joining_date: data.joining_date || staffDetails.joining_date,
-//       contract_start_date: data.contract_start_date || staffDetails.contract_start_date,
-//       contract_end_date: data.contract_end_date || staffDetails.contract_end_date,
-//       salary: data.salary ? Number(data.salary) : (staffDetails.salary ? Number(staffDetails.salary) : null),
-//       bank_name: data.bank_name || staffDetails.bank_name,
-//       bank_account_no: data.bank_account_no || staffDetails.bank_account_no,
-//       bank_branch: data.bank_branch || staffDetails.bank_branch,
-//       emergency_contact_name: data.emergency_contact_name || staffDetails.emergency_contact_name,
-//       emergency_contact_relation: data.emergency_contact_relation || staffDetails.emergency_contact_relation,
-//       emergency_contact_phone: data.emergency_contact_phone || staffDetails.emergency_contact_phone,
-//     };
-
-//     // Create staff user
-//     const staff = await User.create({
-//       school_id: instituteId,
-//       user_type: 'STAFF',
-//       staff_type: data.staff_type,
-//       first_name: data.first_name,
-//       last_name: data.last_name,
-//       email: data.email?.toLowerCase(),
-//       registration_no: data.registration_no || finalStaffDetails.employee_id,
-//       phone: data.phone,
-//       password_hash: passwordHash,
-      
-//       // Permissions from request or from institute role
-//       permissions: permissions,
-      
-//       details: finalStaffDetails,
-//       documents: documents,
-//       avatar_url: avatarUrl,
-//       avatar_public_id: avatarPublicId,
-//       is_active: data.is_active !== false,
-//       created_by: createdBy,
-//     }, { transaction: t });
-
-//     // If no permissions provided, get from institute's role
-//     if (!permissions || permissions.length === 0) {
-//       const institute = await Institute.findByPk(instituteId, {
-//         include: [{ model: Role, as: 'assignedRole' }],
-//         transaction: t
-//       });
-
-//       if (institute?.assignedRole?.permissions?.staff) {
-//         staff.permissions = institute.assignedRole.permissions.staff;
-//         await staff.save({ transaction: t });
-//       }
-//     }
-
-//     // Generate QR Code
-//     try {
-//       const institute = await Institute.findByPk(instituteId);
-//       const qrCodeResult = await generateAndUploadQRCode(staff, instituteId);
-      
-//       staff.qr_code_url = qrCodeResult.url;
-//       staff.qr_code_public_id = qrCodeResult.public_id;
-//       await staff.save({ transaction: t });
-      
-//       qrCodeUrl = qrCodeResult.url;
-//       qrCodePublicId = qrCodeResult.public_id;
-//     } catch (qrError) {
-//       console.error('❌ QR Code generation failed:', qrError);
-//       // Continue without QR code
-//     }
-
-//     // Send welcome email if email provided
-//     if (staff.email) {
-//       const institute = await Institute.findByPk(instituteId);
-//       await sendWelcomeEmailWithCredentials(
-//         staff,
-//         password,
-//         institute?.name || 'The Clouds Academy',
-//         qrCodeUrl,
-//         'Staff Member'
-//       ).catch(err => console.error('Email sending failed:', err));
-//     }
-
-//     await t.commit();
-    
-//     const createdStaff = await getStaffById(staff.id, instituteId);
-    
-//     return {
-//       staff: createdStaff,
-//       password: password,
-//       qr_code: qrCodeUrl
-//     };
-    
-//   } catch (error) {
-//     await t.rollback();
-    
-//     // Clean up uploaded files on error
-//     if (avatarPublicId) {
-//       await deleteFromCloudinary(avatarPublicId).catch(() => {});
-//     }
-//     if (qrCodePublicId) {
-//       await deleteFromCloudinary(qrCodePublicId).catch(() => {});
-//     }
-    
-//     throw error;
-//   }
-// };
-
-
 
 // ─── Create new staff member ─────────────────────────────────────────────────
 export const createStaff = async (instituteId, data, createdBy, file = null, documentFiles = []) => {
@@ -445,11 +221,11 @@ export const createStaff = async (instituteId, data, createdBy, file = null, doc
       avatarUrl = result.url;
       avatarPublicId = result.public_id;
     } finally {
-      try { 
+      try {
         if (fs.existsSync(file.path)) {
-          await fs.promises.unlink(file.path); 
+          await fs.promises.unlink(file.path);
         }
-      } catch {}
+      } catch { }
     }
   }
 
@@ -458,19 +234,31 @@ export const createStaff = async (instituteId, data, createdBy, file = null, doc
   try {
     // Check if email already exists (if provided)
     if (data.email) {
-      const existingEmail = await User.findOne({
-        where: { email: data.email.toLowerCase() },
+      // const existingEmail = await User.findOne({
+      //   where: { email: data.email.toLowerCase() },
+      //   transaction: t
+      // });
+      // if (existingEmail) {
+      //   throw new AppError('Email already exists', 409);
+      // }
+      // Only check within STAFF type, not across all users
+      const existingStaff = await User.findOne({
+        where: {
+          email: data.email.toLowerCase(),
+          user_type: 'STAFF',
+          school_id: instituteId
+        },
         transaction: t
       });
-      if (existingEmail) {
-        throw new AppError('Email already exists', 409);
+      if (existingStaff) {
+        throw new AppError('A staff member with this email already exists in this institute', 409);
       }
     }
 
     // Check if registration_no already exists (if provided)
     if (data.registration_no) {
       const existingRegNo = await User.findOne({
-        where: { 
+        where: {
           registration_no: data.registration_no,
           school_id: instituteId
         },
@@ -489,8 +277,8 @@ export const createStaff = async (instituteId, data, createdBy, file = null, doc
     let staffDetails = {};
     if (data.staff_details) {
       try {
-        staffDetails = typeof data.staff_details === 'string' 
-          ? JSON.parse(data.staff_details) 
+        staffDetails = typeof data.staff_details === 'string'
+          ? JSON.parse(data.staff_details)
           : data.staff_details;
       } catch (e) {
         staffDetails = {};
@@ -588,10 +376,10 @@ export const createStaff = async (instituteId, data, createdBy, file = null, doc
       registration_no: data.registration_no || finalStaffDetails.employee_id,
       phone: data.phone,
       password_hash: passwordHash,
-      
+
       // Permissions from request or from institute role
       permissions: permissions,
-      
+
       details: finalStaffDetails,
       documents: documents,
       avatar_url: avatarUrl,
@@ -616,14 +404,14 @@ export const createStaff = async (instituteId, data, createdBy, file = null, doc
     // ✅ Generate QR Code
     try {
       const qrCodeResult = await generateAndUploadQRCode(staff, instituteId);
-      
+
       staff.qr_code_url = qrCodeResult.url;
       staff.qr_code_public_id = qrCodeResult.public_id;
       await staff.save({ transaction: t });
-      
+
       qrCodeUrl = qrCodeResult.url;
       qrCodePublicId = qrCodeResult.public_id;
-      
+
       console.log(`✅ QR Code generated for staff ${staff.id}`);
     } catch (qrError) {
       console.error('❌ QR Code generation failed:', qrError);
@@ -637,7 +425,7 @@ export const createStaff = async (instituteId, data, createdBy, file = null, doc
     if (staff.email) {
       try {
         const institute = await Institute.findByPk(instituteId);
-        
+
         // Use setTimeout to not block response
         setTimeout(async () => {
           try {
@@ -657,26 +445,26 @@ export const createStaff = async (instituteId, data, createdBy, file = null, doc
         console.error('❌ Failed to prepare email:', error);
       }
     }
-    
+
     const createdStaff = await getStaffById(staff.id, instituteId);
-    
+
     return {
       staff: createdStaff,
       password: password,
       qr_code: qrCodeUrl
     };
-    
+
   } catch (error) {
     await t.rollback();
-    
+
     // Clean up uploaded files on error
     if (avatarPublicId) {
-      await deleteFromCloudinary(avatarPublicId).catch(() => {});
+      await deleteFromCloudinary(avatarPublicId).catch(() => { });
     }
     if (qrCodePublicId) {
-      await deleteFromCloudinary(qrCodePublicId).catch(() => {});
+      await deleteFromCloudinary(qrCodePublicId).catch(() => { });
     }
-    
+
     throw error;
   }
 };
@@ -706,39 +494,51 @@ export const updateStaff = async (id, instituteId, data, updatedBy, file = null,
         transformation: [{ width: 300, height: 300, crop: 'thumb' }, { quality: 'auto' }],
       });
       avatarUrl = result.url;
-      
+
       // Delete old avatar
       if (staff.avatar_public_id) {
-        await deleteFromCloudinary(staff.avatar_public_id).catch(() => {});
+        await deleteFromCloudinary(staff.avatar_public_id).catch(() => { });
       }
       avatarPublicId = result.public_id;
     } finally {
-      try { 
+      try {
         if (fs.existsSync(file.path)) {
-          await fs.promises.unlink(file.path); 
+          await fs.promises.unlink(file.path);
         }
-      } catch {}
+      } catch { }
     }
   }
 
   const updates = { ...data };
-  
+
   // Handle email uniqueness
   if (data.email && data.email.toLowerCase() !== staff.email) {
-    const existing = await User.findOne({ where: { email: data.email.toLowerCase() } });
-    if (existing && existing.id !== staff.id) {
-      throw new AppError('Email already exists', 409);
+    // const existing = await User.findOne({ where: { email: data.email.toLowerCase() } });
+    // if (existing && existing.id !== staff.id) {
+    //   throw new AppError('Email already exists', 409);
+    // }
+    // Only check within STAFF type, not across all users
+    const existingStaff = await User.findOne({
+      where: {
+        email: data.email.toLowerCase(),
+        user_type: 'STAFF',
+        school_id: instituteId
+      },
+      transaction: t
+    });
+    if (existingStaff) {
+      throw new AppError('A staff member with this email already exists in this institute', 409);
     }
     updates.email = data.email.toLowerCase();
   }
 
   // Handle registration_no uniqueness
   if (data.registration_no && data.registration_no !== staff.registration_no) {
-    const existing = await User.findOne({ 
-      where: { 
+    const existing = await User.findOne({
+      where: {
         registration_no: data.registration_no,
         school_id: instituteId
-      } 
+      }
     });
     if (existing && existing.id !== staff.id) {
       throw new AppError('Registration number already exists', 409);
@@ -810,7 +610,7 @@ export const updateStaff = async (id, instituteId, data, updatedBy, file = null,
       const newDetails = typeof data.staff_details === 'string'
         ? JSON.parse(data.staff_details)
         : data.staff_details;
-      
+
       updates.details = {
         ...staff.details,
         ...newDetails
@@ -842,19 +642,19 @@ export const deleteStaff = async (id, instituteId) => {
 
   // Delete avatar from Cloudinary if exists
   if (staff.avatar_public_id) {
-    await deleteFromCloudinary(staff.avatar_public_id).catch(() => {});
+    await deleteFromCloudinary(staff.avatar_public_id).catch(() => { });
   }
 
   // Delete QR code from Cloudinary if exists
   if (staff.qr_code_public_id) {
-    await deleteFromCloudinary(staff.qr_code_public_id).catch(() => {});
+    await deleteFromCloudinary(staff.qr_code_public_id).catch(() => { });
   }
 
   // Delete all document files from Cloudinary
   if (staff.documents && Array.isArray(staff.documents)) {
     for (const doc of staff.documents) {
       if (doc.public_id) {
-        await deleteFromCloudinary(doc.public_id).catch(() => {});
+        await deleteFromCloudinary(doc.public_id).catch(() => { });
       }
     }
   }
@@ -915,13 +715,13 @@ export const regenerateQRCode = async (id, instituteId) => {
 
   // Generate new QR code with old public_id for deletion
   const oldPublicId = staff.qr_code_public_id;
-  
+
   const qrCodeResult = await generateAndUploadQRCode(staff, instituteId, oldPublicId);
-  
+
   staff.qr_code_url = qrCodeResult.url;
   staff.qr_code_public_id = qrCodeResult.public_id;
-  
+
   await staff.save();
-  
+
   return qrCodeResult.url;
 };

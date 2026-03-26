@@ -19,6 +19,15 @@ const getInstituteId = (req) => {
   return req.user?.school_id || req.user?.institute_id;
 };
 
+const normalizeUploadedFiles = (filesPayload) => {
+  if (Array.isArray(filesPayload)) return filesPayload;
+  if (!filesPayload || typeof filesPayload !== 'object') return [];
+
+  const attachments = Array.isArray(filesPayload.attachments) ? filesPayload.attachments : [];
+  const files = Array.isArray(filesPayload.files) ? filesPayload.files : [];
+  return [...attachments, ...files];
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,11 +145,12 @@ export const getStudentDetails = async (req, res) => {
 export const createAssignment = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
+    const uploadedFiles = normalizeUploadedFiles(req.files);
     const assignment = await teacherService.createAssignment(
       req.user.id,
       instituteId,
       req.body,
-      req.files
+      uploadedFiles
     );
     return sendCreated(res, assignment, 'Assignment created successfully');
   } catch (error) {
@@ -197,12 +207,13 @@ export const updateAssignment = async (req, res) => {
   try {
     const { assignmentId } = req.params;
     const instituteId = getInstituteId(req);
+    const uploadedFiles = normalizeUploadedFiles(req.files);
     const assignment = await teacherService.updateAssignment(
       assignmentId,
       req.user.id,
       instituteId,
       req.body,
-      req.files
+      uploadedFiles
     );
     return sendSuccess(res, assignment, 'Assignment updated successfully');
   } catch (error) {

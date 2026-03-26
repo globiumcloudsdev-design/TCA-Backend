@@ -35,7 +35,7 @@ import * as masterDashboardController from '../../controllers/dashboard/masterDa
 import * as teacherDashboardController from '../../controllers/dashboard/teacherDashboard.controller.js';
 import * as studentDashboardController from '../../controllers/dashboard/studentDashboard.controller.js';
 import * as parentDashboardController from '../../controllers/dashboard/parentDashboard.controller.js';
-// import * as instituteDashboardController from '../../controllers/dashboard/instituteDashboard.controller.js';
+import * as instituteDashboardController from '../../controllers/dashboard/instituteDashboard.controller.js';
 
 const router = Router();
 
@@ -137,12 +137,12 @@ router.get(
  * Institute Admin Dashboard
  * Access: INSTITUTE_ADMIN only
  */
-// router.get(
-//   '/institute',
-//   restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN'),
-//   belongsToInstitute,
-//   instituteDashboardController.getInstituteDashboard
-// );
+router.get(
+  '/institute',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),
+  belongsToInstitute,
+  instituteDashboardController.getInstituteDashboard
+);
 
 /**
  * GET /api/v1/dashboard/branch

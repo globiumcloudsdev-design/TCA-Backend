@@ -203,3 +203,27 @@ export const getCurrentAcademicYear = async (req, res) => {
     return sendError(res, error.message || 'Failed to fetch current academic year');
   }
 };
+
+
+
+
+/**
+ * GET ACADEMIC YEAR OPTIONS FOR DROPDOWN
+ * Yeh endpoint frontend dropdown ke liye hai
+ */
+export const getAcademicYearOptions = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    if (!instituteId) {
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    const onlyActive = req.query.onlyActive !== 'false'; // Default true
+    
+    const result = await academicYearService.getAcademicYearOptions(instituteId, onlyActive);
+    
+    return sendSuccess(res, result.data, 'Academic year options fetched successfully');
+  } catch (error) {
+    return sendError(res, error.message || 'Failed to fetch academic year options');
+  }
+};

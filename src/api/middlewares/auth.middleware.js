@@ -1,72 +1,114 @@
+// // backend/src/middlewares/auth.middleware.js
+
 // /**
-//  * The Clouds Academy - Auth Middleware
-//  * Verifies JWT token and attaches user to request
+//  * The Clouds Academy - Complete Auth Middleware
+//  * 
+//  * Features:
+//  * - JWT verification
+//  * - Role-based access control
+//  * - Institute context validation
+//  * - Permission checking
+//  * - Optional auth for public routes
 //  */
 
-// import { verifyAccessToken } from '../../config/auth.js';
+// import jwt from 'jsonwebtoken';
+// import { promisify } from 'util';
+// import User from '../../models/postgres/User.model.js';
+// import Institute from '../../models/postgres/Institute.model.js';
 // import { AppError } from '../../utils/lib/AppError.js';
 // import catchAsync from '../../utils/lib/catchAsync.js';
-// import User from '../../models/postgres/User.model.js';
+// import { verifyAccessToken } from '../../config/auth.js';
 
+// // ─────────────────────────────────────────────────────────────────────────────
+// // CORE AUTHENTICATION
+// // ─────────────────────────────────────────────────────────────────────────────
+
+// /**
+//  * Protect routes - JWT verification
+//  * Attaches user and institute to request
+//  */
 // export const protect = catchAsync(async (req, res, next) => {
-//   // 1. Get token from header or cookie
+//   // 1. Get token from multiple sources
 //   let token;
+  
+//   // From Authorization header
 //   if (req.headers.authorization?.startsWith('Bearer ')) {
 //     token = req.headers.authorization.split(' ')[1];
-//   } else if (req.cookies?.accessToken) {
+//   } 
+//   // From cookie
+//   else if (req.cookies?.accessToken) {
 //     token = req.cookies.accessToken;
 //   }
+//   // From query param (for downloads/embeds)
+//   else if (req.query?.token) {
+//     token = req.query.token;
+//   }
 
-//   if (!token) throw new AppError('No token provided. Please login.', 401);
+//   if (!token) {
+//     throw new AppError('No authentication token provided. Please login.', 401);
+//   }
 
 //   // 2. Verify token
 //   let decoded;
 //   try {
 //     decoded = verifyAccessToken(token);
-//   } catch {
-//     throw new AppError('Invalid or expired token. Please login again.', 401);
+//   } catch (error) {
+//     if (error.name === 'TokenExpiredError') {
+//       throw new AppError('Token expired. Please login again.', 401);
+//     }
+//     if (error.name === 'JsonWebTokenError') {
+//       throw new AppError('Invalid token. Please login again.', 401);
+//     }
+//     throw new AppError('Authentication failed. Please login again.', 401);
 //   }
 
-//   // 3. Check if user still exists
+//   // 3. Check if user exists
 //   const user = await User.findByPk(decoded.userId, {
-//     attributes: { exclude: ['password_hash'] },
+//     attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] },
+//     include: [
+//       {
+//         model: Institute,
+//         as: 'institute',
+//         attributes: ['id', 'institute_name', 'institute_code', 'is_active', 'subscription_status']
+//       }
+//     ]
 //   });
 
-//   if (!user) throw new AppError('User no longer exists.', 401);
-//   if (!user.is_active) throw new AppError('Account is deactivated.', 403);
+//   if (!user) {
+//     throw new AppError('User account no longer exists.', 401);
+//   }
 
-//   // 4. Attach user to request
+//   // 4. Check if user is active
+//   if (!user.is_active) {
+//     throw new AppError('Your account has been deactivated. Please contact admin.', 403);
+//   }
+
+//   // 5. Check institute status (if not MASTER_ADMIN)
+//   if (user.user_type !== 'MASTER_ADMIN' && user.school_id) {
+//     const institute = user.institute || await Institute.findByPk(user.school_id);
+    
+//     if (!institute) {
+//       throw new AppError('Associated institute not found.', 403);
+//     }
+    
+//     if (!institute.is_active) {
+//       throw new AppError('Institute is inactive. Please contact support.', 403);
+//     }
+    
+//     if (institute.subscription_status === 'expired') {
+//       throw new AppError('Institute subscription has expired. Please renew.', 403);
+//     }
+
+//     // Attach institute to request
+//     req.institute = institute;
+//   }
+
+//   // 6. Attach user and token to request
 //   req.user = user;
 //   req.token = token;
 
 //   next();
 // });
-
-// /**
-//  * Verify Master Admin (Platform owner)
-//  */
-// export const isMasterAdmin = catchAsync(async (req, res, next) => {
-//   if (req.user?.user_type !== 'MASTER_ADMIN') {
-//     throw new AppError('Master Admin access required.', 403);
-//   }
-//   next();
-// });
-
-// /**
-//  * Optional auth (doesn't fail if no token)
-//  */
-// export const optionalAuth = catchAsync(async (req, res, next) => {
-//   try {
-//     await protect(req, res, next);
-//   } catch {
-//     next();
-//   }
-// });
-
-// export default { protect, isMasterAdmin, optionalAuth };
-
-
-
 
 // backend/src/middlewares/auth.middleware.js
 
@@ -85,6 +127,7 @@ import jwt from 'jsonwebtoken';
 import { promisify } from 'util';
 import User from '../../models/postgres/User.model.js';
 import Institute from '../../models/postgres/Institute.model.js';
+import Branch from '../../models/postgres/Branch.model.js'; // ✅ Import Branch
 import { AppError } from '../../utils/lib/AppError.js';
 import catchAsync from '../../utils/lib/catchAsync.js';
 import { verifyAccessToken } from '../../config/auth.js';
@@ -132,14 +175,14 @@ export const protect = catchAsync(async (req, res, next) => {
     throw new AppError('Authentication failed. Please login again.', 401);
   }
 
-  // 3. Check if user exists
+  // 3. Check if user exists with full details
   const user = await User.findByPk(decoded.userId, {
     attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] },
     include: [
       {
         model: Institute,
         as: 'institute',
-        attributes: ['id', 'institute_name', 'institute_code', 'is_active', 'subscription_status']
+        attributes: ['id', 'institute_name', 'institute_code', 'is_active', 'subscription_status', 'institute_logo_url', 'institute_address', 'institute_city', 'settings']
       }
     ]
   });
@@ -153,7 +196,18 @@ export const protect = catchAsync(async (req, res, next) => {
     throw new AppError('Your account has been deactivated. Please contact admin.', 403);
   }
 
-  // 5. Check institute status (if not MASTER_ADMIN)
+  // 5. Load branch if user has branch_id
+  if (user.branch_id) {
+    const branch = await Branch.findByPk(user.branch_id, {
+      attributes: ['id', 'branch_name', 'branch_code', 'branch_address', 'branch_city', 'is_active', 'settings']
+    });
+    if (branch) {
+      user.branch = branch;
+      req.branch = branch;
+    }
+  }
+
+  // 6. Check institute status (if not MASTER_ADMIN)
   if (user.user_type !== 'MASTER_ADMIN' && user.school_id) {
     const institute = user.institute || await Institute.findByPk(user.school_id);
     
@@ -173,7 +227,7 @@ export const protect = catchAsync(async (req, res, next) => {
     req.institute = institute;
   }
 
-  // 6. Attach user and token to request
+  // 7. Attach user and token to request
   req.user = user;
   req.token = token;
 

@@ -16,6 +16,9 @@ router.use(protect);
 
 router.get('/current', academicYearController.getCurrentAcademicYear);
 
+// ✅ OPTIONS ENDPOINT - Frontend dropdown ke liye
+router.get('/options', academicYearController.getAcademicYearOptions);
+
 router.route('/')
   .get(academicYearController.getAllAcademicYears)
   .post(validate(createAcademicYearSchema), academicYearController.createAcademicYear);

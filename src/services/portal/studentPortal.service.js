@@ -32,8 +32,419 @@ const {
   FeeVoucher,
   ExamResult,
   Notice,
+  Notification,
+  Class,
+  Section,
   sequelize 
 } = models;
+
+const NoticeModel = Notice || Notification;
+
+const mapNoticeRow = (row) => {
+  const createdAt = row.created_at || row.createdAt || new Date();
+  const content = row.content || row.body || row.data?.message || '';
+  const priority = row.priority || row.data?.priority || 'normal';
+
+  return {
+    id: row.id,
+    title: row.title || 'Notice',
+    content,
+    priority,
+    created_at: createdAt,
+    attachments: row.attachments || row.data?.attachments || []
+  };
+};
+
+const pickStudentDetails = (student) => {
+  if (!student?.details) return {};
+  return student.details.studentDetails || student.details;
+};
+
+const getActiveAcademicSession = (details = {}) => {
+  const sessions = Array.isArray(details?.academicSessions) ? details.academicSessions : [];
+  const normalized = sessions
+    .filter((session) => session && (session.class_id || session.class_name))
+    .map((session) => ({
+      ...session,
+      status_normalized: String(session.status || '').trim().toLowerCase(),
+      start_ts: Number(new Date(session.start_date || 0)),
+      end_ts: Number(new Date(session.end_date || 0))
+    }));
+
+  const active = normalized
+    .filter((session) => session.status_normalized === 'active')
+    .sort((a, b) => b.start_ts - a.start_ts);
+
+  if (active.length) return active[0];
+
+  const latest = normalized.sort((a, b) => {
+    const bKey = Number.isFinite(b.end_ts) && b.end_ts > 0 ? b.end_ts : b.start_ts;
+    const aKey = Number.isFinite(a.end_ts) && a.end_ts > 0 ? a.end_ts : a.start_ts;
+    return bKey - aKey;
+  });
+
+  return latest[0] || null;
+};
+
+const normalizeStudentPortalProfile = (student) => {
+  const details = pickStudentDetails(student);
+  const activeSession = getActiveAcademicSession(details);
+  const pickValue = (...values) => {
+    const found = values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+    return found ?? null;
+  };
+
+  return {
+    id: student.id,
+    name: `${student.first_name || ''} ${student.last_name || ''}`.trim(),
+    first_name: student.first_name,
+    last_name: student.last_name,
+    email: student.email,
+    phone: student.phone,
+    registration_no: student.registration_no,
+    avatar: student.avatar_url,
+
+    class_id: pickValue(activeSession?.class_id, details.class_id, details.classId, student.class_id, student.classId),
+    class_name: pickValue(activeSession?.class_name, details.class_name, details.className, student.class_name, student.className),
+    section_id: pickValue(activeSession?.section_id, details.section_id, details.sectionId, student.section_id, student.sectionId),
+    section_name: pickValue(activeSession?.section_name, details.section_name, details.sectionName, student.section_name, student.sectionName),
+    roll_number: pickValue(activeSession?.roll_no, details.roll_number, details.roll_no),
+    admission_date: details.admission_date || null,
+
+    date_of_birth: details.date_of_birth || null,
+    gender: details.gender || null,
+    blood_group: details.blood_group || null,
+    religion: details.religion || null,
+    nationality: details.nationality || null,
+
+    present_address: details.present_address || null,
+    permanent_address: details.permanent_address || null,
+    city: details.city || null,
+
+    guardian_name: details.guardian_name || null,
+    guardian_relation: details.guardian_relation || null,
+    guardian_phone: details.guardian_phone || null,
+    guardian_email: details.guardian_email || null,
+
+    documents: student.documents || [],
+    academic_sessions: Array.isArray(details.academicSessions) ? details.academicSessions : [],
+    active_academic_session: activeSession,
+    created_at: student.created_at
+  };
+};
+
+const normalizeCandidate = (candidate = {}) => {
+  const classId = String(candidate.class_id || '').trim();
+  const sectionId = String(candidate.section_id || '').trim();
+  const className = String(candidate.class_name || '').trim();
+  const sectionName = String(candidate.section_name || '').trim();
+
+  return {
+    class_id: classId || null,
+    section_id: sectionId || null,
+    class_name: className || null,
+    section_name: sectionName || null
+  };
+};
+
+const hasTeachingSlots = (timetable) => {
+  const slots = Array.isArray(timetable?.slots) ? timetable.slots : [];
+  return slots.some((slot) => slot && !slot.is_break);
+};
+
+const buildStudentAcademicCandidates = (student) => {
+  const candidates = [];
+  const seen = new Set();
+  const pushCandidate = (rawCandidate) => {
+    const candidate = normalizeCandidate(rawCandidate);
+    if (!candidate.class_id && !candidate.class_name) return;
+
+    const key = [candidate.class_id || '', candidate.section_id || '', candidate.class_name || '', candidate.section_name || '']
+      .join('|')
+      .toLowerCase();
+
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(candidate);
+  };
+
+  // Primary candidate should always be current profile values.
+  pushCandidate(student);
+
+  const sessions = Array.isArray(student?.academic_sessions) ? student.academic_sessions : [];
+
+  const normalizedSessions = sessions
+    .filter((session) => session && (session.class_id || session.class_name))
+    .map((session) => ({
+      class_id: session.class_id,
+      section_id: session.section_id,
+      class_name: session.class_name,
+      section_name: session.section_name,
+      status: String(session.status || '').trim().toLowerCase(),
+      start_ts: Number(new Date(session.start_date || 0)),
+      end_ts: Number(new Date(session.end_date || 0))
+    }));
+
+  const activeSessions = normalizedSessions
+    .filter((session) => session.status === 'active')
+    .sort((a, b) => b.start_ts - a.start_ts);
+
+  const historicalSessions = normalizedSessions
+    .filter((session) => session.status !== 'active')
+    .sort((a, b) => {
+      const bKey = Number.isFinite(b.end_ts) && b.end_ts > 0 ? b.end_ts : b.start_ts;
+      const aKey = Number.isFinite(a.end_ts) && a.end_ts > 0 ? a.end_ts : a.start_ts;
+      return bKey - aKey;
+    });
+
+  activeSessions.forEach(pushCandidate);
+  historicalSessions.forEach(pushCandidate);
+
+  return candidates;
+};
+
+const findBestMatchedTimetables = (timetables = [], student = {}) => {
+  const candidates = buildStudentAcademicCandidates(student);
+  if (!candidates.length) return [];
+
+  const primaryCandidate = candidates[0] || {};
+  const primaryMatches = timetables.filter((timetable) => timetableMatchesStudent(timetable, primaryCandidate));
+  const primaryHasSection = Boolean(primaryCandidate.section_id || primaryCandidate.section_name);
+
+  // If current profile has a section, never fall back to old academic sessions.
+  if (primaryHasSection) {
+    return primaryMatches;
+  }
+
+  let fallbackMatches = [];
+
+  for (const candidate of candidates) {
+    const matches = timetables.filter((timetable) => timetableMatchesStudent(timetable, candidate));
+    if (!matches.length) continue;
+
+    if (!fallbackMatches.length) {
+      fallbackMatches = matches;
+    }
+
+    if (matches.some((timetable) => hasTeachingSlots(timetable))) {
+      return matches;
+    }
+  }
+
+  return fallbackMatches;
+};
+
+const buildAssignmentDirectAudience = (student = {}) => {
+  const classId = String(student?.class_id || '').trim();
+  const sectionId = String(student?.section_id || '').trim();
+
+  if (!classId && !sectionId) return [];
+
+  if (classId && sectionId) {
+    return [
+      {
+        [Op.and]: [
+          { class_id: classId },
+          { section_id: sectionId }
+        ]
+      },
+      {
+        [Op.and]: [
+          { class_id: classId },
+          { section_id: { [Op.is]: null } }
+        ]
+      }
+    ];
+  }
+
+  if (classId) {
+    return [{ class_id: classId }];
+  }
+
+  return [{ section_id: sectionId }];
+};
+
+const timetableMatchesStudent = (timetable, student) => {
+  const studentClassId = String(student.class_id || '').trim();
+  const studentSectionId = String(student.section_id || '').trim();
+  const studentClassName = String(student.class_name || '').trim().toLowerCase();
+  const studentSectionName = String(student.section_name || '').trim().toLowerCase();
+  const requiresSectionMatch = Boolean(studentSectionId || studentSectionName);
+  const entityIds = timetable?.entity_ids || {};
+
+  const entityClassId = String(entityIds.class_id || '').trim();
+  const entitySectionId = String(entityIds.section_id || '').trim();
+  const entityClassName = String(entityIds.class_name || '').trim().toLowerCase();
+  const entitySectionName = String(entityIds.section_name || '').trim().toLowerCase();
+  const entityClassIds = [
+    ...(Array.isArray(entityIds.class_ids) ? entityIds.class_ids : []),
+    ...(Array.isArray(entityIds.classIds) ? entityIds.classIds : [])
+  ].map((id) => String(id || '').trim()).filter(Boolean);
+  const entitySectionIds = [
+    ...(Array.isArray(entityIds.section_ids) ? entityIds.section_ids : []),
+    ...(Array.isArray(entityIds.sectionIds) ? entityIds.sectionIds : [])
+  ].map((id) => String(id || '').trim()).filter(Boolean);
+  const classSectionPairs = Array.isArray(entityIds.class_sections)
+    ? entityIds.class_sections
+    : (Array.isArray(entityIds.classSections) ? entityIds.classSections : []);
+
+  if (studentClassId && entityClassId && studentClassId === entityClassId) {
+    if (!requiresSectionMatch) {
+      return true;
+    }
+    if ((studentSectionId && entitySectionId && studentSectionId === entitySectionId) || (studentSectionName && entitySectionName && studentSectionName === entitySectionName)) {
+      return true;
+    }
+  }
+
+  if (studentClassName && entityClassName && studentClassName === entityClassName) {
+    if (!requiresSectionMatch) {
+      return true;
+    }
+    if ((studentSectionName && entitySectionName && studentSectionName === entitySectionName) || (studentSectionId && entitySectionId && studentSectionId === entitySectionId)) {
+      return true;
+    }
+  }
+
+  if (studentClassId && entityClassIds.includes(studentClassId)) {
+    if (!requiresSectionMatch) {
+      return true;
+    }
+    if ((studentSectionId && entitySectionIds.includes(studentSectionId)) || (studentSectionName && entitySectionName && studentSectionName === entitySectionName)) {
+      return true;
+    }
+  }
+
+  if (studentClassId && classSectionPairs.length) {
+    const pairMatch = classSectionPairs.some((pair) => {
+      if (!pair) return false;
+      const pairClassId = String(pair.class_id || pair.classId || '').trim();
+      const pairSectionId = String(pair.section_id || pair.sectionId || '').trim();
+      const pairSectionName = String(pair.section_name || pair.sectionName || '').trim().toLowerCase();
+      if (pairClassId !== studentClassId) return false;
+      if (!requiresSectionMatch) return true;
+      return (studentSectionId && pairSectionId && pairSectionId === studentSectionId)
+        || (studentSectionName && pairSectionName && pairSectionName === studentSectionName);
+    });
+    if (pairMatch) return true;
+  }
+
+  const slots = Array.isArray(timetable?.slots) ? timetable.slots : [];
+  return slots.some((slot) => {
+    if (!slot || slot.is_break) return false;
+
+    const slotClassId = String(
+      slot.class_id || slot.assigned_class_id || slot.assigned_to?.class_id || ''
+    ).trim();
+    const slotSectionId = String(
+      slot.section_id || slot.assigned_section_id || slot.assigned_to?.section_id || ''
+    ).trim();
+    const slotClassName = String(
+      slot.class_name || slot.assigned_to?.class_name || ''
+    ).trim().toLowerCase();
+    const slotSectionName = String(
+      slot.section_name || slot.assigned_to?.section_name || ''
+    ).trim().toLowerCase();
+
+    const slotClassIds = [
+      ...(Array.isArray(slot.class_ids) ? slot.class_ids : []),
+      ...(Array.isArray(slot.assigned_to?.class_ids) ? slot.assigned_to.class_ids : [])
+    ].map((id) => String(id || '').trim()).filter(Boolean);
+
+    const slotSectionIds = [
+      ...(Array.isArray(slot.section_ids) ? slot.section_ids : []),
+      ...(Array.isArray(slot.assigned_to?.section_ids) ? slot.assigned_to.section_ids : [])
+    ].map((id) => String(id || '').trim()).filter(Boolean);
+
+    const classMatch = studentClassId && (
+      slotClassId === studentClassId ||
+      slotClassIds.includes(studentClassId)
+    );
+
+    const classNameMatch = studentClassName && slotClassName && slotClassName === studentClassName;
+
+    const sectionMatch = !studentSectionId || (
+      slotSectionId === studentSectionId ||
+      slotSectionIds.includes(studentSectionId)
+    );
+
+    const sectionNameMatch = !studentSectionName || !slotSectionName || slotSectionName === studentSectionName;
+
+    return (classMatch && sectionMatch) || (classNameMatch && sectionNameMatch);
+  });
+};
+
+const normalizeDayKey = (rawDay) => {
+  if (rawDay === undefined || rawDay === null) return null;
+
+  const asNumber = Number(rawDay);
+  if (!Number.isNaN(asNumber) && String(rawDay).trim() !== '') {
+    const numericMap = {
+      1: 'monday',
+      2: 'tuesday',
+      3: 'wednesday',
+      4: 'thursday',
+      5: 'friday',
+      6: 'saturday',
+      7: 'sunday',
+      0: 'sunday'
+    };
+    if (numericMap[asNumber]) return numericMap[asNumber];
+  }
+
+  const day = String(rawDay || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!day) return null;
+
+  const map = {
+    mon: 'monday',
+    monday: 'monday',
+    tue: 'tuesday',
+    tues: 'tuesday',
+    tuesday: 'tuesday',
+    wed: 'wednesday',
+    wednesday: 'wednesday',
+    thu: 'thursday',
+    thur: 'thursday',
+    thursday: 'thursday',
+    fri: 'friday',
+    friday: 'friday',
+    sat: 'saturday',
+    saturday: 'saturday',
+    sun: 'sunday',
+    sunday: 'sunday'
+  };
+
+  return map[day] || null;
+};
+
+const resolveSlotTime = (slot = {}, periodConfig = []) => {
+  if (slot.start_time || slot.end_time) {
+    return {
+      start: slot.start_time || '--:--',
+      end: slot.end_time || '--:--'
+    };
+  }
+
+  const periodRaw = String(slot.period || slot.period_no || '').trim();
+  const periodNo = Number(periodRaw.replace(/[^0-9]/g, ''));
+  const periodList = Array.isArray(periodConfig)
+    ? periodConfig
+    : (Array.isArray(periodConfig?.periods) ? periodConfig.periods : []);
+  const matchedPeriod = periodList.find((period) => Number(String(period?.period_no || period?.period || '').replace(/[^0-9]/g, '')) === periodNo);
+
+  if (!matchedPeriod && slot.time && String(slot.time).includes('-')) {
+    const [start, end] = String(slot.time).split('-').map((v) => v.trim());
+    return {
+      start: start || '--:--',
+      end: end || '--:--'
+    };
+  }
+
+  return {
+    start: matchedPeriod?.start_time || '--:--',
+    end: matchedPeriod?.end_time || '--:--'
+  };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD
@@ -43,8 +454,6 @@ const {
  * Get complete student dashboard
  */
 export const getStudentDashboard = async (studentId, instituteId) => {
-  const today = new Date();
-  
   const [
     student,
     todayClasses,
@@ -61,7 +470,8 @@ export const getStudentDashboard = async (studentId, instituteId) => {
     getRecentAttendance(studentId, instituteId, 7),
     getRecentResults(studentId, instituteId, 3),
     getFeeSummary(studentId, instituteId),
-    getRecentNotices(instituteId, 5),
+    // Notices should never break dashboard core widgets.
+    getRecentNotices(instituteId, 5).catch(() => []),
     getStudentStats(studentId, instituteId)
   ]);
 
@@ -106,46 +516,35 @@ export const getStudentProfile = async (studentId, instituteId) => {
 
   if (!student) throw new Error('Student not found');
 
+  const profile = normalizeStudentPortalProfile(student);
+  const session = profile.active_academic_session || null;
+
+  const classId = session?.class_id || profile.class_id;
+  const sectionId = session?.section_id || profile.section_id;
+
+  const [classInfo, sectionInfo] = await Promise.all([
+    classId ? Class.findByPk(classId, { attributes: ['id', 'name'] }) : Promise.resolve(null),
+    sectionId ? Section.findByPk(sectionId, { attributes: ['id', 'name'] }) : Promise.resolve(null)
+  ]);
+
+  const resolvedClassName = classInfo?.name || session?.class_name || profile.class_name || null;
+  const resolvedSectionName = sectionInfo?.name || session?.section_name || profile.section_name || null;
+
   return {
-    id: student.id,
-    name: `${student.first_name} ${student.last_name}`,
-    first_name: student.first_name,
-    last_name: student.last_name,
-    email: student.email,
-    phone: student.phone,
-    registration_no: student.registration_no,
-    avatar: student.avatar_url,
-    
-    // Academic details from JSONB
-    class_id: student.details?.class_id,
-    class_name: student.details?.class_name,
-    section_id: student.details?.section_id,
-    section_name: student.details?.section_name,
-    roll_number: student.details?.roll_number,
-    admission_date: student.details?.admission_date,
-    
-    // Personal details
-    date_of_birth: student.details?.date_of_birth,
-    gender: student.details?.gender,
-    blood_group: student.details?.blood_group,
-    religion: student.details?.religion,
-    nationality: student.details?.nationality,
-    
-    // Address
-    present_address: student.details?.present_address,
-    permanent_address: student.details?.permanent_address,
-    city: student.details?.city,
-    
-    // Guardian info
-    guardian_name: student.details?.guardian_name,
-    guardian_relation: student.details?.guardian_relation,
-    guardian_phone: student.details?.guardian_phone,
-    guardian_email: student.details?.guardian_email,
-    
-    // Documents
-    documents: student.documents || [],
-    
-    created_at: student.created_at
+    ...profile,
+    class_id: classId || profile.class_id,
+    section_id: sectionId || profile.section_id,
+    class_name: resolvedClassName,
+    section_name: resolvedSectionName,
+    active_academic_session: session
+      ? {
+          ...session,
+          class_id: classId || session.class_id || null,
+          section_id: sectionId || session.section_id || null,
+          class_name: resolvedClassName,
+          section_name: resolvedSectionName
+        }
+      : null
   };
 };
 
@@ -226,32 +625,110 @@ export const updateStudentProfile = async (studentId, instituteId, updateData, f
  */
 export const getMyClasses = async (studentId, instituteId) => {
   const student = await getStudentProfile(studentId, instituteId);
+
+  if (!student.class_id && !student.class_name) return [];
+
+  const normalizeSubjectKey = (value) => String(value || '').trim().toLowerCase();
+
+  const classRecord = student.class_id
+    ? await Class.findOne({
+        where: {
+          id: student.class_id,
+          school_id: instituteId,
+          is_active: true,
+        },
+        attributes: ['id', 'name', 'courses'],
+      })
+    : null;
+
+  const courseSyllabusMap = new Map();
+  const courses = Array.isArray(classRecord?.courses) ? classRecord.courses : [];
+  courses.forEach((course, courseIndex) => {
+    const courseName = String(course?.name || '').trim();
+    if (!courseName) return;
+
+    const materials = Array.isArray(course?.materials) ? course.materials : [];
+    const syllabusItems = materials
+      .map((material, materialIndex) => {
+        const text = material?.text || material?.description || material?.content || null;
+        const link = material?.url || material?.link || material?.pdf_url || null;
+        const pdfUrl = material?.pdf_url || (typeof link === 'string' && link.toLowerCase().includes('.pdf') ? link : null);
+
+        if (!text && !link && !pdfUrl) return null;
+
+        return {
+          id: material?.id || `${courseName}-${materialIndex + 1}`,
+          title: material?.name || `Material ${materialIndex + 1}`,
+          text,
+          url: link,
+          pdf_url: pdfUrl,
+          type: material?.type || (pdfUrl ? 'pdf' : (link ? 'url' : 'text')),
+        };
+      })
+      .filter(Boolean);
+
+    courseSyllabusMap.set(normalizeSubjectKey(courseName), {
+      course_id: course?.id || `course-${courseIndex + 1}`,
+      subject_name: courseName,
+      syllabus: syllabusItems,
+    });
+  });
   
   // Get timetable for student's class
   const timetables = await Timetable.findAll({
     where: {
       school_id: instituteId,
-      is_active: true,
-      'entity_ids.class_id': student.class_id
+      is_active: true
     }
   });
+
+  const matchedTimetables = findBestMatchedTimetables(timetables, student);
 
   // Extract subjects from timetable
   const subjects = new Map();
   
-  timetables.forEach(timetable => {
+  matchedTimetables.forEach(timetable => {
     (timetable.slots || []).forEach(slot => {
       if (slot.subject_name && !slot.is_break) {
         if (!subjects.has(slot.subject_name)) {
+          const subjectKey = normalizeSubjectKey(slot.subject_name);
+          const courseSyllabus = courseSyllabusMap.get(subjectKey);
           subjects.set(slot.subject_name, {
             name: slot.subject_name,
             teacher: slot.teacher_name,
             room: slot.room_no,
             total_classes: 0,
-            attended: 0
+            attended: 0,
+            course_id: courseSyllabus?.course_id || slot.subject_id || null,
+            syllabus: courseSyllabus?.syllabus || [],
+            materials: courseSyllabus?.syllabus || [],
           });
         }
       }
+    });
+  });
+
+  // Add class course subjects even if they are not present in timetable slots yet.
+  courseSyllabusMap.forEach((courseSyllabus, key) => {
+    const existing = Array.from(subjects.values()).find((item) => normalizeSubjectKey(item.name) === key);
+    if (existing) {
+      existing.syllabus = Array.isArray(existing.syllabus) && existing.syllabus.length
+        ? existing.syllabus
+        : (courseSyllabus.syllabus || []);
+      existing.materials = existing.syllabus;
+      if (!existing.course_id) existing.course_id = courseSyllabus.course_id;
+      return;
+    }
+
+    subjects.set(courseSyllabus.subject_name, {
+      name: courseSyllabus.subject_name,
+      teacher: null,
+      room: null,
+      total_classes: 0,
+      attended: 0,
+      course_id: courseSyllabus.course_id || null,
+      syllabus: courseSyllabus.syllabus || [],
+      materials: courseSyllabus.syllabus || [],
     });
   });
 
@@ -281,7 +758,8 @@ export const getMyClasses = async (studentId, instituteId) => {
       ...subject,
       attendance_percentage: att.total ? Math.round((att.present / att.total) * 100) : 0,
       total_classes: att.total,
-      attended: att.present
+      attended: att.present,
+      has_syllabus: Array.isArray(subject.syllabus) && subject.syllabus.length > 0,
     };
   });
 
@@ -297,34 +775,54 @@ export const getMyClasses = async (studentId, instituteId) => {
  */
 export const getMyTimetable = async (studentId, instituteId, weekStart = null) => {
   const student = await getStudentProfile(studentId, instituteId);
+
+  if (!student.class_id && !student.class_name) {
+    return {
+      week: {
+        start: format(weekStart ? new Date(weekStart) : startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        end: format(weekStart ? endOfWeek(new Date(weekStart), { weekStartsOn: 1 }) : endOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+      },
+      schedule: {
+        monday: [],
+        tuesday: [],
+        wednesday: [],
+        thursday: [],
+        friday: [],
+        saturday: []
+      }
+    };
+  }
   
-  const startDate = weekStart ? new Date(weekStart) : startOfWeek(new Date());
-  const endDate = endOfWeek(startDate);
+  const startDate = weekStart ? new Date(weekStart) : startOfWeek(new Date(), { weekStartsOn: 1 });
+  const endDate = endOfWeek(startDate, { weekStartsOn: 1 });
 
   const timetables = await Timetable.findAll({
     where: {
       school_id: instituteId,
-      is_active: true,
-      'entity_ids.class_id': student.class_id
+      is_active: true
     }
   });
+
+  const matchedTimetables = findBestMatchedTimetables(timetables, student);
 
   const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const schedule = {};
 
   days.forEach(day => { schedule[day] = []; });
 
-  timetables.forEach(timetable => {
+  matchedTimetables.forEach(timetable => {
     const slots = timetable.slots || [];
     slots.forEach(slot => {
-      if (days.includes(slot.day) && !slot.is_break) {
-        schedule[slot.day].push({
+      const dayKey = normalizeDayKey(slot.day || slot.day_name || slot.week_day);
+      if (dayKey && days.includes(dayKey) && !slot.is_break) {
+        const slotTime = resolveSlotTime(slot, timetable.period_config);
+        schedule[dayKey].push({
           id: slot.id,
-          period: slot.period,
-          start_time: slot.start_time,
-          end_time: slot.end_time,
-          subject: slot.subject_name,
-          teacher: slot.teacher_name,
+          period: slot.period || slot.period_no,
+          start_time: slotTime.start,
+          end_time: slotTime.end,
+          subject: slot.subject_name || slot.subject || 'Subject',
+          teacher: slot.teacher_name || slot.teacher || slot.teacher_id || 'N/A',
           room: slot.room_no
         });
       }
@@ -333,7 +831,14 @@ export const getMyTimetable = async (studentId, instituteId, weekStart = null) =
 
   // Sort each day by start time
   Object.keys(schedule).forEach(day => {
-    schedule[day].sort((a, b) => a.start_time?.localeCompare(b.start_time || ''));
+    schedule[day].sort((a, b) => {
+      const aTime = String(a.start_time || '');
+      const bTime = String(b.start_time || '');
+      if (aTime && bTime && aTime !== '--:--' && bTime !== '--:--') {
+        return aTime.localeCompare(bTime);
+      }
+      return Number(a.period || 0) - Number(b.period || 0);
+    });
   });
 
   return {
@@ -350,34 +855,48 @@ export const getMyTimetable = async (studentId, instituteId, weekStart = null) =
  */
 export const getTodayClasses = async (studentId, instituteId) => {
   const student = await getStudentProfile(studentId, instituteId);
+
+  if (!student.class_id && !student.class_name) return [];
+
   const today = format(new Date(), 'EEEE').toLowerCase();
 
   const timetables = await Timetable.findAll({
     where: {
       school_id: instituteId,
-      is_active: true,
-      'entity_ids.class_id': student.class_id
+      is_active: true
     }
   });
 
+  const matchedTimetables = findBestMatchedTimetables(timetables, student);
+
   const todayClasses = [];
 
-  timetables.forEach(timetable => {
+  matchedTimetables.forEach(timetable => {
     (timetable.slots || [])
-      .filter(slot => slot.day === today && !slot.is_break)
+      .filter(slot => normalizeDayKey(slot.day || slot.day_name || slot.week_day) === today && !slot.is_break)
       .forEach(slot => {
+        const slotTime = resolveSlotTime(slot, timetable.period_config);
         todayClasses.push({
           id: slot.id,
-          time: `${slot.start_time} - ${slot.end_time}`,
-          subject: slot.subject_name,
-          teacher: slot.teacher_name,
+          period: slot.period || slot.period_no,
+          start_time: slotTime.start,
+          time: `${slotTime.start} - ${slotTime.end}`,
+          subject: slot.subject_name || slot.subject || 'Subject',
+          teacher: slot.teacher_name || slot.teacher || slot.teacher_id || 'N/A',
           room: slot.room_no,
           status: 'upcoming' // Can be 'ongoing', 'completed', 'upcoming'
         });
       });
   });
 
-  return todayClasses.sort((a, b) => a.start_time?.localeCompare(b.start_time || ''));
+  return todayClasses.sort((a, b) => {
+    const aTime = String(a.start_time || '');
+    const bTime = String(b.start_time || '');
+    if (aTime && bTime && aTime !== '--:--' && bTime !== '--:--') {
+      return aTime.localeCompare(bTime);
+    }
+    return Number(a.period || 0) - Number(b.period || 0);
+  });
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -503,17 +1022,36 @@ export const getMyAssignments = async (studentId, instituteId, filters = {}, pag
   const student = await getStudentProfile(studentId, instituteId);
 
   // Find assignments for student's class
+  const assignmentAudience = [{ target_type: 'all' }];
+  if (student.class_id) {
+    assignmentAudience.push({ target_type: 'class', target_ids: { [Op.contains]: [student.class_id] } });
+  }
+  if (student.section_id) {
+    assignmentAudience.push({ target_type: 'section', target_ids: { [Op.contains]: [student.section_id] } });
+  }
+
+  const directClassSectionAudience = buildAssignmentDirectAudience(student);
+
   const where = {
     institute_id: instituteId,
-    is_published: true,
     [Op.or]: [
-      { target_type: 'class', target_ids: { [Op.contains]: [student.class_id] } },
-      { target_type: 'section', target_ids: { [Op.contains]: [student.section_id] } },
-      { target_type: 'all' }
+      ...assignmentAudience,
+      ...directClassSectionAudience
+    ],
+    [Op.and]: [
+      {
+        [Op.or]: [
+          { is_published: true },
+          { status: 'published' }
+        ]
+      }
     ]
   };
 
   if (filters.subject) where.subject = filters.subject;
+  if (filters.type) {
+    where.type = filters.type === 'notes' ? 'project' : filters.type;
+  }
   if (filters.status === 'pending') {
     where.due_date = { [Op.gte]: new Date() };
   }
@@ -546,37 +1084,85 @@ export const getMyAssignments = async (studentId, instituteId, filters = {}, pag
   const submissionsMap = {};
   submissions.forEach(s => { submissionsMap[s.assignment_id] = s; });
 
-  const assignmentsWithStatus = rows.map(assignment => {
-    const submission = submissionsMap[assignment.id];
-    const isOverdue = new Date(assignment.due_date) < new Date();
+  // //
+  // const assignmentsWithStatus = rows.map(assignment => {
+  //   const submission = submissionsMap[assignment.id];
+  //   const isOverdue = new Date(assignment.due_date) < new Date();
     
-    let status = 'pending';
-    if (submission) {
-      if (submission.status === 'graded') status = 'graded';
-      else if (submission.status === 'submitted') status = 'submitted';
-      else if (submission.status === 'late') status = 'late';
-    } else if (isOverdue) {
-      status = 'overdue';
-    }
+  //   let status = 'pending';
+  //   if (submission) {
+  //     if (submission.status === 'graded') status = 'graded';
+  //     else if (submission.status === 'submitted') status = 'submitted';
+  //     else if (submission.status === 'late') status = 'late';
+  //   } else if (isOverdue) {
+  //     status = 'overdue';
+  //   }
 
-    return {
-      id: assignment.id,
-      title: assignment.title,
-      subject: assignment.subject,
-      teacher: assignment.teacher ? `${assignment.teacher.first_name} ${assignment.teacher.last_name}` : 'Unknown',
-      due_date: assignment.due_date,
-      total_marks: assignment.total_marks,
-      status,
-      submission: submission ? {
-        id: submission.id,
-        submitted_at: submission.submitted_at,
-        marks: submission.marks,
-        feedback: submission.feedback,
-        files: submission.files
-      } : null,
-      attachments: assignment.attachments
-    };
-  });
+  //   return {
+  //     id: assignment.id,
+  //     title: assignment.title,
+  //     subject: assignment.subject,
+  //     teacher: assignment.teacher ? `${assignment.teacher.first_name} ${assignment.teacher.last_name}` : 'Unknown',
+  //     due_date: assignment.due_date,
+  //     total_marks: assignment.total_marks,
+  //     status,
+  //     submission: submission ? {
+  //       id: submission.id,
+  //       submitted_at: submission.submitted_at,
+  //       marks: submission.marks,
+  //       feedback: submission.feedback,
+  //       files: submission.files
+  //     } : null,
+  //     attachments: assignment.attachments
+  //   };
+  // });
+  // In getMyAssignments function, enhance the response format
+
+const assignmentsWithStatus = rows.map(assignment => {
+  const submission = submissionsMap[assignment.id];
+  const isOverdue = new Date(assignment.due_date) < new Date();
+  
+  let status = 'pending';
+  if (submission) {
+    if (submission.status === 'graded') status = 'graded';
+    else if (submission.status === 'submitted') status = 'submitted';
+    else if (submission.status === 'late') status = 'late';
+  } else if (isOverdue) {
+    status = 'overdue';
+  }
+
+  return {
+    id: assignment.id,
+    title: assignment.title,
+    description: assignment.description,
+    subject: assignment.subject,
+    teacher: assignment.teacher ? `${assignment.teacher.first_name} ${assignment.teacher.last_name}` : 'Unknown',
+    due_date: assignment.due_date,
+    total_marks: assignment.total_marks,
+    passing_marks: assignment.passing_marks,
+    instructions: assignment.instructions,
+    allow_late_submission: assignment.allow_late_submission,
+    late_submission_penalty: assignment.late_submission_penalty,
+    max_files: assignment.max_files,
+    max_file_size: assignment.max_file_size,
+    allowed_file_types: assignment.allowed_file_types,
+    estimated_time: assignment.estimated_time,
+    difficulty_level: assignment.difficulty_level,
+    status,
+    submission: submission ? {
+      id: submission.id,
+      submitted_at: submission.submitted_at,
+      marks: submission.marks,
+      grade: submission.grade,
+      feedback: submission.feedback,
+      files: submission.files,
+      submission_text: submission.submission_text,
+      attempt_number: submission.attempt_number,
+      is_resubmission: submission.is_resubmission
+    } : null,
+    attachments: assignment.attachments
+  };
+});
 
   return {
     data: assignmentsWithStatus,
@@ -596,14 +1182,31 @@ export const getUpcomingAssignments = async (studentId, instituteId, limit = 5) 
   const student = await getStudentProfile(studentId, instituteId);
   const today = new Date();
 
+  const assignmentAudience = [{ target_type: 'all' }];
+  if (student.class_id) {
+    assignmentAudience.push({ target_type: 'class', target_ids: { [Op.contains]: [student.class_id] } });
+  }
+  if (student.section_id) {
+    assignmentAudience.push({ target_type: 'section', target_ids: { [Op.contains]: [student.section_id] } });
+  }
+
+  const directClassSectionAudience = buildAssignmentDirectAudience(student);
+
   const assignments = await Assignment.findAll({
     where: {
       institute_id: instituteId,
-      is_published: true,
       due_date: { [Op.gte]: today },
       [Op.or]: [
-        { target_type: 'class', target_ids: { [Op.contains]: [student.class_id] } },
-        { target_type: 'all' }
+        ...assignmentAudience,
+        ...directClassSectionAudience
+      ],
+      [Op.and]: [
+        {
+          [Op.or]: [
+            { is_published: true },
+            { status: 'published' }
+          ]
+        }
       ]
     },
     order: [['due_date', 'ASC']],
@@ -639,35 +1242,51 @@ export const getUpcomingAssignments = async (studentId, instituteId, limit = 5) 
     }));
 };
 
+// Update the submitAssignment function
+
 /**
- * Submit assignment
+ * Submit assignment with text and multiple files
  */
-export const submitAssignment = async (assignmentId, studentId, instituteId, files = []) => {
+export const submitAssignment = async (assignmentId, studentId, instituteId, files = [], submissionText = null) => {
   const transaction = await sequelize.transaction();
 
   try {
     // Check if assignment exists and is published
     const assignment = await Assignment.findOne({
-      where: { id: assignmentId, institute_id: instituteId, is_published: true }
+      where: { 
+        id: assignmentId, 
+        institute_id: instituteId,
+        [Op.or]: [
+          { is_published: true },
+          { status: 'published' }
+        ]
+      },
+      transaction
     });
 
-    if (!assignment) throw new Error('Assignment not found');
+    if (!assignment) throw new Error('Assignment not found or not published');
 
     // Check if already submitted
     const existing = await AssignmentSubmission.findOne({
-      where: { assignment_id: assignmentId, student_id: studentId }
+      where: { assignment_id: assignmentId, student_id: studentId },
+      transaction
     });
 
-    if (existing) throw new Error('You have already submitted this assignment');
+    if (existing && existing.status !== 'draft') {
+      throw new Error('You have already submitted this assignment');
+    }
 
     // Upload files
     const submissionFiles = [];
     if (files?.length) {
       for (const file of files) {
         const folder = `the-clouds-academy/${instituteId}/submissions/${assignmentId}/${studentId}`;
+        
+        // Use 'raw' for all file types to preserve original format
         const result = await uploadToCloudinary(file.path, folder, {
           resource_type: 'auto',
-          use_filename: true
+          use_filename: true,
+          unique_filename: true
         });
 
         submissionFiles.push({
@@ -686,18 +1305,55 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
 
     // Check if late
     const isLate = new Date(assignment.due_date) < new Date();
+    const allowLate = assignment.allow_late_submission === true;
 
-    // Create submission
-    const submission = await AssignmentSubmission.create({
-      id: uuidv4(),
-      assignment_id: assignmentId,
-      institute_id: instituteId,
-      student_id: studentId,
-      files: submissionFiles,
-      submitted_at: new Date(),
-      status: isLate ? 'late' : 'submitted',
-      attempt_number: 1,
-      is_resubmission: false
+    let status = 'submitted';
+    if (isLate) {
+      status = allowLate ? 'late' : 'overdue';
+    }
+
+    // Create or update submission
+    let submission;
+    if (existing) {
+      // Update existing submission (resubmission)
+      const existingFiles = existing.files || [];
+      await existing.update({
+        files: [...existingFiles, ...submissionFiles],
+        submission_text: submissionText || existing.submission_text,
+        submitted_at: new Date(),
+        status: status,
+        attempt_number: existing.attempt_number + 1,
+        is_resubmission: true
+      }, { transaction });
+      submission = existing;
+    } else {
+      // Create new submission
+      submission = await AssignmentSubmission.create({
+        id: uuidv4(),
+        assignment_id: assignmentId,
+        institute_id: instituteId,
+        student_id: studentId,
+        files: submissionFiles,
+        submission_text: submissionText,
+        submitted_at: new Date(),
+        status: status,
+        attempt_number: 1,
+        is_resubmission: false
+      }, { transaction });
+    }
+
+    // Update assignment stats
+    const totalSubmissions = await AssignmentSubmission.count({
+      where: { assignment_id: assignmentId },
+      transaction
+    });
+
+    await assignment.update({
+      stats: {
+        ...assignment.stats,
+        submitted: totalSubmissions,
+        pending: Math.max(0, (assignment.stats?.total_students || 0) - totalSubmissions)
+      }
     }, { transaction });
 
     await transaction.commit();
@@ -706,7 +1362,9 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
       id: submission.id,
       submitted_at: submission.submitted_at,
       status: submission.status,
-      files: submissionFiles
+      files: submissionFiles,
+      submission_text: submission.submission_text,
+      attempt_number: submission.attempt_number
     };
   } catch (error) {
     await transaction.rollback();
@@ -727,27 +1385,38 @@ export const getMyResults = async (studentId, instituteId, filters = {}) => {
     student_id: studentId
   };
 
-  if (filters.exam_type) where.exam_type = filters.exam_type;
-  if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
+  const examWhere = {};
+  if (filters.exam_type) examWhere.type = filters.exam_type;
+  if (filters.academic_year_id) examWhere.academic_year_id = filters.academic_year_id;
 
   const results = await ExamResult.findAll({
     where,
-    order: [['exam_date', 'DESC']],
+    order: [['created_at', 'DESC']],
     include: [
-      { model: models.Exam, as: 'exam', attributes: ['id', 'name', 'exam_type'] }
+      {
+        model: models.Exam,
+        as: 'Exam',
+        attributes: ['id', 'name', 'type', 'start_date', 'total_marks', 'academic_year_id'],
+        ...(Object.keys(examWhere).length ? { where: examWhere } : {})
+      },
+      { model: models.Subject, attributes: ['id', 'name'] }
     ]
   });
 
   // Group by exam
   const examGroups = {};
   results.forEach(r => {
+    const examRef = r.Exam || r.exam;
+    const obtainedMarks = Number(r.obtained_marks ?? r.marks_obtained ?? 0);
+    const totalMarks = Number(r.total_marks ?? r.full_marks ?? 0);
+
     const examId = r.exam_id;
     if (!examGroups[examId]) {
       examGroups[examId] = {
         exam_id: examId,
-        exam_name: r.exam?.name,
-        exam_type: r.exam?.exam_type,
-        date: r.exam_date,
+        exam_name: examRef?.name,
+        exam_type: examRef?.type || examRef?.exam_type,
+        date: examRef?.start_date || r.created_at,
         subjects: [],
         total_marks: 0,
         obtained_marks: 0,
@@ -756,14 +1425,14 @@ export const getMyResults = async (studentId, instituteId, filters = {}) => {
       };
     }
     examGroups[examId].subjects.push({
-      subject: r.subject_name,
-      marks: r.obtained_marks,
-      total: r.total_marks,
+      subject: r.Subject?.name || r.subject_name || 'Subject',
+      marks: obtainedMarks,
+      total: totalMarks,
       grade: r.grade,
       remarks: r.remarks
     });
-    examGroups[examId].total_marks += r.total_marks;
-    examGroups[examId].obtained_marks += r.obtained_marks;
+    examGroups[examId].total_marks += totalMarks;
+    examGroups[examId].obtained_marks += obtainedMarks;
   });
 
   // Calculate percentages
@@ -780,32 +1449,37 @@ export const getMyResults = async (studentId, instituteId, filters = {}) => {
 export const getRecentResults = async (studentId, instituteId, limit = 3) => {
   const results = await ExamResult.findAll({
     where: { school_id: instituteId, student_id: studentId },
-    order: [['exam_date', 'DESC']],
+    order: [['created_at', 'DESC']],
     limit,
     include: [
-      { model: models.Exam, as: 'exam', attributes: ['name'] }
+      { model: models.Exam, as: 'Exam', attributes: ['name', 'start_date', 'total_marks'] },
+      { model: models.Subject, attributes: ['id', 'name'] }
     ]
   });
 
   const examMap = {};
   results.forEach(r => {
+    const examRef = r.Exam || r.exam;
+    const obtainedMarks = Number(r.obtained_marks ?? r.marks_obtained ?? 0);
+    const totalMarks = Number(r.total_marks ?? r.full_marks ?? 0);
+
     const examId = r.exam_id;
     if (!examMap[examId]) {
       examMap[examId] = {
-        exam_name: r.exam?.name,
-        date: r.exam_date,
+        exam_name: examRef?.name,
+        date: examRef?.start_date || r.created_at,
         subjects: [],
         total: 0,
         obtained: 0
       };
     }
     examMap[examId].subjects.push({
-      subject: r.subject_name,
-      marks: r.obtained_marks,
-      total: r.total_marks
+      subject: r.Subject?.name || r.subject_name || 'Subject',
+      marks: obtainedMarks,
+      total: totalMarks
     });
-    examMap[examId].total += r.total_marks;
-    examMap[examId].obtained += r.obtained_marks;
+    examMap[examId].total += totalMarks;
+    examMap[examId].obtained += obtainedMarks;
   });
 
   return Object.values(examMap).map(exam => ({
@@ -909,15 +1583,33 @@ export const getNotices = async (instituteId, filters = {}, pagination = {}) => 
   const { page = 1, limit = 10 } = pagination;
   const offset = (page - 1) * limit;
 
-  const where = {
-    institute_id: instituteId,
-    is_published: true,
-    target_audience: { [Op.overlap]: ['student', 'all'] }
-  };
+  if (!NoticeModel) {
+    return {
+      data: [],
+      pagination: {
+        total: 0,
+        page,
+        limit,
+        totalPages: 0
+      }
+    };
+  }
 
-  if (filters.priority) where.priority = filters.priority;
+  const isNoticeTable = NoticeModel === Notice;
 
-  const { count, rows } = await Notice.findAndCountAll({
+  const where = isNoticeTable
+    ? {
+      institute_id: instituteId,
+      is_published: true,
+      target_audience: { [Op.overlap]: ['student', 'all'] }
+    }
+    : {
+      school_id: instituteId
+    };
+
+  if (filters.priority && isNoticeTable) where.priority = filters.priority;
+
+  const { count, rows } = await NoticeModel.findAndCountAll({
     where,
     order: [['created_at', 'DESC']],
     limit,
@@ -925,14 +1617,7 @@ export const getNotices = async (instituteId, filters = {}, pagination = {}) => 
   });
 
   return {
-    data: rows.map(n => ({
-      id: n.id,
-      title: n.title,
-      content: n.content,
-      priority: n.priority,
-      created_at: n.created_at,
-      attachments: n.attachments
-    })),
+    data: rows.map(mapNoticeRow),
     pagination: {
       total: count,
       page,
@@ -946,23 +1631,34 @@ export const getNotices = async (instituteId, filters = {}, pagination = {}) => 
  * Get recent notices for dashboard
  */
 export const getRecentNotices = async (instituteId, limit = 5) => {
-  const notices = await Notice.findAll({
-    where: {
-      institute_id: instituteId,
-      is_published: true,
-      target_audience: { [Op.overlap]: ['student', 'all'] }
-    },
+  if (!NoticeModel) return [];
+
+  const isNoticeTable = NoticeModel === Notice;
+
+  const notices = await NoticeModel.findAll({
+    where: isNoticeTable
+      ? {
+        institute_id: instituteId,
+        is_published: true,
+        target_audience: { [Op.overlap]: ['student', 'all'] }
+      }
+      : {
+        school_id: instituteId
+      },
     order: [['created_at', 'DESC']],
     limit
   });
 
-  return notices.map(n => ({
-    id: n.id,
-    title: n.title,
-    content: n.content?.substring(0, 100) + '...',
-    priority: n.priority,
-    date: format(new Date(n.created_at), 'dd MMM yyyy')
-  }));
+  return notices.map((n) => {
+    const mapped = mapNoticeRow(n);
+    return {
+      id: mapped.id,
+      title: mapped.title,
+      content: mapped.content ? `${String(mapped.content).substring(0, 100)}...` : '',
+      priority: mapped.priority,
+      date: format(new Date(mapped.created_at), 'dd MMM yyyy')
+    };
+  });
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

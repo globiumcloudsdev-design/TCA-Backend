@@ -6,31 +6,6 @@
     "auditLog": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\.439098c30cdb2442ec4d6912027d9836468c19db-audit.json",
     "files": [
         {
-            "date": 1772839387552,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-07.log",
-            "hash": "e832fe86cd60e1061b227a3dd651744a708e77f7f13f92ec2eb6a4b0d1b7b8c7"
-        },
-        {
-            "date": 1772961116428,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-08.log",
-            "hash": "09ba78b1e27b291bd59873225e136e9a45f21c962ec3c96316be0104354aca8c"
-        },
-        {
-            "date": 1773029753163,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-09.log",
-            "hash": "7eb8c21838f61e4da4a7ed265e92fd1c489f0cdf419e83f5615429601ff60cff"
-        },
-        {
-            "date": 1773082992063,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-10.log",
-            "hash": "222ca843a5fe1d2ebde6637fe5b78281a5d0401bc25091c88ade264f59f78c13"
-        },
-        {
-            "date": 1773200289953,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-11.log",
-            "hash": "736e5ef9b259f3168cb96e523fec8294b26b39f74e0f6807f8b4dfce96fac50f"
-        },
-        {
             "date": 1773309373066,
             "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-12.log",
             "hash": "621ed6de61a4542343e87e661e1d6d7d0209ee61ac1e9e634f232b6a731fa29c"
@@ -59,6 +34,46 @@
             "date": 1773720974387,
             "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-17.log",
             "hash": "f025970c36831386d3c8010a8cd3d78dad7e5047df278eefa931fcbd3cac2377"
+        },
+        {
+            "date": 1773837916106,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-18.log",
+            "hash": "6ba8e63a124fc52cbe866164953bc39ab64e1e6ab2b6c73769912d78c7c8bd7c"
+        },
+        {
+            "date": 1773906709369,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-19.log",
+            "hash": "8ad60d87a1ec85ebb32cc3702a1848afa693d6bbb100c941cafb8f2847e08c52"
+        },
+        {
+            "date": 1773946800554,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-20.log",
+            "hash": "6cb0359692e4bcb93e81857a969227388a3a006a6d5c10380791ca996da04260"
+        },
+        {
+            "date": 1774170568886,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-22.log",
+            "hash": "13ebb2feed7eda26d235b148ddc55d64bbb5fb50eac013d593f4112fb2262539"
+        },
+        {
+            "date": 1774259512981,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-23.log",
+            "hash": "25074776015bd2289e3d683f623c06bcf0c19690b5c351c499200775e97a712c"
+        },
+        {
+            "date": 1774345426174,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-24.log",
+            "hash": "a09288887b5c6c687063d4981f35db5dbeb0f2212f89a302557ac0d4db2309a7"
+        },
+        {
+            "date": 1774427998272,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-25.log",
+            "hash": "583a74d0a20772bb3bf613333d06b0ba43c74f17bb3c14ffdb2470b007422b67"
+        },
+        {
+            "date": 1774465504809,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-03-26.log",
+            "hash": "efef5cc250080d27fbaebb63d78071ef2d548e35b6920ed0a22d4abe59bab27d"
         }
     ],
     "hashType": "sha256"

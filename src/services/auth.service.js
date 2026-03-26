@@ -16,6 +16,7 @@ import User from '../models/postgres/User.model.js';
 import Role from '../models/postgres/Role.model.js';
 import Institute from '../models/postgres/Institute.model.js';
 import InstituteType from '../models/postgres/InstituteType.model.js';
+import Branch from '../models/postgres/Branch.model.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../config/auth.js';
 import { AppError } from '../utils/lib/AppError.js';
 import { hashPassword, comparePassword } from '../utils/helpers/password.helper.js';
@@ -25,11 +26,47 @@ import logger from '../config/logger.js';
 const USER_TYPE_TO_KEY = {
   MASTER_ADMIN:    'master',
   INSTITUTE_ADMIN: 'instituteAdmin',
-  BRANCH_ADMIN:    'branchAdmin',      // ✅ Added for branch admins
+  BRANCH_ADMIN:    'branchAdmin',
   TEACHER:         'teacher',
   STUDENT:         'student',
   PARENT:          'parent',
-  STAFF:           'staff',            // ✅ Added for staff members
+  STAFF:           'staff',
+};
+
+/**
+ * Helper function to normalize settings (parse if string)
+ */
+const normalizeSettings = (settings) => {
+  if (!settings) {
+    return {
+      has_branches: false,
+      enable_parent_portal: true,
+      enable_teacher_portal: true,
+      enable_student_portal: true,
+      enable_sms_notifications: false
+    };
+  }
+  
+  // If settings is a string, parse it
+  if (typeof settings === 'string') {
+    try {
+      const parsed = JSON.parse(settings);
+      logger.debug('Parsed settings from string:', parsed);
+      return parsed;
+    } catch (e) {
+      logger.error('Error parsing settings JSON:', e);
+      return {
+        has_branches: false,
+        enable_parent_portal: true,
+        enable_teacher_portal: true,
+        enable_student_portal: true,
+        enable_sms_notifications: false
+      };
+    }
+  }
+  
+  // Already an object, return as is
+  return settings;
 };
 
 /**
@@ -37,117 +74,313 @@ const USER_TYPE_TO_KEY = {
  * @param {string} loginId  email address OR registration_no
  * @param {string} password plain-text password
  */
+/**
+ * Login — Returns ALL accounts with this email/registration_no
+ * Frontend will show selection modal if multiple accounts
+ */
 export const loginService = async (loginId, password) => {
-  // ------------------------------------------------------------------
-  // 1. Find user by email or registration_no
-  // Use unscoped() to bypass defaultScope's password_hash exclusion
-  // ------------------------------------------------------------------
-  let user;
+  // 1. Find ALL users with this email OR registration_no
+  let users;
   if (loginId.includes('@')) {
-    user = await User.unscoped().findOne({ where: { email: loginId } });
-  } else {
-    user = await User.unscoped().findOne({ where: { registration_no: loginId } });
-  }
-
-  if (!user) throw new AppError('Invalid credentials.', 401);
-  if (!user.is_active) throw new AppError('Account is deactivated. Contact your administrator.', 403);
-
-  // ------------------------------------------------------------------
-  // 2. Verify password
-  // ------------------------------------------------------------------
-  const isMatch = await comparePassword(password, user.password_hash);
-  if (!isMatch) throw new AppError('Invalid credentials.', 401);
-
-  // ------------------------------------------------------------------
-  // 3. Record last login
-  // ------------------------------------------------------------------
-  await user.update({ last_login_at: new Date() });
-
-  // ------------------------------------------------------------------
-  // 4. Resolve permissions from role JSONB or direct permissions
-  // ------------------------------------------------------------------
-  let roleData = null;
-  let permissions = [];
-
-  // 🔥 FIX: If user has direct permissions (branch_admin/staff with custom perms)
-  if (user.permissions && user.permissions.length > 0) {
-    permissions = user.permissions;
-  }
-  // Otherwise get from role
-  else if (user.role_id) {
-    const role = await Role.findByPk(user.role_id);
-    if (role) {
-      roleData = { id: role.id, name: role.name, code: role.code };
-      
-      // Get the correct permission key based on user_type
-      const typeKey = USER_TYPE_TO_KEY[user.user_type] ?? 'instituteAdmin';
-      const perms = role.permissions?.[typeKey] ?? [];
-      
-      // Expand 'ALL' flag into explicit list; keep as-is otherwise
-      permissions = perms.includes('ALL') ? ['ALL'] : perms;
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // 5. Load institute with its type (for non-master users)
-  // ------------------------------------------------------------------
-  let instituteData = null;
-  if (user.school_id) {
-    const inst = await Institute.findByPk(user.school_id, {
-      include: [{ model: InstituteType, as: 'type', attributes: ['id', 'name', 'slug', 'icon'] }],
-      attributes: ['id', 'institute_name', 'institute_code', 'institute_email',
-                   'institute_contact', 'institute_type_id', 'is_active',
-                   'subscription_status', 'settings'],
+    users = await User.unscoped().findAll({ 
+      where: { email: loginId },
+      include: [
+        { model: Role, as: 'Role' },
+        { model: Institute, as: 'institute', include: [{ model: InstituteType, as: 'type' }] },
+        { model: Branch, as: 'branch' }
+      ]
     });
-    if (inst) {
-      instituteData = {
-        id:               inst.id,
-        name:             inst.institute_name,
-        code:             inst.institute_code,
-        email:            inst.institute_email,
-        phone:            inst.institute_contact,
-        institute_type:   inst.type?.slug   ?? null,
-        institute_type_name: inst.type?.name ?? null,
-        institute_type_icon: inst.type?.icon ?? null,
-        is_active:        inst.is_active,
-        subscription_status: inst.subscription_status,
-        settings:         inst.settings,
-      };
+  } else {
+    users = await User.unscoped().findAll({ 
+      where: { registration_no: loginId },
+      include: [
+        { model: Role, as: 'Role' },
+        { model: Institute, as: 'institute', include: [{ model: InstituteType, as: 'type' }] },
+        { model: Branch, as: 'branch' }
+      ]
+    });
+  }
+
+  if (!users || users.length === 0) {
+    throw new AppError('No account found with these credentials.', 401);
+  }
+
+  // 2. Verify password for each account
+  const validAccounts = [];
+  
+  for (const user of users) {
+    if (!user.is_active) continue;
+    
+    const isMatch = await comparePassword(password, user.password_hash);
+    if (isMatch) {
+      // Get permissions for this account
+      let permissions = [];
+      if (user.permissions && user.permissions.length > 0) {
+        permissions = user.permissions;
+      } else if (user.role_id) {
+        const role = await Role.findByPk(user.role_id);
+        if (role) {
+          const typeKey = USER_TYPE_TO_KEY[user.user_type] ?? 'instituteAdmin';
+          const perms = role.permissions?.[typeKey] ?? [];
+          permissions = perms.includes('ALL') ? ['ALL'] : perms;
+        }
+      }
+      
+      // Get institute data
+      let instituteData = null;
+      if (user.institute) {
+        instituteData = {
+          id: user.institute.id,
+          name: user.institute.institute_name,
+          code: user.institute.institute_code,
+          logo_url: user.institute.institute_logo_url,
+          institute_type: user.institute.type?.slug || null,
+          settings: normalizeSettings(user.institute.settings)
+        };
+      }
+      
+      validAccounts.push({
+        id: user.id,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        email: user.email,
+        registration_no: user.registration_no,
+        user_type: user.user_type,
+        staff_type: user.staff_type,
+        school_id: user.school_id,
+        branch_id: user.branch_id,
+        avatar_url: user.avatar_url,
+        permissions: permissions,
+        institute: instituteData,
+        role: user.Role ? {
+          id: user.Role.id,
+          name: user.Role.name,
+          code: user.Role.code
+        } : null,
+        // Display info for selection UI
+        display_name: `${user.first_name} ${user.last_name}`,
+        display_role: getUserTypeDisplay(user.user_type, user.staff_type),
+        display_icon: getUserTypeIcon(user.user_type),
+        is_active: user.is_active,
+        last_login_at: user.last_login_at
+      });
     }
   }
 
-  // ------------------------------------------------------------------
-  // 6. Sign tokens
-  // ------------------------------------------------------------------
+  if (validAccounts.length === 0) {
+    throw new AppError('Invalid credentials.', 401);
+  }
+
+  // 3. If ONLY ONE account, login directly
+  if (validAccounts.length === 1) {
+    const user = users.find(u => u.id === validAccounts[0].id);
+    await user.update({ last_login_at: new Date() });
+    
+    const tokenPayload = {
+      userId: user.id,
+      schoolId: user.school_id,
+      userType: user.user_type,
+      branchId: user.branch_id,
+    };
+    
+    const accessToken = signAccessToken(tokenPayload);
+    const refreshToken = signRefreshToken({ userId: user.id });
+    
+    // Get full user profile
+    const userProfile = await getUserProfile(user.id);
+    
+    return {
+      accessToken,
+      refreshToken,
+      user: userProfile,
+      accounts: validAccounts,
+      hasMultipleAccounts: false
+    };
+  }
+  
+  // 4. If MULTIPLE accounts, return accounts list for selection
+  logger.info(`🔐 Multiple accounts found for ${loginId}: ${validAccounts.map(a => `${a.user_type} (${a.id})`).join(', ')}`);
+  
+  return {
+    accounts: validAccounts,
+    hasMultipleAccounts: true,
+    message: 'Multiple accounts found. Please select which account to use.'
+  };
+};
+
+/**
+ * Select specific account after login
+ */
+export const selectAccountService = async (accountId, email, registrationNo) => {
+  // Find the selected account
+  const user = await User.unscoped().findByPk(accountId, {
+    include: [
+      { model: Role, as: 'Role' },
+      { model: Institute, as: 'institute', include: [{ model: InstituteType, as: 'type' }] },
+      { model: Branch, as: 'branch' }
+    ]
+  });
+  
+  if (!user) {
+    throw new AppError('Account not found.', 404);
+  }
+  
+  // Verify this email/reg_no matches the selected account
+  let isValid = false;
+  if (email && user.email === email) isValid = true;
+  if (registrationNo && user.registration_no === registrationNo) isValid = true;
+  
+  // Also check if any other account with same email exists (for security)
+  if (!isValid) {
+    const otherAccounts = await User.findAll({
+      where: {
+        [Op.or]: [
+          { email: email },
+          { registration_no: registrationNo }
+        ]
+      }
+    });
+    
+    const isLinked = otherAccounts.some(acc => acc.id === user.id);
+    if (!isLinked) {
+      throw new AppError('Account not linked to this email/registration number.', 403);
+    }
+  }
+  
+  if (!user.is_active) {
+    throw new AppError('Account is deactivated. Contact administrator.', 403);
+  }
+  
+  // Update last login
+  await user.update({ last_login_at: new Date() });
+  
+  // Generate tokens for selected account
   const tokenPayload = {
-    userId:   user.id,
+    userId: user.id,
     schoolId: user.school_id,
     userType: user.user_type,
+    branchId: user.branch_id,
   };
-
-  const accessToken  = signAccessToken(tokenPayload);
+  
+  const accessToken = signAccessToken(tokenPayload);
   const refreshToken = signRefreshToken({ userId: user.id });
-
-  logger.info(`🔐 Login: ${user.email || user.registration_no} [${user.user_type}]`);
-
+  
+  const userProfile = await getUserProfile(user.id);
+  
   return {
     accessToken,
     refreshToken,
-    user: {
-      id:             user.id,
-      first_name:     user.first_name,
-      last_name:      user.last_name,
-      email:          user.email,
-      registration_no: user.registration_no,
-      user_type:      user.user_type,
-      staff_type:     user.staff_type,           // ✅ Important for branch heads
-      school_id:      user.school_id,
-      branch_id:      user.branch_id,             // ✅ Important for branch users
-      role:           roleData,
-      permissions,                                 // ✅ Now properly populated
-      avatar_url:     user.avatar_url,
-      institute:      instituteData,
-    },
+    user: userProfile
+  };
+};
+
+/**
+ * Helper: Get user permissions
+ */
+const getUserPermissions = async (user) => {
+  let permissions = [];
+  
+  if (user.permissions && user.permissions.length > 0) {
+    permissions = user.permissions;
+  } else if (user.role_id) {
+    const role = await Role.findByPk(user.role_id);
+    if (role) {
+      const typeKey = USER_TYPE_TO_KEY[user.user_type] ?? 'instituteAdmin';
+      const perms = role.permissions?.[typeKey] ?? [];
+      permissions = perms.includes('ALL') ? ['ALL'] : perms;
+    }
+  }
+  
+  return permissions;
+};
+
+/**
+ * Helper: Get user display name for role
+ */
+const getUserTypeDisplay = (userType, staffType = null) => {
+  const typeMap = {
+    MASTER_ADMIN: 'Master Admin',
+    INSTITUTE_ADMIN: 'Institute Admin',
+    BRANCH_ADMIN: 'Branch Admin',
+    TEACHER: 'Teacher',
+    STUDENT: 'Student',
+    PARENT: 'Parent',
+    STAFF: staffType || 'Staff'
+  };
+  return typeMap[userType] || userType;
+};
+
+/**
+ * Helper: Get user type icon
+ */
+const getUserTypeIcon = (userType) => {
+  const iconMap = {
+    MASTER_ADMIN: '👑',
+    INSTITUTE_ADMIN: '🏢',
+    BRANCH_ADMIN: '🌿',
+    TEACHER: '👨‍🏫',
+    STUDENT: '👨‍🎓',
+    PARENT: '👪',
+    STAFF: '👔'
+  };
+  return iconMap[userType] || '👤';
+};
+
+/**
+ * Helper: Get full user profile
+ */
+const getUserProfile = async (userId) => {
+  const user = await User.findByPk(userId, {
+    include: [
+      { model: Role, as: 'Role' },
+      { model: Institute, as: 'institute', include: [{ model: InstituteType, as: 'type' }] },
+      { model: Branch, as: 'branch' }
+    ]
+  });
+  
+  if (!user) return null;
+  
+  const permissions = await getUserPermissions(user);
+  
+  let instituteData = null;
+  if (user.institute) {
+    instituteData = {
+      id: user.institute.id,
+      name: user.institute.institute_name,
+      code: user.institute.institute_code,
+      logo_url: user.institute.institute_logo_url,
+      institute_type: user.institute.type?.slug || null,
+      settings: normalizeSettings(user.institute.settings)
+    };
+  }
+  
+  let branchData = null;
+  if (user.branch) {
+    branchData = {
+      id: user.branch.id,
+      name: user.branch.branch_name,
+      code: user.branch.branch_code
+    };
+  }
+  
+  return {
+    id: user.id,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    email: user.email,
+    registration_no: user.registration_no,
+    user_type: user.user_type,
+    staff_type: user.staff_type,
+    school_id: user.school_id,
+    branch_id: user.branch_id,
+    role: user.Role ? { id: user.Role.id, name: user.Role.name, code: user.Role.code } : null,
+    permissions: permissions,
+    avatar_url: user.avatar_url,
+    institute: instituteData,
+    branch: branchData,
+    phone: user.phone,
+    is_active: user.is_active,
+    has_branch: !!user.branch_id
   };
 };
 
@@ -164,13 +397,17 @@ export const refreshTokenService = async (refreshToken) => {
     throw new AppError('Invalid or expired refresh token.', 401);
   }
 
-  const user = await User.findByPk(decoded.userId);
+  const user = await User.findByPk(decoded.userId, {
+    attributes: ['id', 'school_id', 'user_type', 'branch_id', 'is_active']
+  });
+  
   if (!user || !user.is_active) throw new AppError('User not found.', 401);
 
   const accessToken = signAccessToken({
     userId:   user.id,
     schoolId: user.school_id,
     userType: user.user_type,
+    branchId: user.branch_id,
   });
 
   return { accessToken };
@@ -209,7 +446,7 @@ export const resetPasswordService = async (token, newPassword) => {
   const passwordHash = await hashPassword(newPassword);
   await user.update({
     password_hash:          passwordHash,
-    email_verified:        true, // Mark email as verified on successful reset
+    email_verified:        true,
     password_reset_token:   null,
     password_reset_expires: null,
   });
@@ -217,4 +454,108 @@ export const resetPasswordService = async (token, newPassword) => {
   return user;
 };
 
-export default { loginService, refreshTokenService, forgotPasswordService, resetPasswordService };
+// backend/src/services/auth.service.js (ADD THIS)
+
+/**
+ * Get all accounts for an email WITHOUT verifying password
+ * Returns list of accounts with their basic info
+ */
+export const getAccountsByEmailService = async (email) => {
+  if (!email || !email.includes('@')) {
+    throw new AppError('Valid email is required', 400);
+  }
+  
+  const users = await User.unscoped().findAll({
+    where: { email: email.toLowerCase() },
+    attributes: [
+      'id', 'first_name', 'last_name', 'email', 'user_type', 
+      'staff_type', 'school_id', 'branch_id', 'avatar_url', 'is_active'
+    ],
+    include: [
+      { 
+        model: Institute, 
+        as: 'institute', 
+        attributes: ['id', 'institute_name', 'institute_code', 'institute_logo_url']
+      }
+    ]
+  });
+  
+  if (!users || users.length === 0) {
+    return { accounts: [], hasAccounts: false };
+  }
+  
+  const accounts = users.map(user => ({
+    id: user.id,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    email: user.email,
+    user_type: user.user_type,
+    staff_type: user.staff_type,
+    display_name: `${user.first_name} ${user.last_name}`,
+    display_role: getUserTypeDisplay(user.user_type, user.staff_type),
+    display_icon: getUserTypeIcon(user.user_type),
+    institute: user.institute ? {
+      id: user.institute.id,
+      name: user.institute.institute_name,
+      code: user.institute.institute_code,
+      logo_url: user.institute.institute_logo_url
+    } : null,
+    is_active: user.is_active
+  }));
+  
+  return { 
+    accounts, 
+    hasAccounts: accounts.length > 0,
+    accountCount: accounts.length 
+  };
+};
+
+/**
+ * Login with specific account ID and password
+ */
+export const loginWithAccountService = async (accountId, password) => {
+  const user = await User.unscoped().findByPk(accountId, {
+    include: [
+      { model: Role, as: 'Role' },
+      { model: Institute, as: 'institute', include: [{ model: InstituteType, as: 'type' }] },
+      { model: Branch, as: 'branch' }
+    ]
+  });
+  
+  if (!user) {
+    throw new AppError('Account not found.', 404);
+  }
+  
+  if (!user.is_active) {
+    throw new AppError('Account is deactivated. Contact administrator.', 403);
+  }
+  
+  const isMatch = await comparePassword(password, user.password_hash);
+  if (!isMatch) {
+    throw new AppError('Invalid password for this account.', 401);
+  }
+  
+  // Update last login
+  await user.update({ last_login_at: new Date() });
+  
+  // Generate tokens
+  const tokenPayload = {
+    userId: user.id,
+    schoolId: user.school_id,
+    userType: user.user_type,
+    branchId: user.branch_id,
+  };
+  
+  const accessToken = signAccessToken(tokenPayload);
+  const refreshToken = signRefreshToken({ userId: user.id });
+  
+  const userProfile = await getUserProfile(user.id);
+  
+  return {
+    accessToken,
+    refreshToken,
+    user: userProfile
+  };
+};
+
+export default { loginService, refreshTokenService, forgotPasswordService, resetPasswordService , selectAccountService, getAccountsByEmailService, loginWithAccountService };

@@ -20,6 +20,7 @@ import timetableRoutes from './timetable.routes.js'; // ✅ Yahan import karo
 import feeTemplateRoutes from './feeTemplate.routes.js'; // ✅ Yahan import karo
 import staffRoutes from './staff.routes.js'; // ✅ Yahan import karo
 import branchRoutes from './branch.routes.js'
+import parentRoutes from './parent.routes.js';
 import portalRoutes from './portal/index.js'; // ✅ Portal routes aggregator
 
 const router = Router();
@@ -44,6 +45,9 @@ router.use('/roles', roleRoutes);
 
 // ── Students ───────────────────────────────────────────────────────────────
 router.use('/students', studentRoutes);
+
+// ── Parents ────────────────────────────────────────────────────────────────
+router.use('/parents', parentRoutes);
 
 // ── Teachers ───────────────────────────────────────────────────────────────
 router.use('/teachers', teacherRoutes); // ✅ Mount teacher routes

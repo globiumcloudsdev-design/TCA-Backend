@@ -18,7 +18,7 @@
 import { Op } from 'sequelize';
 import models from '../../models/postgres/index.js';
 import { v4 as uuidv4 } from 'uuid';
-import { startOfDay, endOfDay, addDays, format, startOfWeek, endOfWeek } from 'date-fns';
+import { startOfDay, endOfDay, addDays, format, startOfWeek, endOfWeek, formatDistanceToNow } from 'date-fns';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 import { unlink } from 'fs/promises';
 
@@ -46,8 +46,47 @@ const resolveValidSectionId = async (sectionId, instituteId, classId = null, tra
   const where = { id: sectionId, school_id: instituteId };
   if (classId && UUID_REGEX.test(String(classId))) where.class_id = classId;
 
-  const section = await Section.findOne({ where, attributes: ['id'], transaction });
-  return section?.id || null;
+  const existing = await Section.findOne({ where, attributes: ['id'], transaction });
+  if (existing?.id) return existing.id;
+
+  // Fallback: some campuses keep sections only in Class.sections JSONB.
+  // If selected section exists there, materialize it into sections table.
+  if (classId && UUID_REGEX.test(String(classId))) {
+    const cls = await Class.findOne({
+      where: { id: classId, school_id: instituteId },
+      attributes: ['id', 'academic_year_id', 'sections'],
+      transaction
+    });
+
+    const jsonSections = Array.isArray(cls?.sections) ? cls.sections : [];
+    const matched = jsonSections.find((s) => String(s?.id || s?.section_id || '') === String(sectionId));
+
+    if (matched && cls?.academic_year_id) {
+      try {
+        await Section.create({
+          id: sectionId,
+          school_id: instituteId,
+          class_id: classId,
+          academic_year_id: cls.academic_year_id,
+          name: String(matched?.name || matched?.section_name || 'Section').slice(0, 10),
+          capacity: Number.isFinite(Number(matched?.capacity)) ? Number(matched.capacity) : 30,
+          room_number: matched?.room_no || matched?.room_number || null,
+          is_active: matched?.is_active !== false
+        }, { transaction });
+      } catch {
+        // Ignore race/duplicate and re-check below.
+      }
+
+      const hydrated = await Section.findOne({
+        where: { id: sectionId, school_id: instituteId },
+        attributes: ['id'],
+        transaction
+      });
+      return hydrated?.id || null;
+    }
+  }
+
+  return null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,6 +249,7 @@ export const getMyClasses = async (teacherId, instituteId) => {
 
   const classesMap = new Map();
   const classIds = new Set();
+  const slotAssignedClassIds = new Set();
   const sectionIds = new Set();
 
   timetables.forEach(timetable => {
@@ -502,16 +542,101 @@ export const getMyStudents = async (teacherId, instituteId, filters = {}, pagina
   });
 
   const classIds = new Set();
-  const sectionIds = new Set();
+  const slotAssignedClassIds = new Set();
+  const classSectionMap = new Map();
+  const classNoSectionAccess = new Set();
+  const classNameSectionMap = new Map();
+  const classNameNoSectionAccess = new Set();
+
+  // Include class/section ownership assignments (without slot dependency)
+  const [ownedClasses, ownedSections] = await Promise.all([
+    Class.findAll({
+      where: { school_id: instituteId, class_teacher_id: teacherId, is_active: true },
+      attributes: ['id']
+    }),
+    Section.findAll({
+      where: { school_id: instituteId, section_teacher_id: teacherId, is_active: true },
+      attributes: ['id', 'class_id']
+    })
+  ]);
+
+  ownedClasses.forEach((cls) => {
+    const classId = cls.id;
+    classIds.add(classId);
+    if (!classSectionMap.has(classId)) classSectionMap.set(classId, new Set());
+    classNoSectionAccess.add(classId);
+  });
+
+  ownedSections.forEach((sec) => {
+    const classId = sec.class_id;
+    if (!classId) return;
+    classIds.add(classId);
+    if (!classSectionMap.has(classId)) classSectionMap.set(classId, new Set());
+    classSectionMap.get(classId).add(sec.id);
+  });
+
   timetables.forEach(timetable => {
     const slots = timetable.slots || [];
-    const hasTeacher = slots.some(slot => slot.teacher_id === teacherId);
-    if (hasTeacher && timetable.entity_ids?.class_id) {
-      classIds.add(timetable.entity_ids.class_id);
+    const teacherSlots = slots.filter((slot) => String(slot.teacher_id || '') === String(teacherId));
+    const timetableCreatedByTeacher = String(timetable.created_by || '') === String(teacherId);
+    const hasTeacherAssignment = teacherSlots.length > 0 || timetableCreatedByTeacher;
+
+    if (hasTeacherAssignment && timetable.entity_ids?.class_id) {
+      const classId = timetable.entity_ids.class_id;
+      classIds.add(classId);
+      if (teacherSlots.length > 0) {
+        slotAssignedClassIds.add(classId);
+      }
+
+      if (!classSectionMap.has(classId)) {
+        classSectionMap.set(classId, new Set());
+      }
+
+      const sectionsForClass = classSectionMap.get(classId);
       if (timetable.entity_ids?.section_id) {
-        sectionIds.add(timetable.entity_ids.section_id);
+        sectionsForClass.add(timetable.entity_ids.section_id);
+      }
+
+      teacherSlots.forEach((slot) => {
+        if (slot.section_id) {
+          sectionsForClass.add(slot.section_id);
+        }
+      });
+
+      if (sectionsForClass.size === 0) {
+        classNoSectionAccess.add(classId);
       }
     }
+
+    // Fallback for legacy/partial timetables that only store names
+    const className = String(timetable.entity_ids?.class_name || '').trim().toLowerCase();
+    const sectionName = String(timetable.entity_ids?.section_name || '').trim().toLowerCase();
+    if (hasTeacherAssignment && className) {
+      if (!classNameSectionMap.has(className)) {
+        classNameSectionMap.set(className, new Set());
+      }
+
+      const sectionsForClassName = classNameSectionMap.get(className);
+      if (sectionName) {
+        sectionsForClassName.add(sectionName);
+      }
+
+      if (sectionsForClassName.size === 0) {
+        classNameNoSectionAccess.add(className);
+      }
+    }
+  });
+
+  // If teacher has slot assignment in a class, include all timetable-defined sections of that class.
+  // This helps when section-level timetable entries exist but one section has no explicit slot records.
+  timetables.forEach((timetable) => {
+    const classId = timetable.entity_ids?.class_id;
+    const sectionId = timetable.entity_ids?.section_id;
+    if (!classId || !sectionId) return;
+    if (!slotAssignedClassIds.has(classId)) return;
+
+    if (!classSectionMap.has(classId)) classSectionMap.set(classId, new Set());
+    classSectionMap.get(classId).add(sectionId);
   });
 
   if (classIds.size === 0) {
@@ -522,12 +647,7 @@ export const getMyStudents = async (teacherId, instituteId, filters = {}, pagina
     school_id: instituteId,
     user_type: 'STUDENT',
     is_active: true,
-    'details.class_id': { [Op.in]: Array.from(classIds) }
   };
-
-  if (sectionIds.size > 0) {
-    where['details.section_id'] = { [Op.in]: Array.from(sectionIds) };
-  }
 
   if (filters.search) {
     where[Op.or] = [
@@ -537,30 +657,63 @@ export const getMyStudents = async (teacherId, instituteId, filters = {}, pagina
     ];
   }
 
-  if (filters.class_id) {
-    where['details.class_id'] = filters.class_id;
-  }
-
-  const { count, rows } = await User.findAndCountAll({
+  const rows = await User.findAll({
     where,
     attributes: ['id', 'first_name', 'last_name', 'registration_no', 'avatar_url', 'details'],
-    order: [['first_name', 'ASC']],
-    limit,
-    offset
+    order: [['first_name', 'ASC']]
   });
+
+  // Filter by classes/sections from teacher timetable using nested studentDetails
+  const filteredRows = rows.filter((student) => {
+    const details = student.details?.studentDetails || {};
+    const classId = details.class_id;
+    const sectionId = details.section_id;
+    const className = String(details.class_name || '').trim().toLowerCase();
+    const sectionName = String(details.section_name || '').trim().toLowerCase();
+
+    const inTeacherClass = classId && classIds.has(classId);
+    const classSections = classSectionMap.get(classId) || new Set();
+    const hasClassSectionRestriction = classSections.size > 0;
+    const inTeacherSection = hasClassSectionRestriction
+      ? !!sectionId && classSections.has(sectionId)
+      : classNoSectionAccess.has(classId);
+
+    const nameSections = classNameSectionMap.get(className) || new Set();
+    const hasNameSectionRestriction = nameSections.size > 0;
+    const inTeacherClassByName = !!className && classNameSectionMap.has(className);
+    const inTeacherSectionByName = hasNameSectionRestriction
+      ? !!sectionName && nameSections.has(sectionName)
+      : classNameNoSectionAccess.has(className);
+
+    const inTeacherScope = (inTeacherClass && inTeacherSection) || (inTeacherClassByName && inTeacherSectionByName);
+    const classFilterOk = !filters.class_id || classId === filters.class_id;
+
+    return inTeacherScope && classFilterOk;
+  });
+
+  const pagedRows = filteredRows.slice(offset, offset + limit);
 
   // Get attendance stats for each student
   const studentsWithStats = await Promise.all(
-    rows.map(async (student) => {
+    pagedRows.map(async (student) => {
+      const details = student.details?.studentDetails || {};
       const attendance = await getStudentAttendanceStats(student.id, instituteId);
       return {
         id: student.id,
         name: `${student.first_name} ${student.last_name}`,
+        first_name: student.first_name,
+        last_name: student.last_name,
         registration_no: student.registration_no,
         avatar: student.avatar_url,
-        class: student.details?.class_name,
-        section: student.details?.section_name,
-        roll_number: student.details?.roll_number,
+        class_id: details.class_id || null,
+        class: details.class_name || null,
+        class_name: details.class_name || null,
+        section_id: details.section_id || null,
+        section: details.section_name || null,
+        section_name: details.section_name || null,
+        roll_no: details.roll_no || details.roll_number || null,
+        roll_number: details.roll_number || details.roll_no || null,
+        guardians: details.guardians || [],
         attendance_percentage: attendance.percentage,
         last_attendance: attendance.last_date
       };
@@ -570,10 +723,10 @@ export const getMyStudents = async (teacherId, instituteId, filters = {}, pagina
   return {
     data: studentsWithStats,
     pagination: {
-      total: count,
+      total: filteredRows.length,
       page,
       limit,
-      totalPages: Math.ceil(count / limit)
+      totalPages: Math.ceil(filteredRows.length / limit)
     }
   };
 };
@@ -589,17 +742,60 @@ export const getStudentDetails = async (studentId, teacherId, instituteId) => {
 
   if (!student) throw new Error('Student not found');
 
+  const studentDetails = student.details?.studentDetails || {};
+  const studentClassId = studentDetails.class_id;
+  const studentSectionId = studentDetails.section_id;
+  const studentClassName = String(studentDetails.class_name || '').trim().toLowerCase();
+  const studentSectionName = String(studentDetails.section_name || '').trim().toLowerCase();
+
   const timetables = await Timetable.findAll({
     where: {
       school_id: instituteId,
-      is_active: true,
-      'entity_ids.class_id': student.details?.class_id
+      is_active: true
     }
   });
 
-  const teachesStudent = timetables.some(t => 
-    (t.slots || []).some(s => s.teacher_id === teacherId)
-  );
+  const [ownedClass, ownedSection] = await Promise.all([
+    studentClassId
+      ? Class.findOne({
+        where: { id: studentClassId, school_id: instituteId, class_teacher_id: teacherId, is_active: true },
+        attributes: ['id']
+      })
+      : null,
+    studentSectionId
+      ? Section.findOne({
+        where: { id: studentSectionId, school_id: instituteId, section_teacher_id: teacherId, is_active: true },
+        attributes: ['id']
+      })
+      : null
+  ]);
+
+  const teachesViaOwnership = !!ownedClass || !!ownedSection;
+
+  const teachesViaTimetable = timetables.some((timetable) => {
+    const timetableClassId = timetable.entity_ids?.class_id;
+    const timetableSectionId = timetable.entity_ids?.section_id;
+    const timetableClassName = String(timetable.entity_ids?.class_name || '').trim().toLowerCase();
+    const timetableSectionName = String(timetable.entity_ids?.section_name || '').trim().toLowerCase();
+
+    const idClassMatch = !!studentClassId && timetableClassId === studentClassId;
+    const nameClassMatch = !!studentClassName && timetableClassName === studentClassName;
+    if (!idClassMatch && !nameClassMatch) return false;
+
+    const teacherSlots = (timetable.slots || []).filter((slot) => String(slot.teacher_id || '') === String(teacherId));
+    if (teacherSlots.length === 0) return false;
+
+    const slotSections = teacherSlots.map((slot) => slot.section_id).filter(Boolean);
+
+    if (timetableSectionId && studentSectionId) return timetableSectionId === studentSectionId;
+    if (timetableSectionName && studentSectionName) return timetableSectionName === studentSectionName;
+    if (slotSections.length > 0 && studentSectionId) return slotSections.includes(studentSectionId);
+
+    // If no section on timetable/slot, class-level access applies.
+    return true;
+  });
+
+  const teachesStudent = teachesViaOwnership || teachesViaTimetable;
 
   if (!teachesStudent) {
     throw new Error('You do not teach this student');
@@ -631,7 +827,7 @@ export const getStudentDetails = async (studentId, teacherId, instituteId) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Create assignment
+ * Create assignment - FIXED for Native PDF View
  */
 export const createAssignment = async (teacherId, instituteId, data, files = []) => {
   const transaction = await sequelize.transaction();
@@ -641,10 +837,14 @@ export const createAssignment = async (teacherId, instituteId, data, files = [])
     const attachments = [];
     if (files?.length) {
       for (const file of files) {
+        // Folder structure
         const folder = `the-clouds-academy/${instituteId}/assignments/${Date.now()}`;
+        
+        // CRITICAL FIX: resource_type 'raw' ensures PDF stays as PDF, not Image
         const result = await uploadToCloudinary(file.path, folder, {
-          resource_type: 'auto',
-          use_filename: true
+          resource_type: 'raw', 
+          use_filename: true,
+          unique_filename: true
         });
 
         attachments.push({
@@ -667,6 +867,10 @@ export const createAssignment = async (teacherId, instituteId, data, files = [])
       transaction
     );
 
+    if (data.section_id && !validSectionId) {
+      throw new Error('Selected section is invalid for the selected class');
+    }
+
     const normalizedTargetType = data.target_type
       || (validSectionId ? 'section' : data.class_id ? 'class' : data.student_id ? 'individual' : 'all');
 
@@ -679,7 +883,6 @@ export const createAssignment = async (teacherId, instituteId, data, files = [])
 
     const isPublished = data.is_published === 'true' || data.is_published === true || data.status === 'published';
 
-    // Get target class details for student count
     let totalStudents = 0;
     if (normalizedTargetType === 'class' && normalizedTargetIds?.length) {
       totalStudents = await User.count({
@@ -736,6 +939,90 @@ export const createAssignment = async (teacherId, instituteId, data, files = [])
 };
 
 /**
+ * Update assignment - FIXED with Attachment Management
+ */
+export const updateAssignment = async (assignmentId, teacherId, instituteId, data, files = []) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const assignment = await Assignment.findOne({
+      where: { id: assignmentId, institute_id: instituteId, teacher_id: teacherId },
+      transaction
+    });
+
+    if (!assignment) throw new Error('Assignment not found');
+
+    // --- ATTACHMENT MANAGEMENT LOGIC ---
+    let currentAttachments = Array.isArray(assignment.attachments) ? [...assignment.attachments] : [];
+
+    // 1. Delete requested attachments
+    if (data.remove_attachments) {
+      const idsToRemove = Array.isArray(data.remove_attachments) 
+        ? data.remove_attachments 
+        : JSON.parse(data.remove_attachments);
+
+      for (const id of idsToRemove) {
+        const fileToDelete = currentAttachments.find(a => a.id === id);
+        if (fileToDelete && fileToDelete.public_id) {
+          // Delete from Cloudinary
+          await deleteFromCloudinary(fileToDelete.public_id).catch(err => console.error("Cloudinary Delete Error:", err));
+        }
+        // Remove from local array
+        currentAttachments = currentAttachments.filter(a => a.id !== id);
+      }
+    }
+
+    // 2. Upload new files (Strictly as RAW for PDF viewer)
+    if (files?.length) {
+      for (const file of files) {
+        const folder = `the-clouds-academy/${instituteId}/assignments/${Date.now()}`;
+        const result = await uploadToCloudinary(file.path, folder, {
+          resource_type: 'raw', // Native viewer support
+          use_filename: true,
+          unique_filename: true
+        });
+
+        currentAttachments.push({
+          id: uuidv4(),
+          name: file.originalname,
+          url: result.url,
+          public_id: result.public_id,
+          size: file.size,
+          type: file.mimetype
+        });
+
+        try { await unlink(file.path); } catch { /* ignore */ }
+      }
+    }
+    // ------------------------------------
+
+    const nextClassId = data.class_id !== undefined ? (data.class_id || null) : assignment.class_id;
+    const nextIsPublished = data.is_published !== undefined ? (data.is_published === 'true' || data.is_published === true) : assignment.is_published;
+    const nextSectionId = data.section_id !== undefined ? await resolveValidSectionId(data.section_id, instituteId, nextClassId, transaction) : assignment.section_id;
+
+    await assignment.update({
+      title: data.title ?? assignment.title,
+      description: data.description ?? assignment.description,
+      subject: data.subject ?? assignment.subject,
+      due_date: data.due_date ?? assignment.due_date,
+      due_time: data.due_time ?? assignment.due_time,
+      class_id: nextClassId,
+      section_id: nextSectionId,
+      is_published: nextIsPublished,
+      status: normalizeAssignmentStatus(data.status ?? assignment.status, nextIsPublished),
+      attachments: currentAttachments, // Updated list
+      updated_at: new Date()
+    }, { transaction });
+
+    await transaction.commit();
+    return assignment;
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+};
+
+/**
  * Get teacher's assignments
  */
 export const getMyAssignments = async (teacherId, instituteId, filters = {}, pagination = {}) => {
@@ -777,80 +1064,6 @@ export const getMyAssignments = async (teacherId, instituteId, filters = {}, pag
   };
 };
 
-/**
- * Update assignment
- */
-export const updateAssignment = async (assignmentId, teacherId, instituteId, data, files = []) => {
-  const transaction = await sequelize.transaction();
-
-  try {
-    const assignment = await Assignment.findOne({
-      where: {
-        id: assignmentId,
-        institute_id: instituteId,
-        teacher_id: teacherId
-      },
-      transaction
-    });
-
-    if (!assignment) throw new Error('Assignment not found');
-
-    const mergedAttachments = [...(assignment.attachments || [])];
-    if (files?.length) {
-      for (const file of files) {
-        const folder = `the-clouds-academy/${instituteId}/assignments/${Date.now()}`;
-        const result = await uploadToCloudinary(file.path, folder, {
-          resource_type: 'auto',
-          use_filename: true
-        });
-
-        mergedAttachments.push({
-          id: uuidv4(),
-          name: file.originalname,
-          url: result.url,
-          public_id: result.public_id,
-          size: file.size,
-          type: file.mimetype
-        });
-
-        try { await unlink(file.path); } catch { /* ignore */ }
-      }
-    }
-
-    const nextIsPublished = data.is_published !== undefined
-      ? (data.is_published === 'true' || data.is_published === true)
-      : assignment.is_published;
-
-    const nextSectionId = data.section_id !== undefined
-      ? await resolveValidSectionId(data.section_id, instituteId, data.class_id ?? assignment.class_id, transaction)
-      : assignment.section_id;
-
-    await assignment.update({
-      title: data.title ?? assignment.title,
-      description: data.description ?? assignment.description,
-      type: data.type ?? assignment.type,
-      subject: data.subject ?? assignment.subject,
-      subject_id: data.subject_id ?? assignment.subject_id,
-      due_date: data.due_date ?? assignment.due_date,
-      due_time: data.due_time ?? assignment.due_time,
-      total_marks: data.total_marks !== undefined ? (data.total_marks ? parseInt(data.total_marks) : null) : assignment.total_marks,
-      instructions: data.instructions ?? assignment.instructions,
-      target_type: data.target_type ?? assignment.target_type,
-      target_ids: Array.isArray(data.target_ids) ? data.target_ids : assignment.target_ids,
-      section_id: nextSectionId,
-      is_published: nextIsPublished,
-      status: normalizeAssignmentStatus(data.status ?? assignment.status, nextIsPublished),
-      attachments: mergedAttachments,
-      updated_at: new Date()
-    }, { transaction });
-
-    await transaction.commit();
-    return assignment;
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
-  }
-};
 
 /**
  * Delete assignment and all linked submissions/files
@@ -918,7 +1131,7 @@ export const getAssignmentWithSubmissions = async (assignmentId, teacherId, inst
       {
         model: User,
         as: 'submissions',
-        through: { attributes: ['submitted_at', 'marks', 'feedback', 'status', 'files'] },
+        through: { attributes: ['id', 'submitted_at', 'marks', 'grade', 'feedback', 'status', 'files', 'submission_text'] },
         attributes: ['id', 'first_name', 'last_name', 'registration_no', 'avatar_url']
       }
     ]
@@ -933,10 +1146,23 @@ export const getAssignmentWithSubmissions = async (assignmentId, teacherId, inst
  * Grade submission
  */
 export const gradeSubmission = async (submissionId, gradeData, teacherId) => {
-  const submission = await AssignmentSubmission.findOne({
+  let submission = await AssignmentSubmission.findOne({
     where: { id: submissionId },
     include: [{ model: Assignment, as: 'assignment' }]
   });
+
+  // Backward-compatible fallback: resolve using assignment + student
+  // if caller passed student id instead of submission id.
+  if (!submission && gradeData?.assignment_id && gradeData?.student_id) {
+    submission = await AssignmentSubmission.findOne({
+      where: {
+        assignment_id: gradeData.assignment_id,
+        student_id: gradeData.student_id
+      },
+      include: [{ model: Assignment, as: 'assignment' }],
+      order: [['submitted_at', 'DESC']]
+    });
+  }
 
   if (!submission) throw new Error('Submission not found');
   if (submission.assignment.teacher_id !== teacherId) {
@@ -1198,7 +1424,7 @@ const getTodaySchedule = async (teacherId, instituteId) => {
 
   const [classRows, sectionRows] = await Promise.all([
     classIds.size
-      ? Class.findAll({ where: { id: { [Op.in]: Array.from(classIds) }, school_id: instituteId }, attributes: ['id', 'name'] })
+      ? Class.findAll({ where: { id: { [Op.in]: Array.from(classIds) }, school_id: instituteId }, attributes: ['id', 'name', 'sections'] })
       : [],
     sectionIds.size
       ? Section.findAll({ where: { id: { [Op.in]: Array.from(sectionIds) }, school_id: instituteId }, attributes: ['id', 'name'] })
@@ -1207,6 +1433,8 @@ const getTodaySchedule = async (teacherId, instituteId) => {
 
   const classNameMap = new Map(classRows.map((row) => [row.id, row.name]));
   const sectionNameMap = new Map(sectionRows.map((row) => [row.id, row.name]));
+  // Fallback: sections stored as JSONB array inside Class model
+  const classSectionsJsonbMap = new Map(classRows.map((row) => [row.id, Array.isArray(row.sections) ? row.sections : []]));
 
   const schedule = [];
   timetables.forEach(t => {
@@ -1217,7 +1445,12 @@ const getTodaySchedule = async (teacherId, instituteId) => {
         const classId = t.entity_ids?.class_id || null;
         const sectionId = t.entity_ids?.section_id || null;
         const resolvedClassName = classId ? (classNameMap.get(classId) || t.entity_ids?.class_name || 'Class') : getEntityName(t.entity_ids);
-        const resolvedSectionName = sectionId ? (sectionNameMap.get(sectionId) || t.entity_ids?.section_name || null) : null;
+        const jsonbSection = sectionId && classId
+          ? (classSectionsJsonbMap.get(classId) || []).find((sec) => sec.id === sectionId)
+          : null;
+        const resolvedSectionName = sectionId
+          ? (sectionNameMap.get(sectionId) || jsonbSection?.name || t.entity_ids?.section_name || null)
+          : null;
         schedule.push({
           id: s.id,
           time: `${startTime} - ${endTime}`,
@@ -1254,12 +1487,60 @@ const resolveSlotTime = (slot = {}, periodConfig = {}) => {
 };
 
 const getRecentAssignments = async (teacherId, instituteId, limit) => {
-  return await Assignment.findAll({
+  const assignments = await Assignment.findAll({
     where: { institute_id: instituteId, teacher_id: teacherId },
     order: [['created_at', 'DESC']],
     limit,
-    attributes: ['id', 'title', 'subject', 'due_date', 'is_published', 'stats', 'created_at']
+    attributes: [
+      'id',
+      'title',
+      'type',
+      'subject',
+      'class_id',
+      'section_id',
+      'due_date',
+      'is_published',
+      'status',
+      'stats',
+      'created_at'
+    ]
   });
+
+  const classIds = [...new Set(assignments.map((a) => a.class_id).filter(Boolean))];
+  const sectionIds = [...new Set(assignments.map((a) => a.section_id).filter(Boolean))];
+
+  const [classRows, sectionRows] = await Promise.all([
+    classIds.length
+      ? Class.findAll({
+        where: { id: { [Op.in]: classIds }, school_id: instituteId },
+        attributes: ['id', 'name', 'sections']
+      })
+      : [],
+    sectionIds.length
+      ? Section.findAll({
+        where: { id: { [Op.in]: sectionIds }, school_id: instituteId },
+        attributes: ['id', 'name', 'class_id']
+      })
+      : []
+  ]);
+
+  const classNameMap = new Map(classRows.map((row) => [row.id, row.name]));
+  const sectionNameMap = new Map(sectionRows.map((row) => [row.id, row.name]));
+
+  // Fallback from Class JSONB sections when Section rows are missing.
+  for (const cls of classRows) {
+    for (const sec of (cls.sections || [])) {
+      if (sec?.id && sec?.name && !sectionNameMap.has(sec.id)) {
+        sectionNameMap.set(sec.id, sec.name);
+      }
+    }
+  }
+
+  return assignments.map((assignment) => ({
+    ...assignment.toJSON(),
+    class_name: assignment.class_id ? (classNameMap.get(assignment.class_id) || null) : null,
+    section_name: assignment.section_id ? (sectionNameMap.get(assignment.section_id) || null) : null
+  }));
 };
 
 const getPendingWork = async (teacherId, instituteId) => {
@@ -1301,12 +1582,89 @@ const getPendingWork = async (teacherId, instituteId) => {
 };
 
 const getRecentActivity = async (teacherId, instituteId) => {
-  // This would query activity logs
-  return [
-    { id: 1, type: 'assignment', title: 'Created new assignment', time: '2 hours ago', icon: 'FileText' },
-    { id: 2, type: 'attendance', title: 'Marked attendance for Class 10-A', time: 'Yesterday', icon: 'CheckSquare' },
-    { id: 3, type: 'grade', title: 'Graded 15 submissions', time: '2 days ago', icon: 'Award' }
-  ];
+  const [recentAssignments, recentAttendance, recentGrading] = await Promise.all([
+    Assignment.findAll({
+      where: { institute_id: instituteId, teacher_id: teacherId },
+      order: [['created_at', 'DESC']],
+      limit: 5,
+      attributes: ['id', 'title', 'type', 'created_at']
+    }),
+    Attendance.findAll({
+      where: { school_id: instituteId, marked_by: teacherId },
+      order: [['date', 'DESC']],
+      limit: 5,
+      attributes: ['id', 'class_id', 'date']
+    }),
+    AssignmentSubmission.findAll({
+      where: {
+        graded_by: teacherId,
+        graded_at: { [Op.ne]: null }
+      },
+      include: [
+        {
+          model: Assignment,
+          as: 'assignment',
+          attributes: ['id', 'title', 'institute_id']
+        }
+      ],
+      order: [['graded_at', 'DESC']],
+      limit: 5,
+      attributes: ['id', 'assignment_id', 'graded_at', 'status']
+    })
+  ]);
+
+  const classIds = [...new Set(recentAttendance.map((a) => a.class_id).filter(Boolean))];
+  const classRows = classIds.length
+    ? await Class.findAll({
+      where: { id: { [Op.in]: classIds }, school_id: instituteId },
+      attributes: ['id', 'name']
+    })
+    : [];
+  const classNameMap = new Map(classRows.map((row) => [row.id, row.name]));
+
+  const assignmentActivity = recentAssignments.map((item) => ({
+    id: `assignment-${item.id}`,
+    type: 'assignment',
+    title: `Created ${item.type || 'assignment'}: ${item.title}`,
+    time: formatTimeAgo(item.created_at),
+    icon: 'FileText',
+    created_at: item.created_at
+  }));
+
+  const attendanceActivity = recentAttendance.map((item) => {
+    const className = classNameMap.get(item.class_id) || 'Class';
+    return {
+      id: `attendance-${item.id}`,
+      type: 'attendance',
+      title: `Marked attendance for ${className}`,
+      time: formatTimeAgo(item.marked_at || item.date),
+      icon: 'CheckSquare',
+      created_at: item.marked_at || item.date
+    };
+  });
+
+  const gradingActivity = recentGrading
+    .filter((item) => item.assignment?.institute_id === instituteId)
+    .map((item) => ({
+      id: `grading-${item.id}`,
+      type: 'grade',
+      title: `Graded submission: ${item.assignment?.title || 'Assignment'}`,
+      time: formatTimeAgo(item.graded_at),
+      icon: 'Award',
+      created_at: item.graded_at
+    }));
+
+  return [...assignmentActivity, ...attendanceActivity, ...gradingActivity]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 8)
+    .map(({ created_at, ...rest }) => rest);
+};
+
+const formatTimeAgo = (value) => {
+  if (!value) return 'Just now';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Just now';
+  return formatDistanceToNow(parsed, { addSuffix: true });
 };
 
 const getTeacherStats = async (teacherId, instituteId) => {

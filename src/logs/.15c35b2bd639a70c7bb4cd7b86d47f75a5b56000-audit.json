@@ -19,6 +19,11 @@
             "date": 1773189756087,
             "name": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/exceptions-2026-03-11.log",
             "hash": "4c019f56172efb3716970c435438294ac9aff65982ea2894ded4d4ec33a7ff22"
+        },
+        {
+            "date": 1773377226850,
+            "name": "/home/sajoodali/The-Cloud-Soluitons-Backend-/src/logs/exceptions-2026-03-13.log",
+            "hash": "f73c9e939b2b5dff3af4e1d4444f4b899161128faac2214352e4ea1ee6c28185"
         }
     ],
     "hashType": "sha256"

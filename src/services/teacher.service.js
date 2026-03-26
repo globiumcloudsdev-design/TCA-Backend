@@ -106,13 +106,6 @@ export const createTeacher = async (data, options = {}) => {
     if (!teacherRole) {
       throw new Error('Teacher role not found for this institute. Please create a role with teacher permissions first.');
     }
-
-    // console.log('✅ Using teacher role:', {
-    //   id: teacherRole.id,
-    //   name: teacherRole.name,
-    //   permissions: teacherRole.permissions
-    // });
-
     // 2. Generate password
     const password = data.password || generateRandomPassword(10);
     const hashedPassword = await bcrypt.hash(password, 10);

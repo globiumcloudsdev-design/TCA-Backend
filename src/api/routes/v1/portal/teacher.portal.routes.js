@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import { protect, isTeacher } from '../../../middlewares/auth.middleware.js';
-import { uploadMultiple, uploadSingle } from '../../../middlewares/upload.middleware.js';
+import { uploadFields, uploadSingle } from '../../../middlewares/upload.middleware.js';
 import * as teacherPortal from '../../../controllers/portal/teacherPortal.controller.js';
 
 const router = Router();
@@ -43,10 +43,16 @@ router.get('/students/:studentId', teacherPortal.getStudentDetails);
 // ─────────────────────────────────────────────────────────────────────────────
 // ASSIGNMENTS
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/assignments', uploadMultiple('attachments', 10), teacherPortal.createAssignment);
+router.post('/assignments', uploadFields([
+	{ name: 'attachments', maxCount: 10 },
+	{ name: 'files', maxCount: 10 }
+]), teacherPortal.createAssignment);
 router.get('/assignments', teacherPortal.getMyAssignments);
 router.get('/assignments/:assignmentId', teacherPortal.getAssignmentDetails);
-router.put('/assignments/:assignmentId', uploadMultiple('attachments', 10), teacherPortal.updateAssignment);
+router.put('/assignments/:assignmentId', uploadFields([
+	{ name: 'attachments', maxCount: 10 },
+	{ name: 'files', maxCount: 10 }
+]), teacherPortal.updateAssignment);
 router.delete('/assignments/:assignmentId', teacherPortal.deleteAssignment);
 
 // Submissions
