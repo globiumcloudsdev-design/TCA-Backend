@@ -6,18 +6,22 @@
 
 import app from './src/app.js';
 import { testConnection, syncDatabase, fixForeignKeys } from './src/config/database.js';
-import { createServer } from 'https';
+import { createServer as createHttpServer } from 'http';
+import { createServer as createHttpsServer } from 'https';
 import fs from 'fs';
 import { initSocket } from './src/sockets/index.js';
 import logger from './src/config/logger.js';
 import config from './src/config/index.js';
 
-const httpsOptions = {
-  key: fs.readFileSync('/etc/letsencrypt/live/api.globiumclouds.com/privkey.pem'),
-  cert: fs.readFileSync('/etc/letsencrypt/live/api.globiumclouds.com/fullchain.pem')
-};
+const sslOptions = config.isProduction
+  ? {
+    key: fs.readFileSync(process.env.SSL_KEY_PATH || '/etc/letsencrypt/live/api.globiumclouds.com/privkey.pem'),
+    cert: fs.readFileSync(process.env.SSL_CERT_PATH || '/etc/letsencrypt/live/api.globiumclouds.com/fullchain.pem'),
+  }
+  : null;
 
-const httpServer = createServer(httpsOptions, app);
+const protocol = sslOptions ? 'https' : 'http';
+const httpServer = sslOptions ? createHttpsServer(sslOptions, app) : createHttpServer(app);
 
 // Initialize Socket.io
 initSocket(httpServer);
@@ -32,9 +36,9 @@ const startServer = async () => {
 
     // Start listening
     httpServer.listen(config.port, config.host, () => {
-      logger.info(`🚀 Server running at https://${config.host}:${config.port}`);
+      logger.info(`🚀 Server running at ${protocol}://${config.host}:${config.port}`);
       logger.info(`🌍 Environment: ${config.env}`);
-      logger.info(`📋 API Docs: https://${config.host}:${config.port}/api/v1/docs`);
+      logger.info(`📋 API Docs: ${protocol}://${config.host}:${config.port}/api/v1/docs`);
     });
   } catch (error) {
     logger.error('❌ Server startup failed:', error);
