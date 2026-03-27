@@ -70,6 +70,17 @@ app.get('/health', (req, res) => {
 });
 
 // =============================================
+// ROOT ROUTE
+// =============================================
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Welcome to The Clouds Academy API!',
+    documentation: '/api/v1/docs',
+    version: '1.0.0',
+  });
+});
+
+// =============================================
 // API ROUTES
 // =============================================
 app.use('/api/v1', v1Routes);
