@@ -6,12 +6,18 @@
 
 import app from './src/app.js';
 import { testConnection, syncDatabase, fixForeignKeys } from './src/config/database.js';
-import { createServer } from 'http';
+import { createServer } from 'https';
+import fs from 'fs';
 import { initSocket } from './src/sockets/index.js';
 import logger from './src/config/logger.js';
 import config from './src/config/index.js';
 
-const httpServer = createServer(app);
+const httpsOptions = {
+  key: fs.readFileSync('/etc/letsencrypt/live/api.globiumclouds.com/privkey.pem'),
+  cert: fs.readFileSync('/etc/letsencrypt/live/api.globiumclouds.com/fullchain.pem')
+};
+
+const httpServer = createServer(httpsOptions, app);
 
 // Initialize Socket.io
 initSocket(httpServer);
@@ -26,9 +32,9 @@ const startServer = async () => {
 
     // Start listening
     httpServer.listen(config.port, config.host, () => {
-      logger.info(`🚀 Server running at http://${config.host}:${config.port}`);
+      logger.info(`🚀 Server running at https://${config.host}:${config.port}`);
       logger.info(`🌍 Environment: ${config.env}`);
-      logger.info(`📋 API Docs: http://${config.host}:${config.port}/api/v1/docs`);
+      logger.info(`📋 API Docs: https://${config.host}:${config.port}/api/v1/docs`);
     });
   } catch (error) {
     logger.error('❌ Server startup failed:', error);
