@@ -20,8 +20,8 @@ const config = {
   isTest: process.env.NODE_ENV === 'test',
 
   // Server
-  port: parseInt(process.env.PORT, 10) || 3000,
-  host: process.env.HOST || 'localhost',
+ port: parseInt(process.env.PORT, 10) || 5000, // default 5000
+host: process.env.HOST || '0.0.0.0',
 
   // Database (PostgreSQL)
   database: {
