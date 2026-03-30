@@ -84,6 +84,15 @@ const updateBranchSchema = Joi.object({
     address: Joi.string().optional().allow('', null),
     place_id: Joi.string().optional().allow('', null)
   }).optional(),
+    // 🔥 ADD THIS - head field for update
+  head: Joi.object({
+    first_name: Joi.string().min(2).optional(),
+    last_name: Joi.string().min(2).optional(),
+    email: Joi.string().email().optional(),
+    phone: Joi.string().optional().allow('', null),
+    password: Joi.string().min(6).optional().allow('', null),
+    permissions: Joi.array().items(Joi.string()).optional()
+  }).optional(),
   settings: Joi.object().optional()
 });
 

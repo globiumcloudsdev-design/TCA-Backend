@@ -460,11 +460,157 @@ export const toggleTimetableStatus = async (id, instituteId, isActive) => {
   return timetable;
 };
 
+
+// /**
+//  * 8. checkTeacherConflict(instituteId, teacherId, day, period, startTime, endTime, excludeId)
+//  * ------------------------------------------------------------------------------------------
+//  * Check karta hai ke teacher already busy to nahi hai
+//  */
+// export const checkTeacherConflict = async (instituteId, teacherId, day, period, startTime, endTime, excludeId = null) => {
+//   console.log('🔍 Teacher conflict check ho raha hai:', { teacherId, day, period });
+
+//   const timetables = await Timetable.findAll({
+//     where: {
+//       school_id: instituteId,
+//       is_active: true
+//     }
+//   });
+
+//   for (const timetable of timetables) {
+//     const conflict = (timetable.slots || []).some(slot => 
+//       slot.teacher_id === teacherId &&
+//       slot.day === day &&
+//       slot.id !== excludeId &&
+//       (
+//         // Period number se match
+//         (period && slot.period === period) ||
+//         // Ya time range se match (agar periods flexible hain)
+//         (startTime && endTime && slot.start_time && slot.end_time &&
+//           ((startTime >= slot.start_time && startTime < slot.end_time) ||
+//            (endTime > slot.start_time && endTime <= slot.end_time) ||
+//            (startTime <= slot.start_time && endTime >= slot.end_time)))
+//       )
+//     );
+
+//     if (conflict) {
+//       console.log('⚠️ Teacher conflict milli');
+//       return true;
+//     }
+//   }
+
+//   console.log('✅ Teacher conflict nahi milli');
+//   return false;
+// };
+
+// backend/src/services/timetable.service.js
+
 /**
- * 8. checkTeacherConflict(instituteId, teacherId, day, period, startTime, endTime, excludeId)
- * ------------------------------------------------------------------------------------------
- * Check karta hai ke teacher already busy to nahi hai
+ * 8. getBusyTeachers(instituteId, day, period, startTime, endTime, excludeTimetableId, classId, sectionId)
+ * ---------------------------------------------------------------------------------------------------------
+ * Specific day aur period ke liye busy teachers fetch karta hai
+ * Agar koi teacher already kisi class mein busy hai to woh yahan aayega
  */
+export const getBusyTeachers = async (instituteId, day, period, startTime, endTime, excludeTimetableId, classId, sectionId) => {
+  console.log('🔍 Busy teachers fetch ho rahe hain:', { day, period, classId, sectionId });
+
+  // Active timetables fetch karo
+  const timetables = await Timetable.findAll({
+    where: {
+      school_id: instituteId,
+      is_active: true
+    },
+    include: [
+      { model: AcademicYear, as: 'academicYear', attributes: ['id', 'name', 'is_current'] }
+    ]
+  });
+
+  const busyTeacherIds = new Set();
+  const busyTeacherDetails = [];
+
+  for (const timetable of timetables) {
+    // Current timetable ko exclude karo (edit mode mein)
+    if (excludeTimetableId && timetable.id === excludeTimetableId) {
+      continue;
+    }
+
+    const slots = timetable.slots || [];
+    
+    for (const slot of slots) {
+      // Sirf study slots check karo (breaks nahi)
+      if (slot.is_break) continue;
+
+      // Same day check karo
+      if (slot.day !== day) continue;
+
+      let isConflict = false;
+
+      // Period number se check
+      if (period && slot.period === parseInt(period)) {
+        isConflict = true;
+      }
+      // Time range se check
+      else if (startTime && endTime && slot.start_time && slot.end_time) {
+        if ((startTime >= slot.start_time && startTime < slot.end_time) ||
+            (endTime > slot.start_time && endTime <= slot.end_time) ||
+            (startTime <= slot.start_time && endTime >= slot.end_time)) {
+          isConflict = true;
+        }
+      }
+
+      if (isConflict && slot.teacher_id) {
+        busyTeacherIds.add(slot.teacher_id);
+        
+        // Additional info store karo
+        busyTeacherDetails.push({
+          teacher_id: slot.teacher_id,
+          teacher_name: slot.teacher_name,
+          class_name: timetable.name,
+          period: slot.period,
+          subject: slot.subject_name,
+          day: slot.day
+        });
+      }
+    }
+  }
+
+  // Agar class_id aur section_id diya hai to same class ke teachers ko check karo
+  if (classId && sectionId) {
+    // Is class/section ka active timetable dekho
+    const currentClassTimetable = timetables.find(t => 
+      t.entity_ids?.class_id === classId && 
+      t.entity_ids?.section_id === sectionId
+    );
+
+    if (currentClassTimetable) {
+      const slots = currentClassTimetable.slots || [];
+      for (const slot of slots) {
+        if (slot.day === day && !slot.is_break) {
+          if ((period && slot.period === parseInt(period)) ||
+              (startTime && endTime && slot.start_time && slot.end_time &&
+               ((startTime >= slot.start_time && startTime < slot.end_time) ||
+                (endTime > slot.start_time && endTime <= slot.end_time)))) {
+            busyTeacherIds.add(slot.teacher_id);
+            busyTeacherDetails.push({
+              teacher_id: slot.teacher_id,
+              teacher_name: slot.teacher_name,
+              class_name: currentClassTimetable.name,
+              period: slot.period,
+              subject: slot.subject_name,
+              day: slot.day,
+              is_same_class: true
+            });
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`✅ ${busyTeacherIds.size} busy teachers mile`);
+  
+  return Array.from(busyTeacherIds);
+};
+
+// Update checkTeacherConflict function
 export const checkTeacherConflict = async (instituteId, teacherId, day, period, startTime, endTime, excludeId = null) => {
   console.log('🔍 Teacher conflict check ho raha hai:', { teacherId, day, period });
 
@@ -479,10 +625,11 @@ export const checkTeacherConflict = async (instituteId, teacherId, day, period, 
     const conflict = (timetable.slots || []).some(slot => 
       slot.teacher_id === teacherId &&
       slot.day === day &&
+      !slot.is_break &&
       slot.id !== excludeId &&
       (
         // Period number se match
-        (period && slot.period === period) ||
+        (period && slot.period === parseInt(period)) ||
         // Ya time range se match (agar periods flexible hain)
         (startTime && endTime && slot.start_time && slot.end_time &&
           ((startTime >= slot.start_time && startTime < slot.end_time) ||
@@ -531,6 +678,7 @@ export const validateTimetableDays = async (id, instituteId) => {
   };
 };
 
+// Export karna mat bhoolna
 export default {
   getTimetableEntities,
   createTimetable,
@@ -540,5 +688,19 @@ export default {
   deleteTimetable,
   toggleTimetableStatus,
   checkTeacherConflict,
+  getBusyTeachers,  // <-- Naya function export
   validateTimetableDays
 };
+
+
+// export default {
+//   getTimetableEntities,
+//   createTimetable,
+//   updateTimetable,
+//   getAllTimetables,
+//   getTimetableById,
+//   deleteTimetable,
+//   toggleTimetableStatus,
+//   checkTeacherConflict,
+//   validateTimetableDays
+// };

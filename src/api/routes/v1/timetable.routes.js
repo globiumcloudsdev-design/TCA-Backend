@@ -81,6 +81,18 @@ router.get(
 );
 
 /**
+ * GET /api/v1/timetable/busy-teachers
+ * ------------------------------------
+ * Specific day aur period ke liye busy teachers fetch karta hai
+ * Yeh route /:id se PEHLE hona chahiye
+ */
+router.get(
+  '/busy-teachers',
+  hasPermission('timetable.read'),
+  timetableController.getBusyTeachers
+);
+
+/**
  * GET /api/v1/timetable/:id
  * -------------------------
  * Ek timetable ki details fetch karta hai
@@ -126,5 +138,6 @@ router.patch(
   hasPermission('timetable.update'),
   timetableController.toggleTimetableStatus
 );
+
 
 export default router;

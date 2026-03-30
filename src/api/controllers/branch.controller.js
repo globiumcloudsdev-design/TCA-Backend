@@ -99,22 +99,30 @@ export const createBranch = catchAsync(async (req, res) => {
 export const updateBranch = catchAsync(async (req, res) => {
   const instituteId = req.institute?.id || req.user?.institute_id || req.user?.school_id;
   
+  console.log('📥 Update branch request body:', JSON.stringify(req.body, null, 2));
+  
   const updateData = {
     ...req.body,
     updated_by: req.user?.id
   };
 
-  const branch = await branchService.updateBranch(
-    req.params.id,
-    instituteId,
-    updateData
-  );
+  try {
+    const branch = await branchService.updateBranch(
+      req.params.id,
+      instituteId,
+      updateData
+    );
 
-  if (!branch) {
-    return sendError(res, 'Branch not found', 404);
+    if (!branch) {
+      return sendError(res, 'Branch not found', 404);
+    }
+
+    return sendSuccess(res, branch, 'Branch updated successfully');
+  } catch (error) {
+    console.error('❌ Update branch error:', error);
+    // Send proper error message
+    return sendError(res, error.message || 'Failed to update branch', 400);
   }
-
-  return sendSuccess(res, branch, 'Branch updated successfully');
 });
 
 /**

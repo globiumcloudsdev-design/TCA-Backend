@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "G:\\E transfer\\Globium Clouds\\TCA Dev Email\\TCA Backend\\src\\logs\\.6d905beceb3d566d927e89744f3ceac25f420320-audit.json",
+    "files": [
+        {
+            "date": 1774634229253,
+            "name": "G:\\E transfer\\Globium Clouds\\TCA Dev Email\\TCA Backend\\src\\logs\\exceptions-2026-03-27.log",
+            "hash": "81aa0f698ad0038a57f4f5ea5905a819916f336063818f0367149e3810016081"
+        }
+    ],
+    "hashType": "sha256"
+}

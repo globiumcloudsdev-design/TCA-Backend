@@ -378,16 +378,16 @@ export const updateBranch = async (id, institute_id, updateData) => {
     const [headUser, created] = await User.findOrCreate({
       where: { 
         branch_id: id,
-        user_type: 'STAFF',
-        staff_type: 'Branch Head'
+        user_type: 'BRANCH_ADMIN',
+          staff_type: 'BRANCH_HEAD'
       },
       defaults: {
         id: uuidv4(),
         school_id: institute_id,
         branch_id: id,
         role_id: null,
-        user_type: 'STAFF',
-        staff_type: 'Branch Head',
+        user_type: 'BRANCH_ADMIN',
+          staff_type: 'BRANCH_HEAD',
         first_name: updateData.head.first_name,
         last_name: updateData.head.last_name,
         email: updateData.head.email,

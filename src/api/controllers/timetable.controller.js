@@ -301,3 +301,43 @@ export const checkTeacherConflict = async (req, res) => {
     return sendError(res, error.message || 'Conflict check nahi ho saka', 500);
   }
 };
+
+// backend/src/controllers/timetable.controller.js
+
+/**
+ * GET /api/v1/timetable/busy-teachers
+ * ------------------------------------
+ * Specific day aur period ke liye busy teachers fetch karta hai
+ */
+export const getBusyTeachers = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    if (!instituteId) {
+      return sendError(res, 'Institute ID nahi mila', 400);
+    }
+
+    const { day, period, start_time, end_time, exclude_timetable_id, class_id, section_id } = req.query;
+
+    if (!day) {
+      return sendError(res, 'day parameter zaroori hai', 400);
+    }
+
+    console.log('🔍 Busy teachers fetch ho rahe hain:', { day, period, class_id, section_id });
+
+    const busyTeachers = await timetableService.getBusyTeachers(
+      instituteId,
+      day,
+      period,
+      start_time,
+      end_time,
+      exclude_timetable_id,
+      class_id,
+      section_id
+    );
+
+    return sendSuccess(res, { busyTeachers }, 'Busy teachers fetch ho gaye');
+  } catch (error) {
+    console.error('❌ Busy teachers fetch error:', error);
+    return sendError(res, error.message || 'Busy teachers fetch nahi ho sakin', 500);
+  }
+};

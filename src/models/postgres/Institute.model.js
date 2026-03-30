@@ -92,7 +92,7 @@ const Institute = sequelize.define(
         //         enable_sms_notifications: false
         //     }
         // },
-           // ✅ FIXED: Settings with getter/setter to handle string JSON
+        // ✅ FIXED: Settings with getter/setter to handle string JSON
         settings: {
             type: DataTypes.JSONB,
             defaultValue: {
@@ -161,12 +161,12 @@ Institute.associate = (models) => {
     Institute.belongsTo(models.User, { foreignKey: 'principal_user_id', as: 'principal' });
     // school_id is the FK column in child tables (renamed to institute_id in JS via field mapping)
     // 🔥 ADD THIS: Institute has many Invoices
-  Institute.hasMany(models.Invoice, {
-    foreignKey: 'institute_id',
-    as: 'invoices',  // This must match the include in your service
-    onDelete: 'CASCADE'
-  });
-  
+    Institute.hasMany(models.Invoice, {
+        foreignKey: 'institute_id',
+        as: 'invoices',  // This must match the include in your service
+        onDelete: 'CASCADE'
+    });
+
     Institute.hasMany(models.User, { foreignKey: 'school_id', as: 'users' });
     Institute.hasMany(models.Role, { foreignKey: 'school_id', as: 'roles' });
 };
