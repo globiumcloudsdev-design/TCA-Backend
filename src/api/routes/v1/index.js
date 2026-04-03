@@ -11,7 +11,7 @@ import academicYearRoutes from './academicYear.routes.js';
 import classRoutes from './class.routes.js';   // includes nested /sections
 import studentRoutes from './student.routes.js';
 import feeRoutes from './fee.routes.js';
-import attendanceRoutes from './attendance.routes.js';
+import attendanceRoutes from './studentAttendance.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import subscriptionPlanRoutes from './subscriptionPlan.routes.js';
 import masterAdminRoutes from './masterAdmin.routes.js';
@@ -22,6 +22,7 @@ import staffRoutes from './staff.routes.js'; // ✅ Yahan import karo
 import branchRoutes from './branch.routes.js'
 import parentRoutes from './parent.routes.js';
 import portalRoutes from './portal/index.js'; // ✅ Portal routes aggregator
+import ExamRoutes from './exam.routes.js'; // ✅ Import exam routes
 
 const router = Router();
 
@@ -81,6 +82,9 @@ router.use('/master-admin', masterAdminRoutes);
 
 // ── Portal Routes / Teacher, Student, Parent ──────────────────────────────────────────────────────────────
 router.use('/portal', portalRoutes);
+
+// ── Exam Routes ─────────────────────────────────────────────────────────────
+router.use('/exams', ExamRoutes); // ✅ Mount exam routes
 
 // V1 health
 router.get('/ping', (req, res) => res.json({ ok: true, version: 'v1' }));

@@ -23,7 +23,7 @@ const {
   User,
   Class,
   Section,
-  Attendance,
+  StudentAttendance: Attendance,
   FeeVoucher,
   Exam,
   Branch,

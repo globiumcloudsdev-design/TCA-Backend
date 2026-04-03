@@ -3,7 +3,9 @@
 import * as instituteDashboardService from '../../../services/dashboard/instituteDashboard.service.js';
 import { sendSuccess, sendError } from '../../../utils/helpers/response.helper.js';
 
-const getInstituteId = (req) => req.user?.school_id || req.user?.institute_id || null;
+const getInstituteId = (req) => {
+  return req.user?.school_id || req.user?.institute_id || req.headers['x-school-id'] || null;
+};
 
 export const getInstituteDashboard = async (req, res) => {
   try {

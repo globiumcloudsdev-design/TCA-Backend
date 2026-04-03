@@ -76,4 +76,17 @@ router.get('/timetable', teacherPortal.getMyTimetable);
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/notices', teacherPortal.getNotices);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EXAM MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/exam-assignments', teacherPortal.getAssignments); // Get available classes/subjects for exams
+router.get('/exams', teacherPortal.getExams); // List teacher exams with filters
+router.post('/exams', teacherPortal.createExam); // Create new exam
+router.get('/exams/:examId', teacherPortal.getExamDetails); // Exam detail + stats
+router.get('/exams/:examId/results', teacherPortal.getExamResults); // Students + results
+router.post('/exams/:examId/results', teacherPortal.addExamResults); // Save marks
+
+// EXAM MANAGEMENT - Add this new route
+router.get('/exams/:examId/entry-students', teacherPortal.getExamEntryStudents); // For Enter Marks page
+
 export default router;

@@ -19,16 +19,17 @@ import { v4 as uuidv4 } from 'uuid';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 import { unlink } from 'fs/promises';
 
-const { 
-  User, 
-  Timetable, 
-  Assignment, 
-  AssignmentSubmission, 
-  Attendance, 
+
+const {
+  User,
+  Timetable,
+  Assignment,
+  AssignmentSubmission,
+  StudentAttendance: Attendance,
   FeeVoucher,
   ExamResult,
   Notice,
-  sequelize 
+  sequelize
 } = models;
 
 // ─────────────────────────────────────────────────────────────────────────────

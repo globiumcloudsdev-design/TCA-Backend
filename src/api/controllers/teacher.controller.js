@@ -18,7 +18,7 @@ const { sequelize, User } = models;
  * Get institute ID from request
  */
 const getInstituteId = (req) => {
-  return req.user?.institute_id || req.user?.school_id;
+  return req.user?.school_id || req.user?.institute_id || req.query.institute_id || req.headers['x-school-id'] || null;
 };
 
 /**

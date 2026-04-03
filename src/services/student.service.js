@@ -8,7 +8,7 @@
  */
 
 import models, { sequelize } from '../models/postgres/index.js';
-import { Op } from 'sequelize';
+import Sequelize, { Op } from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';
 import { generateRandomPassword } from '../utils/passwordGenerator.js';
@@ -876,11 +876,13 @@ export const getStudentsByClass = async (classId, instituteId) => {
   return await User.findAll({
     where: {
       school_id: instituteId,
-      user_type: 'STUDENT',
-      'details.studentDetails.class_id': classId,
-      is_active: true
+      user_type: "STUDENT",
+      is_active: true,
+      [Op.and]: sequelize.literal(
+        `"User"."details"->'studentDetails'->>'class_id' = '${classId}'`,
+      ),
     },
-    order: [['first_name', 'ASC']]
+    order: [["first_name", "ASC"]],
   });
 };
 
@@ -891,11 +893,13 @@ export const getStudentsBySection = async (sectionId, instituteId) => {
   return await User.findAll({
     where: {
       school_id: instituteId,
-      user_type: 'STUDENT',
-      'details.studentDetails.section_id': sectionId,
-      is_active: true
+      user_type: "STUDENT",
+      is_active: true,
+      [Op.and]: sequelize.literal(
+        `"User"."details"->'studentDetails'->>'section_id' = '${sectionId}'`,
+      ),
     },
-    order: [['first_name', 'ASC']]
+    order: [["first_name", "ASC"]],
   });
 };
 
@@ -942,6 +946,209 @@ export const getStudentStats = async (instituteId) => {
   };
 };
 
+// backend/src/services/student.service.js
+
+/**
+ * Bulk import students with full academic session handling
+ * @param {Array} studentsData - Array of student objects from import file
+ * @param {string} instituteId - Institute ID
+ * @param {string} instituteType - school/coaching/academy/college/university
+ * @param {object} options - Transaction options
+ */
+/**
+ * Bulk import students - Simple version
+ * Class ke ANDAR sections search honge
+ */
+// backend/src/services/student.service.js
+
+export const bulkImportStudents = async (studentsData, instituteId, instituteType, options = {}) => {
+  const results = {
+    success: [],
+    failed: [],
+    total: studentsData.length,
+    imported: 0,
+    errors: []
+  };
+
+  const studentRole = await getStudentRole(instituteId);
+  
+  // Process each student in its OWN transaction
+  for (let i = 0; i < studentsData.length; i++) {
+    const student = studentsData[i];
+    const transaction = await sequelize.transaction(); // New transaction for each row
+    
+    try {
+      // Validate minimum required fields
+      if (!student.first_name || !student.last_name) {
+        results.failed.push({
+          row: i + 1,
+          data: student,
+          error: 'First name and last name are required'
+        });
+        await transaction.rollback();
+        continue;
+      }
+      
+      // Get class info if class_name provided
+      let classInfo = null;
+      let classId = null;
+      let matchedSection = null;
+      
+      if (student.class_name) {
+        classInfo = await models.Class.findOne({
+          where: {
+            school_id: instituteId,
+            name: student.class_name,
+            is_active: true
+          },
+          transaction
+        });
+        
+        if (classInfo) {
+          classId = classInfo.id;
+          
+          // Match section from class.sections JSON
+          if (student.section_name && classInfo.sections) {
+            const sections = Array.isArray(classInfo.sections) ? classInfo.sections : [];
+            matchedSection = sections.find(s => 
+              s.name === student.section_name || s.section_name === student.section_name
+            );
+          }
+        }
+      }
+      
+      // Generate registration number
+      let registrationNo = student.registration_no;
+      if (!registrationNo) {
+        registrationNo = await generateRegistrationNo(instituteId, instituteType);
+      }
+      
+      // Generate roll number
+      let rollNo = student.roll_no;
+      if (!rollNo && classId && matchedSection && classInfo?.academic_year_id) {
+        rollNo = await generateRollNoFromClassInfo(instituteId, {
+          class_id: classId,
+          section_id: matchedSection.id,
+          academic_year_id: classInfo.academic_year_id
+        });
+      }
+      
+      // Generate password
+      const password = generateRandomPassword(8);
+      const hashedPassword = await bcrypt.hash(password, 10);
+      
+      // Prepare academic session
+      const academicSessions = [{
+        academic_year_id: classInfo?.academic_year_id || null,
+        class_id: classId,
+        class_name: classInfo?.name || student.class_name,
+        section_id: matchedSection?.id || null,
+        section_name: matchedSection?.name || student.section_name,
+        roll_no: rollNo,
+        status: 'active',
+        start_date: student.admission_date || new Date()
+      }];
+      
+      // Prepare guardians
+      let guardians = [];
+      if (student.guardian_name) {
+        guardians = [{
+          name: student.guardian_name,
+          relation: student.guardian_relation || 'guardian',
+          phone: student.guardian_phone,
+          cnic: student.guardian_cnic,
+          email: student.guardian_email
+        }];
+      }
+      
+      // Prepare student details
+      const studentDetails = {
+        first_name: student.first_name,
+        last_name: student.last_name,
+        email: student.email,
+        phone: student.phone,
+        date_of_birth: student.dob || student.date_of_birth,
+        gender: student.gender,
+        class_id: classId,
+        class_name: classInfo?.name || student.class_name,
+        section_id: matchedSection?.id,
+        section_name: matchedSection?.name || student.section_name,
+        roll_no: rollNo,
+        guardians: guardians,
+        present_address: student.present_address || student.address,
+        city: student.city,
+        monthly_fee: student.monthly_fee,
+        fee_status: student.fee_status,
+        is_active: student.is_active !== false,
+        academicSessions: academicSessions,
+        ...student // Copy all other fields
+      };
+      
+      // Create user
+      const userData = {
+        id: uuidv4(),
+        school_id: instituteId,
+        role_id: studentRole.id,
+        user_type: 'STUDENT',
+        first_name: student.first_name,
+        last_name: student.last_name,
+        email: student.email || null,
+        phone: student.phone || null,
+        password_hash: hashedPassword,
+        registration_no: registrationNo,
+        permissions: [],
+        details: {
+          studentDetails: studentDetails
+        },
+        is_active: student.is_active !== false,
+        created_by: options.created_by
+      };
+      
+      const user = await models.User.create(userData, { transaction });
+      
+      // Generate QR Code (optional, don't fail if it errors)
+      try {
+        const qrCodeResult = await generateAndUploadQRCode(user, instituteId);
+        user.qr_code_url = qrCodeResult.url;
+        user.qr_code_public_id = qrCodeResult.public_id;
+        await user.save({ transaction });
+      } catch (qrError) {
+        console.warn(`QR code failed for ${student.first_name}:`, qrError.message);
+      }
+      
+      await transaction.commit();
+      
+      results.success.push({
+        row: i + 1,
+        id: user.id,
+        name: `${user.first_name} ${user.last_name}`,
+        registration_no: registrationNo,
+        temp_password: password
+      });
+      
+      results.imported++;
+      
+    } catch (error) {
+      await transaction.rollback();
+      console.error(`Row ${i + 1} error:`, error.message);
+      
+      results.failed.push({
+        row: i + 1,
+        data: {
+          first_name: student.first_name,
+          last_name: student.last_name,
+          email: student.email,
+          class_name: student.class_name
+        },
+        error: error.message
+      });
+      results.errors.push(`Row ${i + 1}: ${error.message}`);
+    }
+  }
+  
+  return results;
+};
+
 export default {
   createStudent,
   getAllStudents,
@@ -953,5 +1160,6 @@ export default {
   addAcademicSession,
   getStudentsByClass,
   getStudentsBySection,
-  getStudentStats
+  getStudentStats,
+  bulkImportStudents
 };

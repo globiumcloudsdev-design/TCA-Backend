@@ -34,6 +34,9 @@ router.get(
   studentController.getAllStudents
 );
 
+// Sirf ek route - simple!
+router.post('/bulk-import', hasPermission('students.create'), studentController.bulkImportStudents);
+
 /**
  * GET - Student by ID
  * GET /api/v1/students/:id

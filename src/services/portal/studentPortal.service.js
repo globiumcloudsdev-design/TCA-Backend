@@ -28,7 +28,7 @@ const {
   Timetable, 
   Assignment, 
   AssignmentSubmission, 
-  Attendance, 
+  StudentAttendance: Attendance, 
   FeeVoucher,
   ExamResult,
   Notice,
@@ -1395,7 +1395,7 @@ export const getMyResults = async (studentId, instituteId, filters = {}) => {
     include: [
       {
         model: models.Exam,
-        as: 'Exam',
+        as: 'exam',
         attributes: ['id', 'name', 'type', 'start_date', 'total_marks', 'academic_year_id'],
         ...(Object.keys(examWhere).length ? { where: examWhere } : {})
       },
@@ -1452,7 +1452,7 @@ export const getRecentResults = async (studentId, instituteId, limit = 3) => {
     order: [['created_at', 'DESC']],
     limit,
     include: [
-      { model: models.Exam, as: 'Exam', attributes: ['name', 'start_date', 'total_marks'] },
+      { model: models.Exam, as: 'exam', attributes: ['name', 'start_date', 'total_marks'] },
       { model: models.Subject, attributes: ['id', 'name'] }
     ]
   });

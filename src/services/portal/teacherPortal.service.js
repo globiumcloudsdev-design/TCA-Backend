@@ -22,7 +22,7 @@ import { startOfDay, endOfDay, addDays, format, startOfWeek, endOfWeek, formatDi
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 import { unlink } from 'fs/promises';
 
-const { User, Timetable, Assignment, AssignmentSubmission, Attendance, Notification, Class, Section, Subject, sequelize } = models;
+const { User, Timetable, Assignment, AssignmentSubmission, StudentAttendance: Attendance, Notification, Class, Section, Subject, sequelize } = models;
 
 const normalizeAssignmentStatus = (status, isPublished = false) => {
   if (!status) return isPublished ? 'published' : 'draft';
@@ -400,7 +400,7 @@ export const getMyClasses = async (teacherId, instituteId) => {
         .map((s) => ({ id: s.id || null, name: s.name }));
     }
 
-    // Build course name → syllabus/material lookup from Class JSONB courses
+    // Build course name → syllabus/material/id lookup from Class JSONB courses
     const coursesJsonb = classCoursesMap.get(data.class_id) || [];
     const courseMetaMap = {};
     for (const c of coursesJsonb) {
@@ -429,7 +429,12 @@ export const getMyClasses = async (teacherId, instituteId) => {
           syllabus = `${c.materials.length} material${c.materials.length !== 1 ? 's' : ''}`;
         }
 
-        courseMetaMap[key] = { syllabus, materials };
+        courseMetaMap[key] = { 
+          id: c.id || null,
+          code: c.course_code || c.code || null,
+          syllabus, 
+          materials 
+        };
       }
     }
 
@@ -438,13 +443,16 @@ export const getMyClasses = async (teacherId, instituteId) => {
       syllabus: courseMetaMap[sub.name?.toLowerCase()]?.syllabus || null,
       materials: courseMetaMap[sub.name?.toLowerCase()]?.materials || []
     }));
-    const fallbackSubjectDetails = Array.from(data.subjects).map((name) => ({
-      id: null,
-      name,
-      code: null,
-      syllabus: courseMetaMap[name?.toLowerCase()]?.syllabus || null,
-      materials: courseMetaMap[name?.toLowerCase()]?.materials || []
-    }));
+    const fallbackSubjectDetails = Array.from(data.subjects).map((name) => {
+      const meta = courseMetaMap[name?.toLowerCase()] || {};
+      return {
+        id: meta.id || null,
+        name,
+        code: meta.code || null,
+        syllabus: meta.syllabus || null,
+        materials: meta.materials || []
+      };
+    });
     const subjectDetails = subjectDetailsFromDB.length ? subjectDetailsFromDB : fallbackSubjectDetails;
 
     result.push({
@@ -1801,22 +1809,788 @@ const updateAssignmentStats = async (assignmentId) => {
   }, { where: { id: assignmentId } });
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EXAM MANAGEMENT (Teacher Portal)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get teacher's assigned classes, sections, and subjects from timetable
+ */
+export const getTeacherAssignments = async (teacherId, instituteId) => {
+  const timetables = await Timetable.findAll({
+    where: {
+      school_id: instituteId,
+      is_active: true
+    }
+  });
+
+  const assignments = {
+    classes: new Map(),
+    sections: new Map(),
+    subjects: new Set()
+  };
+
+  timetables.forEach(timetable => {
+    const slots = timetable.slots || [];
+    const teacherSlots = slots.filter(slot => slot.teacher_id === teacherId);
+
+    if (teacherSlots.length > 0) {
+      const classId = timetable.entity_ids?.class_id;
+      const sectionId = timetable.entity_ids?.section_id;
+      const className = timetable.entity_ids?.class_name || 'Class';
+      const sectionName = timetable.entity_ids?.section_name || null;
+
+      // Add class
+      if (classId) {
+        if (!assignments.classes.has(classId)) {
+          assignments.classes.set(classId, {
+            id: classId,
+            name: className,
+            sections: new Map(),
+            subjects: new Set()
+          });
+        }
+      }
+
+      // Add section
+      if (sectionId && classId) {
+        const classData = assignments.classes.get(classId);
+        if (classData && !classData.sections.has(sectionId)) {
+          classData.sections.set(sectionId, {
+            id: sectionId,
+            name: sectionName || `Section ${classData.sections.size + 1}`,
+            subjects: new Set()
+          });
+        }
+      }
+
+      // Add subjects
+      teacherSlots.forEach(slot => {
+        if (slot.subject_name) {
+          assignments.subjects.add(slot.subject_name);
+          
+          if (classId) {
+            const classData = assignments.classes.get(classId);
+            if (classData) {
+              classData.subjects.add(slot.subject_name);
+              
+              if (sectionId && classData.sections.has(sectionId)) {
+                classData.sections.get(sectionId).subjects.add(slot.subject_name);
+              }
+            }
+          }
+        }
+      });
+    }
+  });
+
+  // Convert Maps to Arrays
+  const result = {
+    classes: Array.from(assignments.classes.values()).map(cls => ({
+      ...cls,
+      sections: Array.from(cls.sections.values()).map(sec => ({
+        ...sec,
+        subjects: Array.from(sec.subjects)
+      })),
+      subjects: Array.from(cls.subjects)
+    })),
+    subjects: Array.from(assignments.subjects),
+    total_classes: assignments.classes.size,
+    total_subjects: assignments.subjects.size
+  };
+
+  return result;
+};
+
+/**
+ * Create exam for teacher's assigned class/section/subject
+ */
+export const createTeacherExam = async (teacherId, instituteId, examData, options = {}) => {
+  const { Exam } = models;
+  const transaction = options.transaction || await sequelize.transaction();
+  let shouldCommit = !options.transaction;
+
+  try {
+    // Verify teacher is assigned to this class/subject
+    const assignments = await getTeacherAssignments(teacherId, instituteId);
+    
+    const classAssignment = assignments.classes.find(c => c.id === examData.class_id);
+    if (!classAssignment) {
+      throw new Error('You are not assigned to this class');
+    }
+
+    // Verify section if provided
+    if (examData.section_id) {
+      const sectionAssignment = classAssignment.sections.find(s => s.id === examData.section_id);
+      if (!sectionAssignment) {
+        throw new Error('You are not assigned to this section');
+      }
+    }
+
+    // Verify all subjects are assigned to teacher
+    const examSubjects = examData.subject_schedules || [];
+    examSubjects.forEach(subject => {
+      const hasSubject = classAssignment.subjects.find(s => s === subject.subject_name) ||
+                        examSubjects.some(s => s.subject_id === subject.subject_id);
+      if (!hasSubject) {
+        throw new Error(`You are not assigned to subject: ${subject.subject_name}`);
+      }
+    });
+
+    // Calculate total marks
+    const totalMarks = examSubjects.reduce((sum, s) => sum + (parseInt(s.total_marks) || 0), 0);
+
+    const exam = await Exam.create({
+      id: uuidv4(),
+      school_id: instituteId,
+      class_id: examData.class_id,
+      section_id: examData.section_id || null,
+      academic_year_id: examData.academic_year_id,
+      name: examData.name,
+      type: examData.type || 'mid-term',
+      code: examData.code || `${examData.type?.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      subject_schedules: examSubjects,
+      start_date: examSubjects.length > 0 ? examSubjects[0].date : examData.start_date,
+      end_date: examSubjects.length > 0 ? examSubjects[examSubjects.length - 1].date : examData.end_date,
+      total_marks: totalMarks,
+      pass_marks: Math.round((totalMarks * (examData.pass_percentage || 40)) / 100),
+      pass_percentage: examData.pass_percentage || 40,
+      grading_system: examData.grading_system || null,
+      status: 'scheduled',
+      is_published: false,
+      created_by: teacherId,
+      updated_by: teacherId
+    }, { transaction });
+
+    if (shouldCommit) await transaction.commit();
+    return exam;
+  } catch (error) {
+    if (shouldCommit) await transaction.rollback();
+    throw error;
+  }
+};
+
+/**
+ * Get teacher's exams
+ */
+export const getTeacherExams = async (teacherId, instituteId, filters = {}, pagination = {}) => {
+  const { page = 1, limit = 10 } = pagination;
+  const offset = (page - 1) * limit;
+  const { Exam, Class, Section } = models;
+
+  // Get teacher's assigned classes
+  const assignments = await getTeacherAssignments(teacherId, instituteId);
+  const classIds = assignments.classes.map(c => c.id);
+
+  const where = {
+    school_id: instituteId,
+    [Op.or]: [
+      { created_by: teacherId },
+      { class_id: classIds.length > 0 ? classIds : null }
+    ]
+  };
+
+  // Convert 'published' status from frontend filter to is_published flag
+  if (filters.status === 'published') {
+    where.is_published = true;
+  } else if (filters.status) {
+    where.status = filters.status;
+  }
+
+  if (filters.type) where.type = filters.type;
+  if (filters.class_id) where.class_id = filters.class_id;
+  if (filters.is_published !== undefined) where.is_published = filters.is_published;
+
+  const { count, rows } = await Exam.findAndCountAll({
+    where,
+    order: [['start_date', 'DESC']],
+    include: [
+      { model: Class, as: 'class', attributes: ['id', 'name'] },
+      { model: Section, as: 'section', attributes: ['id', 'name'] }
+    ],
+    limit,
+    offset
+  });
+
+  return {
+    data: rows.map(exam => {
+      const examData = exam.toJSON();
+      
+      // Filter subject schedules to only those assigned to this teacher
+      let filteredSchedules = examData.subject_schedules || [];
+      const classAssignment = assignments.classes.find(c => c.id === examData.class_id);
+      
+      if (classAssignment && examData.created_by !== teacherId) {
+        // If the teacher didn't create the exam, only show subjects they are assigned to teach
+        filteredSchedules = filteredSchedules.filter(schedule => 
+          classAssignment.subjects.includes(schedule.subject_name)
+        );
+      }
+
+      return {
+        ...examData,
+        subject_schedules: filteredSchedules,
+        class_name: examData.class?.name || 'Class',
+        section_name: examData.section?.name || 'All Sections',
+        subject_count: filteredSchedules.length,
+        status_display: examData.is_published ? 'Published' : 'Draft'
+      };
+    }),
+    pagination: {
+      total: count,
+      page,
+      limit,
+      totalPages: Math.ceil(count / limit)
+    }
+  };
+};
+
+/**
+ * Add or update exam results for teacher's students
+ */
+export const addTeacherExamResults = async (teacherId, instituteId, examId, results, options = {}) => {
+  const { Exam, ExamResult, User } = models;
+  const transaction = options.transaction || await sequelize.transaction();
+  let shouldCommit = !options.transaction;
+
+  try {
+    // Verify teacher created or is assigned to this exam
+    const assignments = await getTeacherAssignments(teacherId, instituteId);
+    const classIds = assignments.classes.map(c => c.id);
+
+    const exam = await Exam.findOne({
+      where: { 
+        id: examId, 
+        school_id: instituteId,
+        [Op.or]: [
+          { created_by: teacherId },
+          { class_id: classIds.length > 0 ? classIds : null }
+        ]
+      },
+      transaction
+    });
+
+    if (!exam) throw new Error('Exam not found or unauthorized');
+
+    // Get students in this exam's class/section
+    const studentWhere = {
+      school_id: instituteId,
+      user_type: 'STUDENT',
+      is_active: true,
+      'details.studentDetails.class_id': exam.class_id
+    };
+
+    if (exam.section_id) {
+      studentWhere['details.studentDetails.section_id'] = exam.section_id;
+    }
+
+    const allowedStudents = await User.findAll({
+      where: studentWhere,
+      attributes: ['id'],
+      transaction
+    });
+
+    const allowedStudentIds = new Set(allowedStudents.map(s => s.id));
+
+    const processed = [];
+    const errors = [];
+
+    for (const result of results) {
+      try {
+        // Verify student is in this class/section
+        if (!allowedStudentIds.has(result.student_id)) {
+          throw new Error('Student not in this class');
+        }
+
+        // Validate marks
+        const subjectMarksMap = {};
+        (result.subject_marks || []).forEach(sm => {
+          subjectMarksMap[sm.subject_id] = sm.marks_obtained;
+        });
+
+        if (result.is_present !== false) {
+          for (const [subjectId, marksObtained] of Object.entries(subjectMarksMap)) {
+            const subjectSchedule = exam.subject_schedules.find(s => s.subject_id === subjectId);
+            if (subjectSchedule && marksObtained > subjectSchedule.total_marks) {
+              throw new Error(
+                `Marks (${marksObtained}) exceed total marks (${subjectSchedule.total_marks})`
+              );
+            }
+          }
+        }
+
+        // Check for existing result
+        const existing = await ExamResult.findOne({
+          where: { exam_id: examId, student_id: result.student_id },
+          transaction
+        });
+
+        // Merge existing subject marks with the incoming ones
+        let finalSubjectMarks = [...(result.subject_marks || [])];
+        if (existing && existing.subject_marks) {
+          const existingMarksToKeep = existing.subject_marks.filter(
+            sm => !subjectMarksMap.hasOwnProperty(sm.subject_id)
+          );
+          finalSubjectMarks = [...finalSubjectMarks, ...existingMarksToKeep];
+
+          // Add existing marks to our map for total calculation
+          existingMarksToKeep.forEach(sm => {
+            subjectMarksMap[sm.subject_id] = sm.marks_obtained;
+          });
+        }
+
+        // Calculate result from exam.service logic
+        const totalObtained = Object.values(subjectMarksMap).reduce((a, b) => a + (b || 0), 0);
+        const totalPossible = exam.subject_schedules.reduce((a, s) => a + (s.total_marks || 0), 0);
+        const percentage = totalPossible > 0 ? (totalObtained / totalPossible) * 100 : 0;
+        const status = result.is_present === false ? 'absent' 
+                     : percentage >= exam.pass_percentage ? 'pass' 
+                     : 'fail';
+
+        if (existing) {
+          await existing.update({
+            subject_marks: finalSubjectMarks,
+            total_marks_obtained: totalObtained,
+            percentage,
+            status,
+            is_present: result.is_present !== false,
+            updated_by: teacherId
+          }, { transaction });
+          processed.push({ student_id: result.student_id, action: 'updated' });
+        } else {
+          await ExamResult.create({
+            id: uuidv4(),
+            exam_id: examId,
+            student_id: result.student_id,
+            subject_marks: finalSubjectMarks,
+            total_marks_obtained: totalObtained,
+            total_marks: totalPossible,
+            percentage,
+            status,
+            is_present: result.is_present !== false,
+            created_by: teacherId,
+            updated_by: teacherId
+          }, { transaction });
+          processed.push({ student_id: result.student_id, action: 'created' });
+        }
+      } catch (error) {
+        errors.push({ student_id: result.student_id, error: error.message });
+      }
+    }
+
+    if (shouldCommit) await transaction.commit();
+
+    return {
+      processed: processed.length,
+      failed: errors.length,
+      errors
+    };
+  } catch (error) {
+    if (shouldCommit) await transaction.rollback();
+    throw error;
+  }
+};
+
+/**
+ * Get exam results for teacher
+ */
+export const getTeacherExamResults = async (teacherId, instituteId, examId, filters = {}, pagination = {}) => {
+  const { page = 1, limit = 20 } = pagination;
+  const offset = (page - 1) * limit;
+  const { Exam, ExamResult, User } = models;
+
+  // Verify teacher owns or is assigned to this exam
+  const assignments = await getTeacherAssignments(teacherId, instituteId);
+  const classIds = assignments.classes.map(c => c.id);
+
+  const exam = await Exam.findOne({
+    where: { 
+      id: examId, 
+      school_id: instituteId,
+      [Op.or]: [
+        { created_by: teacherId },
+        { class_id: classIds.length > 0 ? classIds : null }
+      ]
+    },
+    attributes: ['id', 'name', 'total_marks', 'subject_schedules', 'class_id', 'section_id']
+  });
+
+  if (!exam) throw new Error('Exam not found or unauthorized');
+
+  // Get students in this exam's class/section
+  const studentWhere = {
+    school_id: instituteId,
+    user_type: 'STUDENT',
+    is_active: true,
+    'details.studentDetails.class_id': exam.class_id
+  };
+
+  if (exam.section_id) {
+    studentWhere['details.studentDetails.section_id'] = exam.section_id;
+  }
+
+  const students = await User.findAll({
+    where: studentWhere,
+    attributes: ['id', 'first_name', 'last_name', 'email', 'registration_no', 'details'],
+    order: [['first_name', 'ASC']]
+  });
+
+  const studentIds = students.map(s => s.id);
+
+  // Get results
+  const existingResults = await ExamResult.findAll({
+    where: {
+      exam_id: examId,
+      student_id: { [Op.in]: studentIds }
+    }
+  });
+
+  const resultsMap = new Map(existingResults.map(r => [r.student_id, r]));
+
+  // Build response
+  const results = [];
+  for (const student of students) {
+    const result = resultsMap.get(student.id);
+    
+    results.push({
+      ...(result?.dataValues || {}),
+      student: {
+        id: student.id,
+        first_name: student.first_name,
+        last_name: student.last_name,
+        email: student.email,
+        registration_no: student.registration_no,
+        roll_number: student.details?.studentDetails?.roll_no || ''
+      },
+      id: result?.id || null,
+      exam_id: examId,
+      total_marks_obtained: result?.total_marks_obtained || 0,
+      percentage: result?.percentage || 0,
+      grade: result?.grade || 'N/A',
+      status: result?.status || 'pending'
+    });
+  }
+
+  // Pagination
+  const paginatedResults = results.slice(offset, offset + limit);
+
+  return {
+    data: paginatedResults,
+    pagination: {
+      total: results.length,
+      page,
+      limit,
+      totalPages: Math.ceil(results.length / limit)
+    },
+    exam: {
+      id: exam.id,
+      name: exam.name,
+      total_marks: exam.total_marks,
+      subjects: exam.subject_schedules || []
+    }
+  };
+};
+
+/**
+ * Get exam details for teacher
+ */
+export const getTeacherExamDetails = async (teacherId, instituteId, examId) => {
+  const { Exam, ExamResult } = models;
+
+  // Verify teacher owns or is assigned to this exam
+  const assignments = await getTeacherAssignments(teacherId, instituteId);
+  const classIds = assignments.classes.map(c => c.id);
+
+  const exam = await Exam.findOne({
+    where: { 
+      id: examId, 
+      school_id: instituteId,
+      [Op.or]: [
+        { created_by: teacherId },
+        { class_id: classIds.length > 0 ? classIds : null }
+      ]
+    }
+  });
+
+  if (!exam) throw new Error('Exam not found');
+
+  const examData = exam.toJSON();
+
+  // Filter subject schedules to only those assigned to this teacher
+  let filteredSchedules = examData.subject_schedules || [];
+  const classAssignment = assignments.classes.find(c => c.id === examData.class_id);
+  
+  if (classAssignment && examData.created_by !== teacherId) {
+    filteredSchedules = filteredSchedules.filter(schedule => 
+      classAssignment.subjects.includes(schedule.subject_name)
+    );
+  }
+
+  examData.subject_schedules = filteredSchedules;
+  // Also calculate total marks relevant to this teacher's view dynamically
+  examData.total_marks = filteredSchedules.reduce((a, s) => a + (Number(s.total_marks) || 0), 0);
+
+  // Get results summary
+  const results = await ExamResult.findAll({
+    where: { exam_id: examId }
+  });
+
+  const stats = {
+    total_students: results.length,
+    submitted: results.filter(r => r.status !== 'pending').length,
+    passed: results.filter(r => r.status === 'pass').length,
+    failed: results.filter(r => r.status === 'fail').length,
+    absent: results.filter(r => r.status === 'absent').length,
+    average_percentage: results.length > 0
+      ? results.reduce((sum, r) => sum + (Number(r.percentage) || 0), 0) / results.length
+      : 0
+  };
+
+  return {
+    ...examData,
+    stats,
+    results: results.map(r => r.toJSON())
+  };
+};
+/**
+ * Get ALL students for exam entry (with existing results if any)
+ * This returns complete student list from class/section, not just those with results
+ * AND filters subjects to ONLY those taught by the teacher
+ */
+export const getExamEntryStudents = async (examId, teacherId, instituteId, filters = {}, pagination = {}) => {
+    const { Exam, Timetable, User, ExamResult } = models;
+  const { page = 1, limit = 100 } = pagination;
+  const offset = (page - 1) * limit;
+
+  // 1. Get exam with class/section info
+  const exam = await Exam.findOne({
+    where: { id: examId, school_id: instituteId },
+    attributes: ['id', 'class_id', 'section_id', 'academic_year_id', 'subject_schedules', 'name', 'type', 'total_marks']
+  });
+
+  if (!exam) throw new Error('Exam not found');
+
+  // 2. Get teacher's assigned subjects from timetable for this class/section
+  const timetables = await Timetable.findAll({
+    where: {
+      school_id: instituteId,
+      is_active: true
+    }
+  });
+
+  // Extract subjects that this teacher teaches in this specific class/section
+  const teacherSubjects = new Set();
+  let teachesClass = false;
+
+  timetables.forEach(timetable => {
+    const slots = timetable.slots || [];
+    const teacherSlots = slots.filter(slot => String(slot.teacher_id || '') === String(teacherId));
+    
+    // Check if teacher teaches this class
+    const classMatch = timetable.entity_ids?.class_id === exam.class_id;
+    const sectionMatch = !exam.section_id || timetable.entity_ids?.section_id === exam.section_id;
+    
+    if (teacherSlots.length > 0 && classMatch && sectionMatch) {
+      teachesClass = true;
+      // Add subjects that this teacher teaches
+      teacherSlots.forEach(slot => {
+        if (slot.subject_id) {
+          teacherSubjects.add(slot.subject_id);
+        }
+        if (slot.subject_name) {
+          teacherSubjects.add(slot.subject_name);
+        }
+      });
+    }
+  });
+
+  if (!teachesClass) {
+    throw new Error('You are not authorized to enter marks for this exam');
+  }
+
+  // 3. Filter exam subjects to ONLY those taught by this teacher
+  const allExamSubjects = exam.subject_schedules || [];
+  const filteredSubjects = allExamSubjects.filter(subject => {
+    // Match by subject_id OR subject_name
+    return teacherSubjects.has(subject.subject_id) || teacherSubjects.has(subject.subject_name);
+  });
+
+  console.log(`Teacher subjects: ${Array.from(teacherSubjects).join(', ')}`);
+  console.log(`Filtered subjects: ${filteredSubjects.map(s => s.subject_name).join(', ')}`);
+
+  // Calculate total marks for filtered subjects only
+  const totalPossibleMarks = filteredSubjects.reduce((sum, s) => sum + (Number(s.total_marks) || 0), 0);
+
+  // 4. Fetch ALL students from exam's class/section
+  let studentWhere = {
+    school_id: instituteId,
+    user_type: 'STUDENT',
+    is_active: true,
+    'details.studentDetails.class_id': exam.class_id
+  };
+
+  if (exam.section_id) {
+    studentWhere['details.studentDetails.section_id'] = exam.section_id;
+  }
+
+  // Apply search filter
+  if (filters.search) {
+    studentWhere[Op.or] = [
+      { first_name: { [Op.iLike]: `%${filters.search}%` } },
+      { last_name: { [Op.iLike]: `%${filters.search}%` } },
+      { registration_no: { [Op.iLike]: `%${filters.search}%` } }
+    ];
+  }
+
+  const allStudents = await User.findAll({
+    where: studentWhere,
+    attributes: ['id', 'first_name', 'last_name', 'email', 'registration_no', 'avatar_url', 'details'],
+    order: [['first_name', 'ASC']]
+  });
+
+  // 5. Get existing exam results for these students
+  const studentIds = allStudents.map(s => s.id);
+  
+  let existingResultsMap = new Map();
+  
+  if (models.ExamResult) {
+    const examResults = await models.ExamResult.findAll({
+      where: {
+        exam_id: examId,
+        student_id: { [Op.in]: studentIds }
+      }
+    });
+    existingResultsMap = new Map(examResults.map(r => [r.student_id, r]));
+  }
+
+  // 6. Build response with all students (filtered subjects only)
+  const allStudentsWithResults = allStudents.map(student => {
+    const existingResult = existingResultsMap.get(student.id);
+    const studentDetails = student.details?.studentDetails || {};
+    
+    // Get existing subject marks for filtered subjects only
+    let existingSubjectMarksMap = new Map();
+    if (existingResult && existingResult.subject_marks) {
+      existingResult.subject_marks.forEach(sm => {
+        existingSubjectMarksMap.set(sm.subject_id, sm);
+      });
+    }
+    
+    // Build subject_marks array for filtered subjects only
+    const subjectMarksArray = filteredSubjects.map(subject => {
+      const existingMark = existingSubjectMarksMap.get(subject.subject_id);
+      return {
+        subject_id: subject.subject_id,
+        subject_name: subject.subject_name,
+        marks_obtained: existingMark?.marks_obtained !== undefined && existingMark?.marks_obtained !== null 
+          ? existingMark.marks_obtained 
+          : '',
+        total_marks: subject.total_marks,
+        percentage: existingMark?.percentage || 0,
+        grade: existingMark?.grade || null
+      };
+    });
+    
+    // Calculate total obtained marks for filtered subjects only
+    let totalObtained = 0;
+    subjectMarksArray.forEach(sm => {
+      if (sm.marks_obtained !== '' && sm.marks_obtained !== null && !isNaN(parseFloat(sm.marks_obtained))) {
+        totalObtained += parseFloat(sm.marks_obtained);
+      }
+    });
+    
+    if (existingResult) {
+      // Student has existing results - show pre-filled marks
+      return {
+        id: existingResult.id,
+        exam_id: examId,
+        student_id: student.id,
+        student: {
+          id: student.id,
+          first_name: student.first_name,
+          last_name: student.last_name,
+          email: student.email,
+          registration_no: student.registration_no || '',
+          roll_number: studentDetails.roll_no || studentDetails.roll_number || '',
+          avatar: student.avatar_url
+        },
+        subject_marks: subjectMarksArray,
+        total_marks_obtained: totalObtained,
+        total_marks: totalPossibleMarks,
+        percentage: existingResult.percentage || (totalPossibleMarks > 0 ? (totalObtained / totalPossibleMarks) * 100 : 0),
+        grade: existingResult.grade || null,
+        status: existingResult.status || 'pending',
+        is_present: existingResult.is_present !== false,
+        absent_reason: existingResult.absent_reason || null,
+        teacher_remarks: existingResult.teacher_remarks || null
+      };
+    } else {
+      // Student has no results yet - empty fields
+      return {
+        id: null,
+        exam_id: examId,
+        student_id: student.id,
+        student: {
+          id: student.id,
+          first_name: student.first_name,
+          last_name: student.last_name,
+          email: student.email,
+          registration_no: student.registration_no || '',
+          roll_number: studentDetails.roll_no || studentDetails.roll_number || '',
+          avatar: student.avatar_url
+        },
+        subject_marks: subjectMarksArray,
+        total_marks_obtained: 0,
+        total_marks: totalPossibleMarks,
+        percentage: 0,
+        grade: null,
+        status: 'pending',
+        is_present: true,
+        absent_reason: null,
+        teacher_remarks: null
+      };
+    }
+  });
+
+  // Apply status filter
+  let filteredStudents = allStudentsWithResults;
+  if (filters.status && filters.status !== 'all') {
+    filteredStudents = filteredStudents.filter(s => s.status === filters.status);
+  }
+
+  // Pagination
+  const total = filteredStudents.length;
+  const paginatedStudents = filteredStudents.slice(offset, offset + limit);
+
+  // Get class name
+  const classData = await Class.findOne({
+    where: { id: exam.class_id, school_id: instituteId },
+    attributes: ['name']
+  });
+
+  return {
+    data: paginatedStudents,
+    pagination: {
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(total / limit),
+      hasNext: page * limit < total,
+      hasPrev: page > 1
+    },
+    exam: {
+      id: exam.id,
+      name: exam.name,
+      type: exam.type,
+      class_name: classData?.name || 'Class',
+      section_name: exam.section_id ? 'Section' : null,
+      subject_schedules: filteredSubjects, // ONLY teacher's subjects
+      total_marks: totalPossibleMarks
+    }
+  };
+};
+
 export default {
-  // Dashboard
-  getTeacherDashboard,
-  
-  // Profile
-  getTeacherProfile,
-  updateTeacherProfile,
-  
-  // Classes
-  getMyClasses,
-  getClassDetails,
-  
-  // Students
-  getMyStudents,
-  getStudentDetails,
-  
   // Assignments
   createAssignment,
   updateAssignment,
@@ -1833,5 +2607,14 @@ export default {
   getMyTimetable,
   
   // Notices
-  getNotices
+  getNotices,
+  
+  // Exams
+  getTeacherAssignments,
+  createTeacherExam,
+  getTeacherExams,
+  addTeacherExamResults,
+  getTeacherExamResults,
+  getTeacherExamDetails,
+  getExamEntryStudents
 };

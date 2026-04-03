@@ -593,6 +593,62 @@ export const getStudentStats = async (req, res) => {
   }
 };
 
+/**
+ * Bulk import students
+ * POST /api/v1/students/bulk-import
+ */
+// backend/src/controllers/student.controller.js
+
+export const bulkImportStudents = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const instituteType = getInstituteType(req);
+    
+    let { students } = req.body;
+    
+    if (typeof students === 'string') {
+      students = JSON.parse(students);
+    }
+    
+    if (!students || !Array.isArray(students) || students.length === 0) {
+      return sendError(res, 'No student data provided for bulk import', 400);
+    }
+    
+    // Limit batch size
+    if (students.length > 500) {
+      return sendError(res, 'Maximum 500 students can be imported at once', 400);
+    }
+    
+    const result = await studentService.bulkImportStudents(
+      students,
+      instituteId,
+      instituteType,
+      { created_by: req.user.id }
+    );
+    
+    // Determine response status based on results
+    let statusMessage = '';
+    let statusCode = 200;
+    
+    if (result.imported === 0) {
+      statusMessage = `Import failed for all ${result.total} students`;
+      statusCode = 400;
+    } else if (result.imported === result.total) {
+      statusMessage = `Successfully imported all ${result.imported} students`;
+      statusCode = 200;
+    } else {
+      statusMessage = `Imported ${result.imported} of ${result.total} students. ${result.failed.length} failed.`;
+      statusCode = 207; // Partial success
+    }
+    
+    return sendSuccess(res, result, statusMessage, statusCode);
+    
+  } catch (error) {
+    console.error('Bulk import error:', error);
+    return sendError(res, error.message || 'Failed to import students', 500);
+  }
+};
+
 export default {
   createStudent,
   getAllStudents,
@@ -604,5 +660,6 @@ export default {
   addAcademicSession,
   getStudentsByClass,
   getStudentsBySection,
-  getStudentStats
+  getStudentStats,
+  bulkImportStudents
 };

@@ -354,3 +354,232 @@ export const getNotices = async (req, res) => {
     return sendError(res, error.message, 500);
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXAM MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const getAssignments = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    
+    const assignments = await teacherService.getTeacherAssignments(
+      req.user.id,
+      instituteId
+    );
+    
+    return sendSuccess(res, assignments, 'Teacher assignments fetched successfully');
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+export const createExam = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const { class_id, section_id, subject_schedules, exam_date, exam_type, duration_minutes } = req.body;
+    
+    // Validate required fields
+    if (!class_id || !subject_schedules || !Array.isArray(subject_schedules)) {
+      return sendError(res, 'class_id and subject_schedules are required', 400);
+    }
+    
+    if (subject_schedules.length === 0) {
+      return sendError(res, 'At least one subject is required', 400);
+    }
+    
+    const result = await teacherService.createTeacherExam(
+      req.user.id,
+      instituteId,
+      {
+        class_id,
+        section_id,
+        subject_schedules,
+        exam_date,
+        exam_type: exam_type || 'PERIODIC',
+        duration_minutes: duration_minutes || 60
+      },
+      { transaction: true }
+    );
+    
+    return sendSuccess(res, result, 'Exam created successfully', 201);
+  } catch (error) {
+    return sendError(res, error.message, error.message.includes('not assigned') ? 403 : 500);
+  }
+};
+
+export const getExams = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const { 
+      page = 1, 
+      limit = 10, 
+      status, 
+      type, 
+      class_id, 
+      is_published 
+    } = req.query;
+    
+    const filters = {};
+    if (status) filters.status = status;
+    if (type) filters.type = type;
+    if (class_id) filters.class_id = class_id;
+    if (is_published !== undefined) filters.is_published = is_published === 'true';
+    
+    const result = await teacherService.getTeacherExams(
+      req.user.id,
+      instituteId,
+      filters,
+      {
+        page: parseInt(page),
+        limit: parseInt(limit)
+      }
+    );
+    
+    return sendSuccess(res, result, 'Teacher exams fetched successfully');
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+export const getExamDetails = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const { examId } = req.params;
+    
+    if (!examId) {
+      return sendError(res, 'examId is required', 400);
+    }
+    
+    const result = await teacherService.getTeacherExamDetails(
+      req.user.id,
+      instituteId,
+      examId
+    );
+    
+    if (!result) {
+      return sendError(res, 'Exam not found or unauthorized', 404);
+    }
+    
+    return sendSuccess(res, result, 'Exam details fetched successfully');
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+export const getExamResults = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const { examId } = req.params;
+    const { page = 1, limit = 10, status } = req.query;
+    
+    if (!examId) {
+      return sendError(res, 'examId is required', 400);
+    }
+    
+    const filters = {};
+    if (status) filters.status = status;
+    
+    const result = await teacherService.getTeacherExamResults(
+      req.user.id,
+      instituteId,
+      examId,
+      filters,
+      {
+        page: parseInt(page),
+        limit: parseInt(limit)
+      }
+    );
+    
+    if (!result) {
+      return sendError(res, 'Exam not found or unauthorized', 404);
+    }
+    
+    return sendSuccess(res, result, 'Exam results fetched successfully');
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+export const addExamResults = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const { examId } = req.params;
+    const { results } = req.body;
+    
+    if (!examId) {
+      return sendError(res, 'examId is required', 400);
+    }
+    
+    if (!results || !Array.isArray(results)) {
+      return sendError(res, 'results array is required', 400);
+    }
+    
+    if (results.length === 0) {
+      return sendError(res, 'At least one result is required', 400);
+    }
+    
+    const result = await teacherService.addTeacherExamResults(
+      req.user.id,
+      instituteId,
+      examId,
+      results,
+      { transaction: true }
+    );
+    
+    return sendSuccess(res, result, 'Exam results saved successfully');
+  } catch (error) {
+    return sendError(
+      res, 
+      error.message, 
+      error.message.includes('not assigned') || error.message.includes('unauthorized') ? 403 : 500
+    );
+  }
+};
+
+// backend/src/controllers/portal/teacherPortal.controller.js
+
+/**
+ * Get ALL students for exam entry (with existing results if any)
+ * This is specifically for the "Enter Marks" page
+ */
+export const getExamEntryStudents = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const instituteId = getInstituteId(req);
+    const teacherId = req.user.id;
+
+    if (!examId) {
+      return sendError(res, 'examId is required', 400);
+    }
+
+    const filters = {
+      search: req.query.search,
+      status: req.query.status
+    };
+
+    const pagination = {
+      page: parseInt(req.query.page) || 1,
+      limit: parseInt(req.query.limit) || 100
+    };
+
+    const result = await teacherService.getExamEntryStudents(
+      examId,
+      teacherId,
+      instituteId,
+      filters,
+      pagination
+    );
+
+    return sendSuccess(res, result, 'Exam entry data fetched successfully');
+  } catch (error) {
+    console.error('Get exam entry students error:', error);
+    if (error.message.includes('not authorized')) {
+      return sendError(res, error.message, 403);
+    }
+    if (error.message.includes('not found')) {
+      return sendNotFound(res, error.message);
+    }
+    return sendError(res, error.message, 500);
+  }
+};
