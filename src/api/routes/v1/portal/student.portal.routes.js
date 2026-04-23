@@ -7,7 +7,10 @@
 import { Router } from 'express';
 import { protect, isStudent } from '../../../middlewares/auth.middleware.js';
 import { uploadMultiple, uploadSingle } from '../../../middlewares/upload.middleware.js';
+import { validate } from '../../../middlewares/validation.middleware.js';
 import * as studentPortal from '../../../controllers/portal/studentPortal.controller.js';
+import * as leaveRequestsPortal from '../../../controllers/portal/leaveRequests.portal.controller.js';
+import { createLeaveRequestSchema, cancelLeaveRequestSchema, getMyLeaveRequestsQuerySchema } from '../../../validators/leaveRequest.validator.js';
 
 const router = Router();
 
@@ -46,8 +49,9 @@ router.get('/assignments/upcoming', studentPortal.getUpcomingAssignments);
 router.post('/assignments/:assignmentId/submit', uploadMultiple('files', 5), studentPortal.submitAssignment);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RESULTS
+// EXAMS & RESULTS
 // ─────────────────────────────────────────────────────────────────────────────
+router.get('/exams/schedule', studentPortal.getMyExamSchedule);
 router.get('/results', studentPortal.getMyResults);
 router.get('/results/recent', studentPortal.getRecentResults);
 
@@ -67,5 +71,14 @@ router.get('/notices/recent', studentPortal.getRecentNotices);
 // LIBRARY
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/library', studentPortal.getLibraryData);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEAVE REQUESTS
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/leave-requests/statistics', leaveRequestsPortal.getMyLeaveStatistics);
+router.get('/leave-balance', leaveRequestsPortal.getLeaveBalance);
+router.get('/leave-requests', validate(getMyLeaveRequestsQuerySchema, 'query'), leaveRequestsPortal.getMyLeaveRequests);
+router.post('/leave-requests', validate(createLeaveRequestSchema), leaveRequestsPortal.createLeaveRequest);
+router.patch('/leave-requests/:id/cancel', validate(cancelLeaveRequestSchema), leaveRequestsPortal.cancelLeaveRequest);
 
 export default router;

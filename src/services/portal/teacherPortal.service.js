@@ -1205,15 +1205,19 @@ export const markAttendance = async (teacherId, instituteId, data) => {
     const { class_id, date, attendance: attendanceList } = data;
 
     // Verify teacher teaches this class
-    const timetable = await Timetable.findOne({
-      where: {
-        school_id: instituteId,
-        is_active: true,
-        'entity_ids.class_id': class_id
-      }
+    // Scan ALL active timetables (same as getMyClasses) to handle both
+    // class-level and section-level timetables correctly.
+    const allTimetables = await Timetable.findAll({
+      where: { school_id: instituteId, is_active: true }
     });
 
-    if (!timetable || !(timetable.slots || []).some(s => s.teacher_id === teacherId)) {
+    const teacherTeachesClass = allTimetables.some(tt => {
+      const ttClassId = tt.entity_ids?.class_id;
+      if (!ttClassId || ttClassId !== class_id) return false;
+      return (tt.slots || []).some(s => s.teacher_id === teacherId);
+    });
+
+    if (!teacherTeachesClass) {
       throw new Error('You do not teach this class');
     }
 
@@ -1254,15 +1258,19 @@ export const markAttendance = async (teacherId, instituteId, data) => {
  */
 export const getClassAttendance = async (teacherId, instituteId, classId, date) => {
   // Verify teacher teaches this class
-  const timetable = await Timetable.findOne({
-    where: {
-      school_id: instituteId,
-      is_active: true,
-      'entity_ids.class_id': classId
-    }
+  // Scan ALL active timetables (same as getMyClasses) to handle both
+  // class-level and section-level timetables correctly.
+  const allTimetables = await Timetable.findAll({
+    where: { school_id: instituteId, is_active: true }
   });
 
-  if (!timetable || !(timetable.slots || []).some(s => s.teacher_id === teacherId)) {
+  const teacherTeachesClass = allTimetables.some(tt => {
+    const ttClassId = tt.entity_ids?.class_id;
+    if (!ttClassId || ttClassId !== classId) return false;
+    return (tt.slots || []).some(s => s.teacher_id === teacherId);
+  });
+
+  if (!teacherTeachesClass) {
     throw new Error('You do not teach this class');
   }
 
@@ -1379,7 +1387,7 @@ export const getMyTimetable = async (teacherId, instituteId, weekStart = null) =
 export const getNotices = async (teacherId, instituteId, limit = 10) => {
   const notices = await Notification.findAll({
     where: {
-      school_id: instituteId,
+      institute_id: instituteId,
       [Op.or]: [{ user_id: null }, { user_id: teacherId }]
     },
     include: [

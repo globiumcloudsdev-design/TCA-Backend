@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { protect } from '../../middlewares/auth.middleware.js';
 import { hasPermission } from '../../middlewares/permission.middleware.js';
 import * as teacherController from '../../controllers/teacher.controller.js';
-import { uploadMultiple } from '../../middlewares/upload.middleware.js';
+import { uploadFields } from '../../middlewares/upload.middleware.js';
 
 const router = Router();
 
@@ -27,7 +27,10 @@ router.get(
 router.post(
   '/',
   hasPermission('teachers.create'),
-  uploadMultiple('documents', 20),
+  uploadFields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'documents', maxCount: 20 }
+  ]),
   teacherController.createTeacher
 );
 
@@ -58,7 +61,10 @@ router.get(
 router.put(
   '/:id',
   hasPermission('teachers.update'),
-  uploadMultiple('documents', 20),
+  uploadFields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'documents', maxCount: 20 }
+  ]),
   teacherController.updateTeacher
 );
 

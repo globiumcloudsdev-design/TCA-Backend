@@ -5,4 +5,5 @@ module.exports = {
   'models-path':     path.resolve('src', 'models', 'postgres'),
   'seeders-path':    path.resolve('src', 'seeders'),
   'migrations-path': path.resolve('migrations'),
+  'env': process.env.NODE_ENV || 'development'
 };

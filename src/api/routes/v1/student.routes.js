@@ -34,6 +34,16 @@ router.get(
   studentController.getAllStudents
 );
 
+/**
+ * GET - Search students (for promotion/search page)
+ * Query: ?q=Hassan&limit=20
+ */
+router.get(
+  '/search',
+  hasPermission('students.read'),
+  studentController.searchStudents
+);
+
 // Sirf ek route - simple!
 router.post('/bulk-import', hasPermission('students.create'), studentController.bulkImportStudents);
 
@@ -69,6 +79,46 @@ router.delete(
   '/:id',
   hasPermission('students.delete'),
   studentController.deleteStudent
+);
+
+router.post('/bulk-delete', hasPermission('students.delete'), studentController.bulkDeleteStudents);
+
+// ==================== PROMOTION ROUTES ====================
+
+/**
+ * GET - Check promotion eligibility for a single student
+ */
+router.get(
+  '/:id/promotion-eligibility',
+  hasPermission('students.read'),
+  studentController.getSingleStudentEligibility
+);
+
+/**
+ * GET - Get promotion eligibility for all students in a class
+ */
+router.get(
+  '/classes/:classId/promotion-eligibility',
+  hasPermission('students.read'),
+  studentController.getPromotionEligibilityByClass
+);
+
+/**
+ * POST - Promote a single student
+ */
+router.post(
+  '/:id/promote',
+  hasPermission('students.update'),
+  studentController.promoteSingleStudent
+);
+
+/**
+ * POST - Bulk promote students by current class
+ */
+router.post(
+  '/bulk-promote',
+  hasPermission('students.update'),
+  studentController.bulkPromoteStudents
 );
 
 export default router;

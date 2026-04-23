@@ -23,6 +23,18 @@ import branchRoutes from './branch.routes.js'
 import parentRoutes from './parent.routes.js';
 import portalRoutes from './portal/index.js'; // ✅ Portal routes aggregator
 import ExamRoutes from './exam.routes.js'; // ✅ Import exam routes
+import reportRoutes from './report.routes.js'; // ✅ Import report routes
+import expenseRoutes from './expense.routes.js'; // ✅ Import expense routes
+import vendorRoutes from './vendor.routes.js'; // ✅ Import vendor routes
+import policyRoutes from './policy.routes.js'; // ✅ Import policy routes
+import staffAttendanceRoutes from './staffAttendance.routes.js'; // ✅ Import staff attendance routes
+import leaveRequestRoutes from './leaveRequest.routes.js'; // ✅ Import leave request routes
+import leaveTypeRoutes from './leaveType.routes.js'; // ✅ Import leave type routes
+import settingRoutes from './setting.routes.js'; // ✅ Import setting routes
+import feeVoucherRoutes from './feeVoucher.routes.js'; // ✅ Import fee voucher routes
+import notificationRoutes from './notification.routes.js'; // ✅ Import notification routes
+import userRoutes from './user.routes.js'; // ✅ Import user routes
+import payrollRoutes from './payroll.routes.js'; // ✅ Import payroll routes
 
 const router = Router();
 
@@ -68,6 +80,9 @@ router.use('/fee-templates', feeTemplateRoutes); // legacy alias, remove later
 // ── Fee Management ─────────────────────────────────────────────────────────
 router.use('/fees', feeRoutes);
 
+// ── Fee Voucher Management ─────────────────────────────────────────────────────────
+router.use('/fee-vouchers', feeVoucherRoutes); // ✅ Mount fee voucher routes
+
 // ── Attendance ─────────────────────────────────────────────────────────────
 router.use('/attendance', attendanceRoutes);
 
@@ -85,6 +100,39 @@ router.use('/portal', portalRoutes);
 
 // ── Exam Routes ─────────────────────────────────────────────────────────────
 router.use('/exams', ExamRoutes); // ✅ Mount exam routes
+
+// ── Report Routes ─────────────────────────────────────────────────────────
+router.use('/reports', reportRoutes); // ✅ Mount report routes
+
+// ── Expense Routes ─────────────────────────────────────────────────────────
+router.use('/expenses', expenseRoutes); // ✅ Mount expense routes
+
+// ── Vendor Routes ─────────────────────────────────────────────────────────
+router.use('/vendors', vendorRoutes); // ✅ Mount vendor routes
+
+// ── Policy Routes ─────────────────────────────────────────────────────────
+router.use('/policies', policyRoutes); // ✅ Mount policy routes
+
+// ── Staff Attendance Routes ─────────────────────────────────────────────────────────
+router.use('/staff-attendance', staffAttendanceRoutes); // ✅ Mount staff attendance routes
+
+// ── Leave Request Routes ─────────────────────────────────────────────────────────
+router.use('/leave-requests', leaveRequestRoutes); // ✅ Mount leave request routes
+
+// ── Leave Type Routes ─────────────────────────────────────────────────────────
+router.use('/leave-types', leaveTypeRoutes); // ✅ Mount leave type routes
+
+// ── Institute Settings Routes ─────────────────────────────────────────────────────────
+router.use('/settings', settingRoutes); // ✅ Mount institute settings routes
+
+// ── Notification Routes ─────────────────────────────────────────────────────────
+router.use('/notifications', notificationRoutes); // ✅ Mount notification routes
+
+// ── User Routes (for admin management of users) ─────────────────────────────────────────────────────────
+router.use('/users', userRoutes); // ✅ Mount user routes
+
+// ── Payroll Routes ─────────────────────────────────────────────────────────
+router.use('/payroll', payrollRoutes); // ✅ Mount payroll routes
 
 // V1 health
 router.get('/ping', (req, res) => res.json({ ok: true, version: 'v1' }));

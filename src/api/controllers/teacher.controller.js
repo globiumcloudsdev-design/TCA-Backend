@@ -119,6 +119,16 @@ export const createTeacher = async (req, res) => {
       }
     }
     
+    // Handle photo upload to Cloudinary
+    if (req.files?.photo?.[0]) {
+      const folder = `the-clouds-academy/${instituteId}/teachers/photos`;
+      const uploaded = await uploadToCloudinary(req.files.photo[0].path, folder);
+      body.photo_url = uploaded.url;
+      body.photo_public_id = uploaded.public_id;
+      
+      try { await unlink(req.files.photo[0].path); } catch { /* ignore */ }
+    }
+    
     // Upload documents if any
     if (req.files?.length) {
       console.log('📎 Uploading', req.files.length, 'documents');
@@ -230,71 +240,136 @@ export const getTeacherById = async (req, res) => {
   }
 };
 
-/**
- * Update teacher
- * PUT /api/v1/teachers/:id
- */
+// /**
+//  * Update teacher
+//  * PUT /api/v1/teachers/:id
+//  */
+// export const updateTeacher = async (req, res) => {
+//   const transaction = await sequelize.transaction();
+  
+//   try {
+//     const { id } = req.params;
+//     const instituteId = getInstituteId(req);
+    
+//     if (!instituteId) {
+//       await transaction.rollback();
+//       return sendError(res, 'Institute ID not found', 400);
+//     }
+    
+//     // Parse form data
+//     const body = { ...req.body };
+    
+//     if (body.subjects) {
+//       try { 
+//         body.subjects = JSON.parse(body.subjects); 
+//       } catch { 
+//         body.subjects = []; 
+//       }
+//     }
+    
+//     // Handle existing documents string from multipart/form-data
+//     if (body.documents && typeof body.documents === 'string') {
+//       try {
+//         body.documents = JSON.parse(body.documents);
+//       } catch (e) {
+//         console.warn('⚠️ Failed to parse body.documents:', e.message);
+//         body.documents = [];
+//       }
+//     }
+
+//     // Handle photo upload to Cloudinary
+//     if (req.files?.photo?.[0]) {
+//       const folder = `the-clouds-academy/${instituteId}/teachers/photos`;
+//       const uploaded = await uploadToCloudinary(req.files.photo[0].path, folder);
+//       body.photo_url = uploaded.url;
+//       body.photo_public_id = uploaded.public_id;
+      
+//       try { await unlink(req.files.photo[0].path); } catch { /* ignore */ }
+//     }
+
+//     // Upload new documents
+//     if (req.files?.length && !req.files?.photo?.[0]) {
+//       console.log('📎 Uploading', req.files.length, 'new documents');
+//       const uploadedDocs = await uploadDocuments(req.files, instituteId, id);
+      
+//       if (Array.isArray(body.documents)) {
+//         body.documents = [...body.documents, ...uploadedDocs];
+//       } else {
+//         body.documents = uploadedDocs;
+//       }
+//     }
+    
+//     const updatedTeacher = await teacherService.updateTeacher(
+//       id, instituteId, body, { transaction }
+//     );
+    
+//     await transaction.commit();
+        
+//     return sendSuccess(res, updatedTeacher, 'Teacher updated successfully');
+    
+//   } catch (error) {
+//     await transaction.rollback();
+//     console.error('❌ Update teacher error:', error);
+    
+//     if (error.message === 'Teacher not found') {
+//       return sendNotFound(res, error.message);
+//     }
+//     return sendError(res, error.message || 'Failed to update teacher', 400);
+//   }
+// };
+
+
 export const updateTeacher = async (req, res) => {
   const transaction = await sequelize.transaction();
-  
   try {
     const { id } = req.params;
     const instituteId = getInstituteId(req);
-    
-    if (!instituteId) {
-      await transaction.rollback();
-      return sendError(res, 'Institute ID not found', 400);
+    if (!instituteId) return sendError(res, 'Institute ID not found', 400);
+
+    let updateData = { ...req.body };
+
+    // Parse JSON strings
+    if (updateData.subjects && typeof updateData.subjects === 'string') {
+      try { updateData.subjects = JSON.parse(updateData.subjects); } catch { updateData.subjects = []; }
     }
-    
-    // Parse form data
-    const body = { ...req.body };
-    
-    if (body.subjects) {
-      try { 
-        body.subjects = JSON.parse(body.subjects); 
-      } catch { 
-        body.subjects = []; 
-      }
+    if (updateData.documents && typeof updateData.documents === 'string') {
+      try { updateData.documents = JSON.parse(updateData.documents); } catch { updateData.documents = []; }
     }
-    
-    // Handle existing documents string from multipart/form-data
-    if (body.documents && typeof body.documents === 'string') {
-      try {
-        body.documents = JSON.parse(body.documents);
-      } catch (e) {
-        console.warn('⚠️ Failed to parse body.documents:', e.message);
-        body.documents = [];
+
+    // Handle photo upload
+    if (req.files?.photo?.[0]) {
+      const folder = `the-clouds-academy/${instituteId}/teachers/photos`;
+      const uploaded = await uploadToCloudinary(req.files.photo[0].path, folder);
+      updateData.photo_url = uploaded.url;
+      updateData.photo_public_id = uploaded.public_id;
+      await unlink(req.files.photo[0].path).catch(() => {});
+      // console.log('✅ Avatar uploaded:', updateData.photo_url);
+    }
+
+    // Handle document uploads
+    const docFiles = req.files?.documents || [];
+    if (docFiles.length) {
+      const uploadedDocs = await uploadDocuments(docFiles, instituteId, id);
+      updateData.documents = [...(updateData.documents || []), ...uploadedDocs];
+    }
+
+    // Cleanup "undefined" strings
+    for (const key of Object.keys(updateData)) {
+      if (updateData[key] === 'undefined' || updateData[key] === 'null') {
+        delete updateData[key];
       }
     }
 
-    // Upload new documents
-    if (req.files?.length) {
-      console.log('📎 Uploading', req.files.length, 'new documents');
-      const uploadedDocs = await uploadDocuments(req.files, instituteId, id);
-      
-      if (Array.isArray(body.documents)) {
-        body.documents = [...body.documents, ...uploadedDocs];
-      } else {
-        body.documents = uploadedDocs;
-      }
-    }
-    
-    const updatedTeacher = await teacherService.updateTeacher(
-      id, instituteId, body, { transaction }
-    );
-    
+    // console.log('📝 Final updateData before service:', JSON.stringify(updateData, null, 2));
+
+    const updatedTeacher = await teacherService.updateTeacher(id, instituteId, updateData, { transaction });
     await transaction.commit();
-        
     return sendSuccess(res, updatedTeacher, 'Teacher updated successfully');
-    
   } catch (error) {
     await transaction.rollback();
-    console.error('❌ Update teacher error:', error);
-    
-    if (error.message === 'Teacher not found') {
-      return sendNotFound(res, error.message);
-    }
-    return sendError(res, error.message || 'Failed to update teacher', 400);
+    console.error('❌ Update error:', error);
+    if (error.message === 'Teacher not found') return sendNotFound(res, error.message);
+    return sendError(res, error.message || 'Update failed', 400);
   }
 };
 

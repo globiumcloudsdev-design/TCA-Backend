@@ -206,6 +206,16 @@ export const createStudent = async (req, res) => {
   } catch (error) {
     await transaction.rollback();
     console.error('❌ Create student error:', error);
+
+    // Precise Error Message for Duplicate Registration Number
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      const field = error.errors[0]?.path;
+      const value = error.errors[0]?.value;
+      if (field === 'registration_no') {
+        return sendError(res, `Registration Number "${value}" already exists. Please use a unique one.`, 409);
+      }
+      return sendError(res, `${field} must be unique.`, 409);
+    }
     
     return sendError(res, error.message || 'Failed to create student', 400);
   }
@@ -396,19 +406,37 @@ export const updateStudent = async (req, res) => {
 /**
  * Delete student
  * DELETE /api/v1/students/:id
+ * Query params: ?type=delete (for permanent delete) or ?type=active (for activate)
  */
 export const deleteStudent = async (req, res) => {
   try {
     const { id } = req.params;
+    const { type } = req.query; // 'delete', 'active', or 'inactive' (default)
     const instituteId = getInstituteId(req);
     
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    await studentService.deleteStudent(id, instituteId);
+    // Validate type parameter
+    let deleteType = 'inactive'; // default
+    if (type === 'delete') {
+      deleteType = 'delete';
+    } else if (type === 'active') {
+      deleteType = 'active';
+    } else if (type === 'inactive') {
+      deleteType = 'inactive';
+    }
     
-    return sendNoContent(res);
+    const result = await studentService.deleteStudent(id, instituteId, deleteType);
+    
+    // Different status codes for different operations
+    let statusCode = 200;
+    if (result.type === 'hard_delete') {
+      statusCode = 200;
+    }
+    
+    return sendSuccess(res, result, result.message, statusCode);
     
   } catch (error) {
     console.error('❌ Delete student error:', error);
@@ -597,7 +625,6 @@ export const getStudentStats = async (req, res) => {
  * Bulk import students
  * POST /api/v1/students/bulk-import
  */
-// backend/src/controllers/student.controller.js
 
 export const bulkImportStudents = async (req, res) => {
   try {
@@ -649,6 +676,175 @@ export const bulkImportStudents = async (req, res) => {
   }
 };
 
+
+
+// ==================== PROMOTION CONTROLLERS ====================
+
+/**
+ * Promote a single student
+ * POST /api/v1/students/:id/promote
+ * Body: { targetClassId, targetSectionId, targetAcademicYearId, force (optional) }
+ */
+export const promoteSingleStudent = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const instituteId = getInstituteId(req);
+    const { targetClassId, targetSectionId, targetAcademicYearId, force = false } = req.body;
+
+    if (!instituteId) {
+      await transaction.rollback();
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    if (!targetClassId || !targetSectionId || !targetAcademicYearId) {
+      await transaction.rollback();
+      return sendError(res, 'Missing required fields: targetClassId, targetSectionId, targetAcademicYearId', 400);
+    }
+
+    const result = await studentService.promoteStudent(
+      id,
+      instituteId,
+      { targetClassId, targetSectionId, targetAcademicYearId, force },
+      { transaction }
+    );
+
+    await transaction.commit();
+    return sendSuccess(res, result, 'Student promoted successfully');
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Promote student error:', error);
+    return sendError(res, error.message || 'Failed to promote student', 400);
+  }
+};
+
+/**
+ * Bulk promote students by current class
+ * POST /api/v1/students/bulk-promote
+ * Body: { fromClassId, toClassId, toSectionId, targetAcademicYearId, force (optional) }
+ */
+export const bulkPromoteStudents = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const { fromClassId, toClassId, toSectionId, targetAcademicYearId, force = false } = req.body;
+
+    if (!instituteId) {
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    if (!fromClassId || !toClassId || !toSectionId || !targetAcademicYearId) {
+      return sendError(res, 'Missing required fields: fromClassId, toClassId, toSectionId, targetAcademicYearId', 400);
+    }
+
+    const result = await studentService.bulkPromoteByClass(
+      instituteId,
+      fromClassId,
+      toClassId,
+      toSectionId,
+      targetAcademicYearId,
+      { force }
+    );
+
+    return sendSuccess(res, result, 'Bulk promotion completed');
+  } catch (error) {
+    console.error('❌ Bulk promote error:', error);
+    return sendError(res, error.message || 'Failed to perform bulk promotion', 500);
+  }
+};
+
+/**
+ * Get promotion eligibility for all students in a class
+ * GET /api/v1/students/classes/:classId/promotion-eligibility?academicYearId=...
+ */
+export const getPromotionEligibilityByClass = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const instituteId = getInstituteId(req);
+    const { academicYearId } = req.query;
+
+    if (!instituteId) {
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    if (!classId || !academicYearId) {
+      return sendError(res, 'Missing required query parameters: classId, academicYearId', 400);
+    }
+
+    const eligibility = await studentService.getClassPromotionEligibility(
+      instituteId,
+      classId,
+      academicYearId
+    );
+
+    return sendSuccess(res, eligibility, 'Promotion eligibility fetched successfully');
+  } catch (error) {
+    console.error('❌ Get eligibility error:', error);
+    return sendError(res, error.message || 'Failed to fetch eligibility', 500);
+  }
+};
+
+/**
+ * Check single student promotion eligibility
+ * GET /api/v1/students/:id/promotion-eligibility
+ */
+export const getSingleStudentEligibility = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const instituteId = getInstituteId(req);
+
+    if (!instituteId) {
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    // Get current active session's academic year
+    const student = await studentService.getStudentById(id, instituteId);
+    if (!student) {
+      return sendNotFound(res, 'Student not found');
+    }
+
+    const activeSession = student.details?.studentDetails?.academicSessions?.find(s => s.status === 'active');
+    if (!activeSession) {
+      return sendError(res, 'No active academic session found for this student', 400);
+    }
+
+    // Call the eligibility check (need to import or define inside service)
+    // We'll add a helper in service or call directly
+    const { isStudentEligibleForPromotion } = await import('../../services/student.service.js');
+    const { eligible, reason } = await isStudentEligibleForPromotion(id, activeSession.academic_year_id);
+
+    return sendSuccess(res, {
+      studentId: id,
+      eligible,
+      reason,
+      currentAcademicYearId: activeSession.academic_year_id,
+      currentClassId: activeSession.class_id,
+      currentSectionId: activeSession.section_id
+    }, 'Eligibility checked');
+  } catch (error) {
+    console.error('❌ Check eligibility error:', error);
+    return sendError(res, error.message || 'Failed to check eligibility', 500);
+  }
+};
+
+/**
+ * Search students by name/email/phone/roll number
+ * GET /api/v1/students/search?q=...&limit=...
+ */
+export const searchStudents = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    if (!instituteId) return sendError(res, 'Institute ID not found', 400);
+    const { q, limit = 20 } = req.query;
+    if (!q || q.trim().length < 2) {
+      return sendSuccess(res, { data: [], total: 0, query: q }, 'Enter at least 2 characters');
+    }
+    const result = await studentService.searchStudents(instituteId, q, limit);
+    return sendSuccess(res, result, 'Students fetched successfully');
+  } catch (error) {
+    console.error('❌ Search students error:', error);
+    return sendError(res, error.message || 'Failed to search students', 500);
+  }
+};
 export default {
   createStudent,
   getAllStudents,
@@ -661,5 +857,10 @@ export default {
   getStudentsByClass,
   getStudentsBySection,
   getStudentStats,
-  bulkImportStudents
+  bulkImportStudents,
+  promoteSingleStudent,
+  bulkPromoteStudents,
+  getPromotionEligibilityByClass,
+  getSingleStudentEligibility,
+  searchStudents
 };

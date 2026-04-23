@@ -178,8 +178,19 @@ export const submitAssignment = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RESULTS
+// EXAMS & RESULTS
 // ─────────────────────────────────────────────────────────────────────────────
+export const getMyExamSchedule = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const schedule = await studentService.getMyExamSchedule(req.user.id, instituteId);
+    return sendSuccess(res, schedule, 'Exam schedule fetched successfully');
+  } catch (error) {
+    console.error('Exam schedule error:', error);
+    return sendError(res, error.message, 500);
+  }
+};
+
 export const getMyResults = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);

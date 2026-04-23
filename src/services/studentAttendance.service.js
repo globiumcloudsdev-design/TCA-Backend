@@ -1,6 +1,8 @@
 import { Op } from "sequelize";
 import models from "../models/postgres/index.js";
 import { sequelize } from "../models/postgres/index.js";
+import { createNotification, broadcastNotification } from "./notification.service.js";
+import logger from "../config/logger.js";
 
 const { StudentAttendance, User, Class, Section, Institute } = models;
 
@@ -39,6 +41,84 @@ const getWorkingDays = (month, year) => {
     if (dayOfWeek !== 0) workingDays++;
   }
   return workingDays;
+};
+
+/**
+ * Helper: Send attendance notification to parent and admins
+ */
+const sendAttendanceNotification = async (studentId, attendanceData, schoolId, studentName, status) => {
+  try {
+    // Find student to get parent info
+    const student = await User.findByPk(studentId, { attributes: ['id', 'school_id', 'details'] });
+    if (!student) return;
+
+    // Find parent users LINKED to this specific student
+    // Parents have student_ids array in details.parentDetails.student_ids
+    const parents = await User.findAll({
+      where: {
+        school_id: schoolId,
+        user_type: 'PARENT',
+      },
+      attributes: ['id', 'first_name', 'last_name', 'details'],
+    });
+
+    // Filter parents that have this student in their student_ids
+    const linkedParents = parents.filter((parent) => {
+      const studentIds = parent.details?.parentDetails?.student_ids || [];
+      return Array.isArray(studentIds) && studentIds.includes(studentId);
+    });
+
+    // Send to each linked parent ONLY
+    for (const parent of linkedParents) {
+      await createNotification({
+        institute_id: schoolId,
+        user_id: parent.id,
+        title: `${studentName} Attendance Marked`,
+        body: `Attendance marked as ${status === 'present' ? '✅ Present' : status === 'absent' ? '❌ Absent' : status === 'half' ? '⏰ Half Day' : '❓ ' + status}`,
+        type: 'attendance',
+        channel: 'in_app',
+        data: {
+          studentId,
+          studentName,
+          status,
+          date: attendanceData.date,
+          className: student?.details?.studentDetails?.class_name || 'N/A',
+          sectionName: student?.details?.studentDetails?.section_name || 'N/A'
+        }
+      }, true);
+    }
+
+    // Also notify institute admin
+    await broadcastNotification({
+      institute_id: schoolId,
+      recipient_type: 'ALL_ADMINS',
+      title: `Attendance: ${studentName}`,
+      body: `${studentName} marked ${status}`,
+      type: 'attendance',
+      channel: 'in_app',
+      data: { studentId, status, date: attendanceData.date }
+    }, true);
+
+    // Notify student
+    await createNotification({
+      institute_id: schoolId,
+      user_id: studentId,
+      title: 'Your Attendance Marked',
+      body: `Your attendance has been marked as ${status === 'present' ? '✅ Present' : status === 'absent' ? '❌ Absent' : status === 'half' ? '⏰ Half Day' : '❓ ' + status} on ${new Date(attendanceData.date).toLocaleDateString()}`,
+      type: 'attendance',
+      channel: 'in_app',
+      data: {
+        studentId,
+        status,
+        date: attendanceData.date,
+        className: student?.details?.studentDetails?.class_name || 'N/A'
+      }
+    }, true);
+
+  } catch (error) {
+    logger.error(`Failed to send attendance notification: ${error.message}`);
+    // Don't fail the attendance marking if notification fails
+  }
 };
 
 /**
@@ -123,6 +203,28 @@ export const markAttendance = async (data, options = {}) => {
     attendance = await StudentAttendance.create(sanitizedData, { transaction });
   }
 
+  // 4.5 Send notifications (after attendance is created/updated)
+  if (attendance) {
+    try {
+      const student = await User.findByPk(sanitizedData.student_id, {
+        attributes: ['id', 'first_name', 'last_name', 'school_id']
+      });
+      if (student) {
+        const studentName = `${student.first_name} ${student.last_name}`;
+        await sendAttendanceNotification(
+          sanitizedData.student_id,
+          attendance,
+          student.school_id || sanitizedData.school_id,
+          studentName,
+          sanitizedData.status
+        );
+      }
+    } catch (notifError) {
+      logger.error(`Notification error in markAttendance: ${notifError.message}`);
+      // Don't fail the attendance marking
+    }
+  }
+
   // 5. Optionally reload with full metadata for display
   if (skipReload) return attendance;
   return await reloadAttendanceWithMetadata(attendance.id);
@@ -180,26 +282,51 @@ export const bulkMarkAttendance = async (data, options = {}) => {
         if (!checkedSections.get(attendanceData.section_id)) attendanceData.section_id = null;
       }
 
-      // Record logic: skip or mark
+      // Record logic: always upsert (never blind INSERT) to prevent unique constraint violations.
+      // findOne first — then skip / update / create based on skip_existing flag.
       let attendance;
-      if (data.skip_existing === true) {
-        const existing = await StudentAttendance.findOne({
-          where: { student_id: attendanceData.student_id, date: attendanceData.date },
-          transaction,
-        });
-        if (existing) {
+      const existing = await StudentAttendance.findOne({
+        where: { student_id: attendanceData.student_id, date: attendanceData.date },
+        transaction,
+      });
+
+      if (existing) {
+        if (data.skip_existing === true) {
+          // skip_existing mode: leave the record untouched
           errors.push({ student_id: record.student_id, reason: 'Already exists' });
           continue;
         }
-        attendance = await StudentAttendance.create(attendanceData, { transaction });
+        // Overwrite mode: update existing record
+        attendance = await existing.update(attendanceData, { transaction });
       } else {
-        // use internal markAttendance but skip its individual reload
-        attendance = await markAttendance(attendanceData, { transaction, skipReload: true });
+        // No existing record — safe to create
+        attendance = await StudentAttendance.create(attendanceData, { transaction });
       }
       results.push(attendance);
     }
 
     await transaction.commit();
+
+    // Send bulk attendance notification to admin
+    try {
+      if (results.length > 0) {
+        await broadcastNotification({
+          institute_id: data.school_id,
+          recipient_type: 'ALL_ADMINS',
+          title: `📋 Bulk Attendance Marked - ${results.length} Students`,
+          body: `${results.length} students' attendance marked for ${data.date}`,
+          type: 'attendance',
+          channel: 'in_app',
+          data: {
+            count: results.length,
+            date: data.date,
+            errors: errors.length
+          }
+        }, true);
+      }
+    } catch (notifError) {
+      logger.error(`Notification error in bulkMarkAttendance: ${notifError.message}`);
+    }
 
     // Reload ALL results with metadata in parallel at the end
     const finalResults = await Promise.all(
@@ -257,6 +384,26 @@ export const scanQR = async (data, options = {}) => {
     }
 
     if (!options.transaction) await transaction.commit();
+
+    // Send QR scan notification
+    try {
+      const student = await User.findByPk(student_id, {
+        attributes: ['id', 'first_name', 'last_name', 'school_id']
+      });
+      if (student) {
+        const studentName = `${student.first_name} ${student.last_name}`;
+        await sendAttendanceNotification(
+          student_id,
+          attendance,
+          finalSchoolId,
+          studentName,
+          'present'
+        );
+      }
+    } catch (notifError) {
+      logger.error(`Notification error in scanQR: ${notifError.message}`);
+    }
+
     return await reloadAttendanceWithMetadata(attendance.id);
   } catch (err) {
     if (!options.transaction) await transaction.rollback();
@@ -277,8 +424,13 @@ export const getAttendance = async (filters = {}, pagination = {}) => {
   if (filters.section_id) where.section_id = filters.section_id;
   if (filters.student_id) where.student_id = filters.student_id;
   if (filters.date) where.date = filters.date;
-  if (filters.from_date && filters.to_date) {
-    where.date = { [Op.between]: [filters.from_date, filters.to_date] };
+  if (filters.from_date || filters.to_date) {
+    where.date = where.date || {};
+    if (typeof where.date !== 'object' || where.date === null) {
+      where.date = { [Op.eq]: where.date };
+    }
+    if (filters.from_date) where.date[Op.gte] = filters.from_date;
+    if (filters.to_date) where.date[Op.lte] = filters.to_date;
   }
   if (filters.status) where.status = filters.status;
 

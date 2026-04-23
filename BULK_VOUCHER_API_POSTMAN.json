@@ -1,0 +1,155 @@
+{
+  "info": {
+    "name": "Bulk Fee Voucher Generation API",
+    "description": "Test endpoints for bulk fee voucher generation system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Generate Single Student Voucher",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"studentId\": \"student-uuid-here\",\n  \"month\": 4,\n  \"year\": 2026\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/fee-vouchers/generate-single",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "fee-vouchers", "generate-single"]
+        }
+      },
+      "description": "Generate fee voucher for a single student with their monthly fee and concession"
+    },
+    {
+      "name": "Generate Class Vouchers",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"classId\": \"class-uuid-here\",\n  \"month\": 4,\n  \"year\": 2026\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/fee-vouchers/generate-class",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "fee-vouchers", "generate-class"]
+        }
+      },
+      "description": "Generate fee vouchers for all students in a specific class"
+    },
+    {
+      "name": "Generate Institute Vouchers",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"month\": 4,\n  \"year\": 2026\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/fee-vouchers/generate-institute",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "fee-vouchers", "generate-institute"]
+        }
+      },
+      "description": "Generate fee vouchers for ALL active students in the entire institute"
+    },
+    {
+      "name": "Get All Vouchers",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/fee-vouchers?month=4&year=2026&status=pending&page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "fee-vouchers"],
+          "query": [
+            {
+              "key": "month",
+              "value": "4"
+            },
+            {
+              "key": "year",
+              "value": "2026"
+            },
+            {
+              "key": "status",
+              "value": "pending"
+            },
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        }
+      },
+      "description": "Retrieve all fee vouchers with optional filters and pagination"
+    },
+    {
+      "name": "Delete/Archive Voucher",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/fee-vouchers/voucher-uuid-here",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "fee-vouchers", "voucher-uuid-here"]
+        }
+      },
+      "description": "Archive/delete a fee voucher (cannot delete paid vouchers)"
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000"
+    },
+    {
+      "key": "token",
+      "value": "your-jwt-token-here"
+    }
+  ]
+}

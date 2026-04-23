@@ -154,6 +154,9 @@ export const createTeacher = async (data, options = {}) => {
       nationality: data.nationality || 'Pakistani',
       cnic: data.cnic,
       status: data.status || 'active',
+      // ✅ Map photo_url to avatar_url (from Cloudinary upload)
+      avatar_url: data.photo_url || data.avatar_url || null,
+      avatar_public_id: data.photo_public_id || data.avatar_public_id || null,
     };
     
     // 6. Prepare documents
@@ -180,6 +183,8 @@ export const createTeacher = async (data, options = {}) => {
       password_hash: hashedPassword,
       registration_no: employeeId,
       permissions: rolePermissions,
+      avatar_url: data.photo_url || data.avatar_url || null,
+      avatar_public_id: data.photo_public_id || data.avatar_public_id || null,
       details: {
         teacherDetails: teacherDetails,
       },
@@ -232,158 +237,115 @@ export const createTeacher = async (data, options = {}) => {
  */
 export const updateTeacher = async (id, instituteId, updateData, options = {}) => {
   const { transaction } = options;
-  
+
   const user = await User.findOne({
     where: { id, school_id: instituteId, user_type: 'TEACHER' },
-    include: [{ model: Role, as: 'Role' }]
+    include: [{ model: Role, as: 'Role' }],
+    transaction
   });
-  
-  if (!user) {
-    throw new Error('Teacher not found');
-  }
-  
-  console.log('📝 Updating teacher with data:', updateData);
-  
-  // Update basic fields - ONLY if they exist in updateData
-  if (updateData.first_name !== undefined) user.first_name = updateData.first_name;
-  if (updateData.last_name !== undefined) user.last_name = updateData.last_name;
-  if (updateData.email !== undefined) user.email = updateData.email;
-  if (updateData.phone !== undefined) user.phone = updateData.phone;
-  if (updateData.is_active !== undefined) user.is_active = updateData.is_active;
-  
-  // Check if role needs update - ONLY if role_id exists
-  if (updateData.role_id !== undefined && updateData.role_id !== user.role_id) {
-    const newRole = await Role.findOne({
-      where: { 
-        id: updateData.role_id, 
-        [Op.or]: [
-          { school_id: instituteId },
-          { school_id: null, is_template: true }
-        ]
-      }
-    });
-    
-    if (newRole) {
-      user.role_id = newRole.id;
-      if (newRole.permissions) {
-        if (newRole.permissions.teacher === 'ALL') {
-          user.permissions = ['ALL'];
-        } else if (Array.isArray(newRole.permissions.teacher)) {
-          user.permissions = newRole.permissions.teacher;
-        } else {
-          user.permissions = [];
-        }
-      }
+  if (!user) throw new Error('Teacher not found');
+
+  // Update basic user fields
+  const basicFields = ['first_name', 'last_name', 'email', 'phone', 'is_active'];
+  for (const field of basicFields) {
+    if (updateData[field] !== undefined && updateData[field] !== 'undefined') {
+      user[field] = updateData[field];
     }
   }
-  
+
+  // Update role if needed
+  if (updateData.role_id && updateData.role_id !== user.role_id) {
+    const newRole = await Role.findOne({
+      where: {
+        id: updateData.role_id,
+        [Op.or]: [{ school_id: instituteId }, { school_id: null, is_template: true }]
+      },
+      transaction
+    });
+    if (newRole) {
+      user.role_id = newRole.id;
+      user.permissions = newRole.permissions?.teacher === 'ALL' 
+        ? ['ALL'] 
+        : (Array.isArray(newRole.permissions?.teacher) ? newRole.permissions.teacher : []);
+    }
+  }
+
   // Get existing teacher details
   const existingDetails = user.details?.teacherDetails || {};
   
-  // ✅ FIXED: Only update fields that are provided, preserve existing ones
-  const updatedTeacherDetails = {
-    // First keep all existing values
-    employee_id: existingDetails.employee_id,
-    qualification: existingDetails.qualification,
-    specialization: existingDetails.specialization,
-    experience_years: existingDetails.experience_years,
-    subjects: existingDetails.subjects || [],
-    salary: existingDetails.salary,
-    designation: existingDetails.designation,
-    department: existingDetails.department,
-    employment_type: existingDetails.employment_type,
-    joining_date: existingDetails.joining_date,
-    contract_start_date: existingDetails.contract_start_date,
-    contract_end_date: existingDetails.contract_end_date,
-    bank_name: existingDetails.bank_name,
-    bank_account_no: existingDetails.bank_account_no,
-    bank_branch: existingDetails.bank_branch,
-    emergency_contact_name: existingDetails.emergency_contact_name,
-    emergency_contact_relation: existingDetails.emergency_contact_relation,
-    emergency_contact_phone: existingDetails.emergency_contact_phone,
-    present_address: existingDetails.present_address,
-    permanent_address: existingDetails.permanent_address,
-    city: existingDetails.city,
-    date_of_birth: existingDetails.date_of_birth,
-    gender: existingDetails.gender,
-    blood_group: existingDetails.blood_group,
-    religion: existingDetails.religion,
-    nationality: existingDetails.nationality || 'Pakistani',
-    cnic: existingDetails.cnic,
-    status: existingDetails.status || 'active',
-    qr_code: existingDetails.qr_code,
-    
-    // THEN override with new values if they exist in updateData
-    ...(updateData.employee_id !== undefined && { employee_id: updateData.employee_id }),
-    ...(updateData.qualification !== undefined && { qualification: updateData.qualification }),
-    ...(updateData.specialization !== undefined && { specialization: updateData.specialization }),
-    ...(updateData.experience_years !== undefined && { experience_years: updateData.experience_years }),
-    ...(updateData.subjects !== undefined && { subjects: updateData.subjects }),
-    ...(updateData.salary !== undefined && { salary: updateData.salary }),
-    ...(updateData.designation !== undefined && { designation: updateData.designation }),
-    ...(updateData.department !== undefined && { department: updateData.department }),
-    ...(updateData.employment_type !== undefined && { employment_type: updateData.employment_type }),
-    ...(updateData.joining_date !== undefined && { joining_date: updateData.joining_date }),
-    ...(updateData.contract_start_date !== undefined && { contract_start_date: updateData.contract_start_date }),
-    ...(updateData.contract_end_date !== undefined && { contract_end_date: updateData.contract_end_date }),
-    ...(updateData.bank_name !== undefined && { bank_name: updateData.bank_name }),
-    ...(updateData.bank_account_no !== undefined && { bank_account_no: updateData.bank_account_no }),
-    ...(updateData.bank_branch !== undefined && { bank_branch: updateData.bank_branch }),
-    ...(updateData.emergency_contact_name !== undefined && { emergency_contact_name: updateData.emergency_contact_name }),
-    ...(updateData.emergency_contact_relation !== undefined && { emergency_contact_relation: updateData.emergency_contact_relation }),
-    ...(updateData.emergency_contact_phone !== undefined && { emergency_contact_phone: updateData.emergency_contact_phone }),
-    ...(updateData.present_address !== undefined && { present_address: updateData.present_address }),
-    ...(updateData.permanent_address !== undefined && { permanent_address: updateData.permanent_address }),
-    ...(updateData.city !== undefined && { city: updateData.city }),
-    ...(updateData.dob !== undefined && { date_of_birth: updateData.dob }),
-    ...(updateData.gender !== undefined && { gender: updateData.gender }),
-    ...(updateData.blood_group !== undefined && { blood_group: updateData.blood_group }),
-    ...(updateData.religion !== undefined && { religion: updateData.religion }),
-    ...(updateData.nationality !== undefined && { nationality: updateData.nationality }),
-    ...(updateData.cnic !== undefined && { cnic: updateData.cnic }),
-    ...(updateData.status !== undefined && { status: updateData.status }),
-  };
-  
-  // Update documents if provided
-  if (updateData.documents !== undefined) {
-    try {
-      const documents = Array.isArray(updateData.documents) 
-        ? updateData.documents 
-        : (typeof updateData.documents === 'string' ? JSON.parse(updateData.documents) : []);
-
-      const newDocs = documents.map(doc => ({
-        id: doc.id || uuidv4(),
-        type: doc.type,
-        title: doc.title,
-        file_name: doc.file_name,
-        file_url: doc.file_url,
-        uploaded_at: doc.uploaded_at || new Date(),
-        verified: doc.verified || false
-      }));
-      
-      // Replace with new full set of documents
-      user.documents = newDocs;
-    } catch (error) {
-      console.error('❌ Error parsing documents:', error);
-      // Keep existing documents if parsing fails
-    }
+  // Delete old avatar if new one uploaded
+  if (updateData.photo_public_id && existingDetails.avatar_public_id) {
+    await deleteFromCloudinary(existingDetails.avatar_public_id).catch(console.warn);
   }
-  
-  // Update details
+
+  // Create updated details by merging (existing + provided)
+  const updatedDetails = { ...existingDetails };
+
+  // Fields that can be updated
+  const detailFields = [
+    'employee_id', 'qualification', 'specialization', 'experience_years',
+    'subjects', 'salary', 'designation', 'department', 'employment_type',
+    'joining_date', 'contract_start_date', 'contract_end_date',
+    'bank_name', 'bank_account_no', 'bank_branch',
+    'emergency_contact_name', 'emergency_contact_relation', 'emergency_contact_phone',
+    'present_address', 'permanent_address', 'city', 'date_of_birth',
+    'gender', 'blood_group', 'religion', 'nationality', 'cnic', 'status',
+    'avatar_url', 'avatar_public_id'
+  ];
+
+  for (const field of detailFields) {
+    // Determine source value
+    let value = updateData[field];
+    if (field === 'avatar_url') {
+      if (updateData.photo_url !== undefined) value = updateData.photo_url;
+      if (value !== undefined && value !== 'undefined') user.avatar_url = value === '' ? null : value; // Update base table
+    } else if (field === 'avatar_public_id') {
+      if (updateData.photo_public_id !== undefined) value = updateData.photo_public_id;
+      if (value !== undefined && value !== 'undefined') user.avatar_public_id = value === '' ? null : value; // Update base table
+    } else if (field === 'date_of_birth' && updateData.dob !== undefined) {
+      value = updateData.dob;
+    }
+
+    // If field is present in updateData (including null or empty string), update it
+    if (value !== undefined && value !== 'undefined') {
+      // Convert empty string to null for optional fields
+      if (value === '') value = null;
+      updatedDetails[field] = value;
+    }
+    // If field not present, keep existing value (do nothing)
+  }
+
+  // Save updated details
   user.details = {
     ...user.details,
-    teacherDetails: updatedTeacherDetails
+    teacherDetails: updatedDetails
   };
-  
+
+  // Update documents if provided
+  if (updateData.documents !== undefined) {
+    const docs = Array.isArray(updateData.documents) ? updateData.documents : [];
+    user.documents = docs.map(doc => ({
+      id: doc.id || uuidv4(),
+      type: doc.type,
+      title: doc.title,
+      file_name: doc.file_name,
+      file_url: doc.file_url,
+      uploaded_at: doc.uploaded_at || new Date(),
+      verified: doc.verified || false
+    }));
+  }
+
   user.changed('details', true);
   user.changed('documents', true);
-  
-  console.log('✅ Updated teacher details:', updatedTeacherDetails);
-  
   await user.save({ transaction });
-  
-  return user;
+
+  // Reload
+  return User.findByPk(user.id, {
+    include: [{ model: Role, as: 'Role' }],
+    transaction
+  });
 };
+
 /**
  * Get all teachers
  */

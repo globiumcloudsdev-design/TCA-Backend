@@ -12,7 +12,11 @@ import {
   getMe,
   selectAccount,
   getAccountsByEmail,
-  loginWithAccount
+  loginWithAccount,
+  getMyInstitute,
+  getMyInstitutePolicies,
+  getInstitutePolicyByType,
+  refreshUserData
 } from '../../controllers/auth.controller.js';
 import { protect } from '../../middlewares/auth.middleware.js';
 import { authRateLimiter } from '../../middlewares/rateLimit.middleware.js';
@@ -23,7 +27,20 @@ const router = Router();
 
 router.post('/login', authRateLimiter, validate(loginSchema), login);
 router.post('/select-account', protect, selectAccount);
-// backend/src/routes/v1/auth.routes.js (ADD THESE)
+
+// GET /auth/my-institute - Get full institute data with settings and policies
+router.get('/my-institute', protect, getMyInstitute);
+
+// GET /auth/my-policies - Get all policies for current institute
+router.get('/my-policies', protect, getMyInstitutePolicies);
+
+// GET /auth/my-policies/:policyType - Get specific policy by type
+router.get('/my-policies/:policyType', protect, getInstitutePolicyByType);
+
+// backend/src/routes/v1/auth.routes.js (Add this)
+
+// GET /auth/refresh-data - Get latest user data after updates
+router.get('/refresh-data', protect, refreshUserData);
 
 router.get('/accounts', getAccountsByEmail);  // GET /api/v1/auth/accounts?email=xxx
 router.post('/login-with-account', loginWithAccount);  // POST /api/v1/auth/login-with-account

@@ -9,7 +9,7 @@ const Notification = sequelize.define(
   'Notification',
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    school_id: { type: DataTypes.UUID, references: { model: 'institutes', key: 'id' } },
+    institute_id: { type: DataTypes.UUID, references: { model: 'institutes', key: 'id' } },
     branch_id: {
       type: DataTypes.UUID,
       allowNull: true,
@@ -21,19 +21,20 @@ const Notification = sequelize.define(
     title: { type: DataTypes.STRING(255), allowNull: false },
     body: { type: DataTypes.TEXT },
     type: {
-      type: DataTypes.ENUM('fee', 'attendance', 'exam', 'general', 'alert', 'system'),
+      type: DataTypes.ENUM('fee', 'attendance', 'exam', 'general', 'alert', 'system', 'payroll'),
       defaultValue: 'general',
+      comment: 'Notification types: fee, attendance, exam, general, alert, system, payroll',
     },
     channel: { type: DataTypes.ENUM('push', 'email', 'sms', 'in_app'), defaultValue: 'in_app' },
     is_read: { type: DataTypes.BOOLEAN, defaultValue: false },
     read_at: { type: DataTypes.DATE },
     data: { type: DataTypes.JSONB, defaultValue: {} },
   },
-  { tableName: 'notifications' }
+  { tableName: 'notifications', underscored: true, paranoid: true }
 );
 
 Notification.associate = (models) => {
-  Notification.belongsTo(models.Institute, { foreignKey: 'school_id', as: 'institute' });
+  Notification.belongsTo(models.Institute, { foreignKey: 'institute_id', as: 'institute' });
   Notification.belongsTo(models.User, { foreignKey: 'user_id' });
 };
 

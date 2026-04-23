@@ -64,6 +64,20 @@ const StudentAttendance = sequelize.define(
       type: DataTypes.UUID,
       references: { model: "users", key: "id" },
     },
+    leave_type_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: "leave_types", key: "id" },
+      onDelete: "SET NULL",
+      comment: "If status = leave, reference to leave type",
+    },
+    leave_request_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: "leave_requests", key: "id" },
+      onDelete: "SET NULL",
+      comment: "Optional link to approved leave request",
+    },
   },
   {
     tableName: "student_attendances",
@@ -72,6 +86,8 @@ const StudentAttendance = sequelize.define(
       { fields: ["class_id"] },
       { fields: ["section_id"] },
       { fields: ["date"] },
+      { fields: ["leave_type_id"] },
+      { fields: ["status"] },
     ],
   },
 );
@@ -101,6 +117,14 @@ StudentAttendance.associate = (models) => {
   StudentAttendance.belongsTo(models.Exam, {
     foreignKey: "exam_id",
     as: "exam",
+  });
+  StudentAttendance.belongsTo(models.LeaveType, {
+    foreignKey: "leave_type_id",
+    as: "leaveType",
+  });
+  StudentAttendance.belongsTo(models.LeaveRequest, {
+    foreignKey: "leave_request_id",
+    as: "leaveRequest",
   });
 };
 

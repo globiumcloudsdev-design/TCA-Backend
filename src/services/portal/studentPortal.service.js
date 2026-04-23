@@ -22,20 +22,21 @@ import { startOfWeek, endOfWeek, format, addDays, subMonths } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 import { unlink } from 'fs/promises';
+import logger from '../../config/logger.js';
 
-const { 
-  User, 
-  Timetable, 
-  Assignment, 
-  AssignmentSubmission, 
-  StudentAttendance: Attendance, 
+const {
+  User,
+  Timetable,
+  Assignment,
+  AssignmentSubmission,
+  StudentAttendance: Attendance,
   FeeVoucher,
   ExamResult,
   Notice,
   Notification,
   Class,
   Section,
-  sequelize 
+  sequelize
 } = models;
 
 const NoticeModel = Notice || Notification;
@@ -110,6 +111,8 @@ const normalizeStudentPortalProfile = (student) => {
     section_name: pickValue(activeSession?.section_name, details.section_name, details.sectionName, student.section_name, student.sectionName),
     roll_number: pickValue(activeSession?.roll_no, details.roll_number, details.roll_no),
     admission_date: details.admission_date || null,
+    
+    cnic: details.cnic || null,   // Add this line
 
     date_of_birth: details.date_of_birth || null,
     gender: details.gender || null,
@@ -538,12 +541,12 @@ export const getStudentProfile = async (studentId, instituteId) => {
     section_name: resolvedSectionName,
     active_academic_session: session
       ? {
-          ...session,
-          class_id: classId || session.class_id || null,
-          section_id: sectionId || session.section_id || null,
-          class_name: resolvedClassName,
-          section_name: resolvedSectionName
-        }
+        ...session,
+        class_id: classId || session.class_id || null,
+        section_id: sectionId || session.section_id || null,
+        class_name: resolvedClassName,
+        section_name: resolvedSectionName
+      }
       : null
   };
 };
@@ -570,9 +573,9 @@ export const updateStudentProfile = async (studentId, instituteId, updateData, f
       });
 
       avatarUrl = result.url;
-      
+
       if (student.avatar_public_id) {
-        await deleteFromCloudinary(student.avatar_public_id).catch(() => {});
+        await deleteFromCloudinary(student.avatar_public_id).catch(() => { });
       }
       avatarPublicId = result.public_id;
     } finally {
@@ -594,16 +597,16 @@ export const updateStudentProfile = async (studentId, instituteId, updateData, f
       'present_address', 'permanent_address', 'city',
       'emergency_contact_name', 'emergency_contact_phone'
     ];
-    
+
     const currentDetails = student.details || {};
     const newDetails = { ...currentDetails };
-    
+
     allowedDetails.forEach(field => {
       if (updateData.details[field] !== undefined) {
         newDetails[field] = updateData.details[field];
       }
     });
-    
+
     student.details = newDetails;
   }
 
@@ -632,13 +635,13 @@ export const getMyClasses = async (studentId, instituteId) => {
 
   const classRecord = student.class_id
     ? await Class.findOne({
-        where: {
-          id: student.class_id,
-          school_id: instituteId,
-          is_active: true,
-        },
-        attributes: ['id', 'name', 'courses'],
-      })
+      where: {
+        id: student.class_id,
+        school_id: instituteId,
+        is_active: true,
+      },
+      attributes: ['id', 'name', 'courses'],
+    })
     : null;
 
   const courseSyllabusMap = new Map();
@@ -673,7 +676,7 @@ export const getMyClasses = async (studentId, instituteId) => {
       syllabus: syllabusItems,
     });
   });
-  
+
   // Get timetable for student's class
   const timetables = await Timetable.findAll({
     where: {
@@ -686,7 +689,7 @@ export const getMyClasses = async (studentId, instituteId) => {
 
   // Extract subjects from timetable
   const subjects = new Map();
-  
+
   matchedTimetables.forEach(timetable => {
     (timetable.slots || []).forEach(slot => {
       if (slot.subject_name && !slot.is_break) {
@@ -792,7 +795,7 @@ export const getMyTimetable = async (studentId, instituteId, weekStart = null) =
       }
     };
   }
-  
+
   const startDate = weekStart ? new Date(weekStart) : startOfWeek(new Date(), { weekStartsOn: 1 });
   const endDate = endOfWeek(startDate, { weekStartsOn: 1 });
 
@@ -980,7 +983,7 @@ export const getMyAttendance = async (studentId, instituteId, filters = {}) => {
  */
 export const getRecentAttendance = async (studentId, instituteId, days = 7) => {
   const fromDate = addDays(new Date(), -days);
-  
+
   const attendance = await Attendance.findAll({
     where: {
       school_id: instituteId,
@@ -1088,7 +1091,7 @@ export const getMyAssignments = async (studentId, instituteId, filters = {}, pag
   // const assignmentsWithStatus = rows.map(assignment => {
   //   const submission = submissionsMap[assignment.id];
   //   const isOverdue = new Date(assignment.due_date) < new Date();
-    
+
   //   let status = 'pending';
   //   if (submission) {
   //     if (submission.status === 'graded') status = 'graded';
@@ -1118,51 +1121,51 @@ export const getMyAssignments = async (studentId, instituteId, filters = {}, pag
   // });
   // In getMyAssignments function, enhance the response format
 
-const assignmentsWithStatus = rows.map(assignment => {
-  const submission = submissionsMap[assignment.id];
-  const isOverdue = new Date(assignment.due_date) < new Date();
-  
-  let status = 'pending';
-  if (submission) {
-    if (submission.status === 'graded') status = 'graded';
-    else if (submission.status === 'submitted') status = 'submitted';
-    else if (submission.status === 'late') status = 'late';
-  } else if (isOverdue) {
-    status = 'overdue';
-  }
+  const assignmentsWithStatus = rows.map(assignment => {
+    const submission = submissionsMap[assignment.id];
+    const isOverdue = new Date(assignment.due_date) < new Date();
 
-  return {
-    id: assignment.id,
-    title: assignment.title,
-    description: assignment.description,
-    subject: assignment.subject,
-    teacher: assignment.teacher ? `${assignment.teacher.first_name} ${assignment.teacher.last_name}` : 'Unknown',
-    due_date: assignment.due_date,
-    total_marks: assignment.total_marks,
-    passing_marks: assignment.passing_marks,
-    instructions: assignment.instructions,
-    allow_late_submission: assignment.allow_late_submission,
-    late_submission_penalty: assignment.late_submission_penalty,
-    max_files: assignment.max_files,
-    max_file_size: assignment.max_file_size,
-    allowed_file_types: assignment.allowed_file_types,
-    estimated_time: assignment.estimated_time,
-    difficulty_level: assignment.difficulty_level,
-    status,
-    submission: submission ? {
-      id: submission.id,
-      submitted_at: submission.submitted_at,
-      marks: submission.marks,
-      grade: submission.grade,
-      feedback: submission.feedback,
-      files: submission.files,
-      submission_text: submission.submission_text,
-      attempt_number: submission.attempt_number,
-      is_resubmission: submission.is_resubmission
-    } : null,
-    attachments: assignment.attachments
-  };
-});
+    let status = 'pending';
+    if (submission) {
+      if (submission.status === 'graded') status = 'graded';
+      else if (submission.status === 'submitted') status = 'submitted';
+      else if (submission.status === 'late') status = 'late';
+    } else if (isOverdue) {
+      status = 'overdue';
+    }
+
+    return {
+      id: assignment.id,
+      title: assignment.title,
+      description: assignment.description,
+      subject: assignment.subject,
+      teacher: assignment.teacher ? `${assignment.teacher.first_name} ${assignment.teacher.last_name}` : 'Unknown',
+      due_date: assignment.due_date,
+      total_marks: assignment.total_marks,
+      passing_marks: assignment.passing_marks,
+      instructions: assignment.instructions,
+      allow_late_submission: assignment.allow_late_submission,
+      late_submission_penalty: assignment.late_submission_penalty,
+      max_files: assignment.max_files,
+      max_file_size: assignment.max_file_size,
+      allowed_file_types: assignment.allowed_file_types,
+      estimated_time: assignment.estimated_time,
+      difficulty_level: assignment.difficulty_level,
+      status,
+      submission: submission ? {
+        id: submission.id,
+        submitted_at: submission.submitted_at,
+        marks: submission.marks,
+        grade: submission.grade,
+        feedback: submission.feedback,
+        files: submission.files,
+        submission_text: submission.submission_text,
+        attempt_number: submission.attempt_number,
+        is_resubmission: submission.is_resubmission
+      } : null,
+      attachments: assignment.attachments
+    };
+  });
 
   return {
     data: assignmentsWithStatus,
@@ -1253,8 +1256,8 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
   try {
     // Check if assignment exists and is published
     const assignment = await Assignment.findOne({
-      where: { 
-        id: assignmentId, 
+      where: {
+        id: assignmentId,
         institute_id: instituteId,
         [Op.or]: [
           { is_published: true },
@@ -1281,7 +1284,7 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
     if (files?.length) {
       for (const file of files) {
         const folder = `the-clouds-academy/${instituteId}/submissions/${assignmentId}/${studentId}`;
-        
+
         // Use 'raw' for all file types to preserve original format
         const result = await uploadToCloudinary(file.path, folder, {
           resource_type: 'auto',
@@ -1373,15 +1376,78 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RESULTS
+// EXAMS & RESULTS
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get exam schedule (upcoming and ongoing exams) for student
+ */
+export const getMyExamSchedule = async (studentId, instituteId) => {
+  const student = await User.findByPk(studentId, {
+    attributes: ['id', 'details']
+  });
+
+  if (!student) throw new Error('Student not found');
+
+  // Extract class_id and section_id from studentDetails (nested in details object)
+  const studentClass = student.details?.studentDetails?.class_id;
+  const studentSection = student.details?.studentDetails?.section_id;
+
+  try {
+    // Get exams for student's class/section
+    // Exams have direct class_id and section_id columns
+    const exams = await models.Exam.findAll({
+      where: {
+        school_id: instituteId,
+        status: { [Op.in]: ['draft', 'scheduled', 'ongoing'] },
+        [Op.or]: [
+          { class_id: studentClass },  // Exam is for this student's class
+          {
+            [Op.and]: [
+              { class_id: studentClass },
+              { [Op.or]: [{ section_id: studentSection }, { section_id: null }] }  // Exam is for this section or all sections of class
+            ]
+          }
+        ]
+      },
+      attributes: ['id', 'name', 'type', 'start_date', 'end_date', 'status', 'total_marks', 'subject_schedules'],
+      order: [['start_date', 'ASC']],
+      raw: true
+    });
+
+    return exams.map(exam => {
+      const subject_schedules = typeof exam.subject_schedules === 'string'
+        ? JSON.parse(exam.subject_schedules)
+        : exam.subject_schedules || [];
+
+      return {
+        exam_id: exam.id,
+        exam_name: exam.name,
+        exam_type: exam.type,
+        status: exam.status,
+        start_date: exam.start_date,
+        end_date: exam.end_date,
+        total_marks: exam.total_marks,
+        subjects_count: subject_schedules.length,
+        subjects: subject_schedules.map(s => ({
+          subject_name: s.subject_name,
+          total_marks: s.total_marks || exam.total_marks,
+          scheduled_date: s.date,
+          scheduled_time: s.start_time
+        }))
+      };
+    });
+  } catch (error) {
+    logger.error('Error fetching exam schedule:', error);
+    return [];
+  }
+};
 
 /**
  * Get student's exam results
  */
 export const getMyResults = async (studentId, instituteId, filters = {}) => {
   const where = {
-    school_id: instituteId,
     student_id: studentId
   };
 
@@ -1398,46 +1464,42 @@ export const getMyResults = async (studentId, instituteId, filters = {}) => {
         as: 'exam',
         attributes: ['id', 'name', 'type', 'start_date', 'total_marks', 'academic_year_id'],
         ...(Object.keys(examWhere).length ? { where: examWhere } : {})
-      },
-      { model: models.Subject, attributes: ['id', 'name'] }
+      }
     ]
   });
 
   // Group by exam
   const examGroups = {};
   results.forEach(r => {
-    const examRef = r.Exam || r.exam;
-    const obtainedMarks = Number(r.obtained_marks ?? r.marks_obtained ?? 0);
-    const totalMarks = Number(r.total_marks ?? r.full_marks ?? 0);
-
+    const examRef = r.exam;
     const examId = r.exam_id;
+
     if (!examGroups[examId]) {
       examGroups[examId] = {
         exam_id: examId,
         exam_name: examRef?.name,
-        exam_type: examRef?.type || examRef?.exam_type,
+        exam_type: examRef?.type,
         date: examRef?.start_date || r.created_at,
         subjects: [],
-        total_marks: 0,
-        obtained_marks: 0,
-        percentage: 0,
-        rank: r.rank
+        total_marks: Number(r.total_marks) || 0,
+        obtained_marks: Number(r.total_marks_obtained) || 0,
+        percentage: Number(r.percentage) || 0,
+        rank: r.rank,
+        grade: r.grade
       };
     }
-    examGroups[examId].subjects.push({
-      subject: r.Subject?.name || r.subject_name || 'Subject',
-      marks: obtainedMarks,
-      total: totalMarks,
-      grade: r.grade,
-      remarks: r.remarks
-    });
-    examGroups[examId].total_marks += totalMarks;
-    examGroups[examId].obtained_marks += obtainedMarks;
-  });
 
-  // Calculate percentages
-  Object.values(examGroups).forEach(exam => {
-    exam.percentage = Math.round((exam.obtained_marks / exam.total_marks) * 100) || 0;
+    // Extract subjects from JSONB subject_marks array
+    const subjectMarks = Array.isArray(r.subject_marks) ? r.subject_marks : [];
+    subjectMarks.forEach(sm => {
+      examGroups[examId].subjects.push({
+        subject: sm.subject_name || 'Subject',
+        marks: Number(sm.marks_obtained) || 0,
+        total: Number(sm.total_marks) || 0,
+        grade: sm.grade || null,
+        remarks: sm.remarks || null
+      });
+    });
   });
 
   return Object.values(examGroups);
@@ -1448,38 +1510,38 @@ export const getMyResults = async (studentId, instituteId, filters = {}) => {
  */
 export const getRecentResults = async (studentId, instituteId, limit = 3) => {
   const results = await ExamResult.findAll({
-    where: { school_id: instituteId, student_id: studentId },
+    where: { student_id: studentId },
     order: [['created_at', 'DESC']],
     limit,
     include: [
-      { model: models.Exam, as: 'exam', attributes: ['name', 'start_date', 'total_marks'] },
-      { model: models.Subject, attributes: ['id', 'name'] }
+      { model: models.Exam, as: 'exam', attributes: ['name', 'start_date', 'total_marks'] }
     ]
   });
 
   const examMap = {};
   results.forEach(r => {
-    const examRef = r.Exam || r.exam;
-    const obtainedMarks = Number(r.obtained_marks ?? r.marks_obtained ?? 0);
-    const totalMarks = Number(r.total_marks ?? r.full_marks ?? 0);
-
+    const examRef = r.exam;
     const examId = r.exam_id;
+
     if (!examMap[examId]) {
       examMap[examId] = {
         exam_name: examRef?.name,
         date: examRef?.start_date || r.created_at,
         subjects: [],
-        total: 0,
-        obtained: 0
+        total: Number(r.total_marks) || 0,
+        obtained: Number(r.total_marks_obtained) || 0
       };
     }
-    examMap[examId].subjects.push({
-      subject: r.Subject?.name || r.subject_name || 'Subject',
-      marks: obtainedMarks,
-      total: totalMarks
+
+    // Extract subjects from JSONB subject_marks array
+    const subjectMarks = Array.isArray(r.subject_marks) ? r.subject_marks : [];
+    subjectMarks.forEach(sm => {
+      examMap[examId].subjects.push({
+        subject: sm.subject_name || 'Subject',
+        marks: Number(sm.marks_obtained) || 0,
+        total: Number(sm.total_marks) || 0
+      });
     });
-    examMap[examId].total += totalMarks;
-    examMap[examId].obtained += obtainedMarks;
   });
 
   return Object.values(examMap).map(exam => ({
@@ -1501,7 +1563,7 @@ export const getRecentResults = async (studentId, instituteId, limit = 3) => {
  */
 export const getMyFees = async (studentId, instituteId, filters = {}) => {
   const where = {
-    school_id: instituteId,
+    institute_id: instituteId,
     student_id: studentId
   };
 
@@ -1553,7 +1615,7 @@ export const getMyFees = async (studentId, instituteId, filters = {}) => {
 export const getFeeSummary = async (studentId, instituteId) => {
   const vouchers = await FeeVoucher.findAll({
     where: {
-      school_id: instituteId,
+      institute_id: instituteId,
       student_id: studentId
     },
     order: [['due_date', 'ASC']]
@@ -1701,7 +1763,15 @@ const getStudentStats = async (studentId, instituteId) => {
   const [attendance, assignments, results] = await Promise.all([
     getRecentAttendance(studentId, instituteId, 30),
     AssignmentSubmission.count({ where: { student_id: studentId } }),
-    ExamResult.count({ where: { school_id: instituteId, student_id: studentId } })
+    ExamResult.count({
+      where: { student_id: studentId },
+      include: [{
+        model: models.Exam,
+        as: 'exam',
+        where: { school_id: instituteId },
+        required: true
+      }]
+    })
   ]);
 
   return {
@@ -1715,37 +1785,38 @@ const getStudentStats = async (studentId, instituteId) => {
 export default {
   // Dashboard
   getStudentDashboard,
-  
+
   // Profile
   getStudentProfile,
   updateStudentProfile,
-  
+
   // Classes & Timetable
   getMyClasses,
   getMyTimetable,
   getTodayClasses,
-  
+
   // Attendance
   getMyAttendance,
   getRecentAttendance,
-  
+
   // Assignments
   getMyAssignments,
   getUpcomingAssignments,
   submitAssignment,
-  
-  // Results
+
+  // Exams & Results
+  getMyExamSchedule,
   getMyResults,
   getRecentResults,
-  
+
   // Fees
   getMyFees,
   getFeeSummary,
-  
+
   // Notices
   getNotices,
   getRecentNotices,
-  
+
   // Library
   getLibraryData
 };

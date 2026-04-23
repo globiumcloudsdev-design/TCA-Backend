@@ -90,7 +90,7 @@ const User = sequelize.define(
     avatar_public_id: { type: DataTypes.STRING },
     qr_code_url: { type: DataTypes.STRING, comment: 'URL to generated QR code' },
     qr_code_public_id: { type: DataTypes.STRING, comment: 'Cloudinary public ID for QR code' },
-    
+
     is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
     last_login_at: { type: DataTypes.DATE },
     password_reset_token: { type: DataTypes.STRING },
@@ -135,7 +135,7 @@ const User = sequelize.define(
 );
 
 // Helper method to add document
-User.prototype.addDocument = function(docType, url, filename) {
+User.prototype.addDocument = function (docType, url, filename) {
   const docs = this.documents || [];
   docs.push({
     id: uuidv4(),
@@ -148,12 +148,12 @@ User.prototype.addDocument = function(docType, url, filename) {
 };
 
 // Helper to get role permissions
-User.prototype.getRolePermissions = async function(models) {
+User.prototype.getRolePermissions = async function (models) {
   if (!this.role_id) return [];
-  
+
   const role = await models.Role.findByPk(this.role_id);
   if (!role) return [];
-  
+
   // Get permissions for this user type
   return role.permissions[this.user_type.toLowerCase()] || [];
 };
@@ -164,6 +164,11 @@ User.associate = (models) => {
   User.belongsTo(models.Role, { foreignKey: 'role_id', as: 'Role' });
   User.belongsTo(models.User, { foreignKey: 'created_by', as: 'creator' });
   User.belongsTo(models.User, { foreignKey: 'updated_by', as: 'updater' });
+  User.hasMany(models.StaffAttendance, { foreignKey: 'staff_id', as: 'staffAttendances' });
+  User.hasMany(models.StudentAttendance, { foreignKey: 'student_id', as: 'studentAttendances' });
+  User.hasMany(models.ExamResult, { foreignKey: 'student_id', as: 'examResults' });
+  User.hasMany(models.FeeVoucher, { foreignKey: 'student_id', as: 'feeVouchers' });
+  User.hasMany(models.LeaveRequest, { foreignKey: 'user_id', as: 'leaveRequests' });
 };
 
 export default User;

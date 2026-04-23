@@ -66,6 +66,7 @@ export const bulkMarkAttendance = async (req, res) => {
   }
 };
 
+//
 export const scanQR = async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
@@ -73,6 +74,8 @@ export const scanQR = async (req, res) => {
 
     const { student_id, date, type } = req.body;
     if (!student_id) return sendError(res, "Student ID required", 400);
+
+    console.log('Scan QR Api Response', student_id)
 
     const student = await models.User.findByPk(student_id, {
       attributes: ["user_type", "details", "school_id"],

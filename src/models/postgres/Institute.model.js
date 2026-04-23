@@ -3,7 +3,7 @@
  * 
  * Institute = School/College/Coaching Center
  */
-
+// backend/src/models/postgres/Institute.model.js
 import { DataTypes } from 'sequelize';
 import sequelize from '../../config/database.js';
 
@@ -81,17 +81,6 @@ const Institute = sequelize.define(
             comment: 'Whether this institute has ever used a trial (prevents multiple trials)'
         },
 
-        // // Settings
-        // settings: {
-        //     type: DataTypes.JSONB,
-        //     defaultValue: {
-        //         has_branches: false,
-        //         enable_parent_portal: true,
-        //         enable_teacher_portal: true,
-        //         enable_student_portal: true,
-        //         enable_sms_notifications: false
-        //     }
-        // },
         // ✅ FIXED: Settings with getter/setter to handle string JSON
         settings: {
             type: DataTypes.JSONB,
@@ -104,7 +93,6 @@ const Institute = sequelize.define(
             },
             get() {
                 const rawValue = this.getDataValue('settings');
-                // If it's a string, parse it
                 if (typeof rawValue === 'string') {
                     try {
                         return JSON.parse(rawValue);
@@ -119,11 +107,9 @@ const Institute = sequelize.define(
                         };
                     }
                 }
-                // If it's already an object, return as is
                 return rawValue;
             },
             set(value) {
-                // Always store as object, Sequelize will handle JSONB conversion
                 if (typeof value === 'string') {
                     try {
                         value = JSON.parse(value);
@@ -149,26 +135,57 @@ const Institute = sequelize.define(
             { fields: ['institute_email'], unique: true },
             { fields: ['institute_type_id'] },
             { fields: ['subscription_status'] },
-            { fields: ['has_used_trial'] } // Add index for new field
+            { fields: ['has_used_trial'] }
         ]
     }
 );
 
 Institute.associate = (models) => {
+    // Existing associations
     Institute.belongsTo(models.InstituteType, { foreignKey: 'institute_type_id', as: 'type' });
     Institute.belongsTo(models.Role, { foreignKey: 'institute_role_id', as: 'assignedRole' });
     Institute.belongsTo(models.SubscriptionPlan, { foreignKey: 'subscription_plan_id', as: 'plan' });
     Institute.belongsTo(models.User, { foreignKey: 'principal_user_id', as: 'principal' });
-    // school_id is the FK column in child tables (renamed to institute_id in JS via field mapping)
-    // 🔥 ADD THIS: Institute has many Invoices
+    
+    // Invoice association
     Institute.hasMany(models.Invoice, {
         foreignKey: 'institute_id',
-        as: 'invoices',  // This must match the include in your service
+        as: 'invoices',
         onDelete: 'CASCADE'
     });
 
-    Institute.hasMany(models.User, { foreignKey: 'school_id', as: 'users' });
-    Institute.hasMany(models.Role, { foreignKey: 'school_id', as: 'roles' });
+    // User association
+    Institute.hasMany(models.User, { 
+        foreignKey: 'school_id', 
+        as: 'users' 
+    });
+    
+    // Role association
+    Institute.hasMany(models.Role, { 
+        foreignKey: 'school_id', 
+        as: 'roles' 
+    });
+
+    // 🔥 NEW: Policy association
+    Institute.hasMany(models.Policy, {
+        foreignKey: 'institute_id',
+        as: 'policies',
+        onDelete: 'CASCADE'
+    });
+
+    // 🔥 NEW: Branch association (already exists but adding for completeness)
+    Institute.hasMany(models.Branch, {
+        foreignKey: 'institute_id',
+        as: 'branches',
+        onDelete: 'CASCADE'
+    });
+
+    // 🔥 NEW: InstituteSettings association (one-to-one)
+    Institute.hasOne(models.InstituteSettings, {
+        foreignKey: 'institute_id',
+        as: 'settings_detail',
+        onDelete: 'CASCADE'
+    });
 };
 
 export default Institute;

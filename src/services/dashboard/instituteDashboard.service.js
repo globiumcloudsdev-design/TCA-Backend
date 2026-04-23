@@ -67,8 +67,9 @@ const resolveTypeSlug = (instituteType = null, fallback = 'school') => {
   return fallback;
 };
 
-const buildWhere = (instituteId, branchId = null) => {
-  const where = { school_id: instituteId };
+const buildWhere = (instituteId, branchId = null, isFeeVoucher = false) => {
+  const fieldName = isFeeVoucher ? 'institute_id' : 'school_id';
+  const where = { [fieldName]: instituteId };
   if (branchId) where.branch_id = branchId;
   return where;
 };
@@ -114,7 +115,7 @@ const getOverviewStats = async ({ instituteId, branchId }) => {
     }),
     FeeVoucher.sum('net_amount', {
       where: {
-        ...buildWhere(instituteId, branchId),
+        ...buildWhere(instituteId, branchId, true),
         status: 'paid',
         due_date: {
           [Op.between]: [
@@ -126,7 +127,7 @@ const getOverviewStats = async ({ instituteId, branchId }) => {
     }),
     FeeVoucher.sum('net_amount', {
       where: {
-        ...buildWhere(instituteId, branchId),
+        ...buildWhere(instituteId, branchId, true),
         status: { [Op.in]: ['pending', 'overdue', 'partial'] },
         due_date: {
           [Op.between]: [
@@ -206,7 +207,7 @@ const getFeesChart = async ({ instituteId, branchId }) => {
   const chart = await Promise.all(
     months.map(async (monthDate) => {
       const whereBase = {
-        ...buildWhere(instituteId, branchId),
+        ...buildWhere(instituteId, branchId, true),
         due_date: {
           [Op.between]: [startOfMonth(monthDate), endOfMonth(monthDate)],
         },
@@ -300,13 +301,13 @@ const getEnrollmentCharts = async ({ instituteId, branchId }) => {
 const getFeeStatusChart = async ({ instituteId, branchId }) => {
   const [paid, pending, overdue] = await Promise.all([
     FeeVoucher.sum('net_amount', {
-      where: { ...buildWhere(instituteId, branchId), status: 'paid' },
+      where: { ...buildWhere(instituteId, branchId, true), status: 'paid' },
     }),
     FeeVoucher.sum('net_amount', {
-      where: { ...buildWhere(instituteId, branchId), status: { [Op.in]: ['pending', 'partial'] } },
+      where: { ...buildWhere(instituteId, branchId, true), status: { [Op.in]: ['pending', 'partial'] } },
     }),
     FeeVoucher.sum('net_amount', {
-      where: { ...buildWhere(instituteId, branchId), status: 'overdue' },
+      where: { ...buildWhere(instituteId, branchId, true), status: 'overdue' },
     }),
   ]);
 
@@ -330,7 +331,7 @@ const getRecentActivity = async ({ instituteId, branchId }) => {
       raw: true,
     }),
     FeeVoucher.findAll({
-      where: buildWhere(instituteId, branchId),
+      where: buildWhere(instituteId, branchId, true),
       attributes: ['id', 'status', 'net_amount', 'created_at'],
       order: [['created_at', 'DESC']],
       limit: 4,

@@ -642,7 +642,11 @@ export const getExamResults = async (examId, instituteId, filters = {}, paginati
           last_name: student.last_name,
           email: student.email,
           registration_no: student.registration_no || '',
-          roll_number: student.details?.studentDetails?.roll_no || ''
+          roll_number: student.details?.studentDetails?.roll_no || '',
+          class_name: student.details?.studentDetails?.class_name || 'N/A',
+          section_name: student.details?.studentDetails?.section_name || 'N/A',
+          guardian_name: student.details?.studentDetails?.father_name || 'N/A',
+          guardian_phone: student.details?.studentDetails?.father_phone || 'N/A'
         }
       };
     }
@@ -667,7 +671,11 @@ export const getExamResults = async (examId, instituteId, filters = {}, paginati
         last_name: student.last_name,
         email: student.email,
         registration_no: student.registration_no || '',
-        roll_number: student.details?.studentDetails?.roll_no || ''
+        roll_number: student.details?.studentDetails?.roll_no || '',
+        class_name: student.details?.studentDetails?.class_name || 'N/A',
+        section_name: student.details?.studentDetails?.section_name || 'N/A',
+        guardian_name: student.details?.studentDetails?.father_name || 'N/A',
+        guardian_phone: student.details?.studentDetails?.father_phone || 'N/A'
       }
     };
   });

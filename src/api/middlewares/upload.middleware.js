@@ -1,7 +1,7 @@
 /**
  * The Clouds Academy - Upload Middleware (Multer)
  */
-
+//src/api/middlewares/upload.middleware.js
 import upload from '../../config/multer.js';
 
 // Single file upload

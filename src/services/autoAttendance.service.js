@@ -34,6 +34,10 @@ const hasClassOnDay = async (
   sectionId,
   dayOfWeek,
 ) => {
+  // Mapping for day numbers (0-6) to strings used in Timetable
+  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const dayName = dayNames[dayOfWeek];
+
   // Fetch all timetables for the school, academic year, entity_type 'school'
   const timetables = await Timetable.findAll({
     where: {
@@ -55,7 +59,10 @@ const hasClassOnDay = async (
 
   // Check slots for the day
   const slots = matchingTimetable.slots || [];
-  return slots.some((slot) => slot.day === dayOfWeek);
+  return slots.some((slot) => {
+    const slotDay = String(slot.day || '').toLowerCase();
+    return slotDay === dayName;
+  });
 };
 
 /**

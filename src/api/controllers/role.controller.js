@@ -47,6 +47,7 @@ const ALL_PERMISSION_CODES = [
   'notifications.send', 'notifications.read', 'notifications.manage',
   // Reports
   'reports.student', 'reports.attendance', 'reports.fee', 'reports.exam', 'reports.payroll', 'reports.analytics',
+  'reports.export', 'reports.create', 'reports.read',
   // Roles & Users
   'roles.create', 'roles.read', 'roles.update', 'roles.delete', 'roles.assign',
   'users.create', 'users.read', 'users.update', 'users.delete',

@@ -29,6 +29,15 @@ import FeeTemplate from "./FeeTemplate.model.js";
 import Branch from "./Branch.model.js";
 import Assignment from "./Assignment.model.js";
 import AssignmentSubmission from "./AssignmentSubmission.model.js";
+import Expense from './Expense.modal.js';
+import Vendor from './Vendor.modal.js';
+import ExpenseCategory from './ExpenseCategory.model.js';
+import Policy from './Policy.model.js';
+import LeaveType from './LeaveType.model.js';
+import LeaveRequest from './LeaveRequest.model.js';
+import StaffAttendance from './StaffAttendance.model.js';
+import InstituteSettings from "./InstituteSettings.model.js";
+import Payslip from "./Payslip.model.js";
 
 const models = {
   sequelize,
@@ -58,6 +67,15 @@ const models = {
   Branch,
   Assignment,
   AssignmentSubmission,
+  Expense,
+  ExpenseCategory,
+  Vendor,
+  Policy,
+  LeaveType,
+  LeaveRequest,
+  StaffAttendance,
+  InstituteSettings,
+  Payslip,
 };
 
 // Run associations — deduplicate so alias School: Institute doesn't call associate twice

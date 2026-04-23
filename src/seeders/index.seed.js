@@ -4,9 +4,11 @@
  * Execution order:
  *   1. Connect to Neon PostgreSQL
  *   2. Sync schema (ALTER — non-destructive)
- *   3. Seed template roles  (01.roles.seed.js)
- *   4. Seed subscription plans  (02.subscriptionPlans.seed.js)
- *   5. Seed master admin user  (03.masterAdmin.seed.js)
+ *   3. Seed institute types  (00.instituteTypes.seed.js)
+ *   4. Seed template roles  (01.roles.seed.js)
+ *   5. Seed subscription plans  (02.subscriptionPlans.seed.js)
+ *   6. Seed master admin user  (03.masterAdmin.seed.js)
+ *   7. Seed leave types  (04.leaveTypes.seed.js) - for first institute
  *
  * Run:  node src/seeders/index.seed.js
  *   or: npm run seed
@@ -19,6 +21,7 @@ import { seedInstituteTypes } from './00.instituteTypes.seed.js';
 import { seedRoles } from './01.roles.seed.js';
 import { seedSubscriptionPlans } from './02.subscriptionPlans.seed.js';
 import { seedMasterAdmin } from './03.masterAdmin.seed.js';
+import { seedLeaveTypes } from './04.leaveTypes.seed.js';
 
 const run = async () => {
   console.log('\n╔══════════════════════════════════════════════════════╗');
@@ -41,6 +44,15 @@ const run = async () => {
     await seedRoles(models);
     await seedSubscriptionPlans(models);
     await seedMasterAdmin(models);
+
+    // 4. Seed leave types for first available institute
+    const firstInstitute = await models.Institute.findOne();
+    if (firstInstitute) {
+      await seedLeaveTypes(models, firstInstitute.id);
+    } else {
+      console.log('\n⚠️  No institute found — skipping LeaveType seeding');
+      console.log('    LeaveTypes can be seeded later when institutes are created');
+    }
 
     console.log('\n✅  All seeders completed successfully!\n');
     process.exit(0);
