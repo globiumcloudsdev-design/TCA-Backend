@@ -21,9 +21,9 @@ const Notification = sequelize.define(
     title: { type: DataTypes.STRING(255), allowNull: false },
     body: { type: DataTypes.TEXT },
     type: {
-      type: DataTypes.ENUM('fee', 'attendance', 'exam', 'general', 'alert', 'system', 'payroll'),
+      type: DataTypes.ENUM('fee', 'attendance', 'exam', 'general', 'alert', 'system', 'payroll', 'event'),
       defaultValue: 'general',
-      comment: 'Notification types: fee, attendance, exam, general, alert, system, payroll',
+      comment: 'Notification types: fee, attendance, exam, general, alert, system, payroll, event',
     },
     channel: { type: DataTypes.ENUM('push', 'email', 'sms', 'in_app'), defaultValue: 'in_app' },
     is_read: { type: DataTypes.BOOLEAN, defaultValue: false },

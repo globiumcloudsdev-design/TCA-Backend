@@ -6,11 +6,6 @@
     "auditLog": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\.7d78ec49a8224e3df020aaf8fdcdb019808345d2-audit.json",
     "files": [
         {
-            "date": 1774427998279,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\exceptions-2026-03-25.log",
-            "hash": "76cda34461d5ed671a5dd1cc6f2f31774668e8421d279065af651596c39369df"
-        },
-        {
             "date": 1774465504816,
             "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\exceptions-2026-03-26.log",
             "hash": "4485b46b175904fc7634543f2ceb123dc068f8b34af644b6884123b9c26a52ef"
@@ -149,6 +144,11 @@
             "date": 1776939631640,
             "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\exceptions-2026-04-23.log",
             "hash": "45d36670e864f8a834cfd20fa6f8f607d1321780908dda041bbae4f7288028bc"
+        },
+        {
+            "date": 1777026213729,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\exceptions-2026-04-24.log",
+            "hash": "4c2f6c2a26a0897b785031c07b31d2162f9c7a02fba215d1549e7c10ccd7f318"
         }
     ],
     "hashType": "sha256"

@@ -11,6 +11,7 @@ import { validate } from '../../../middlewares/validation.middleware.js';
 import * as parentPortal from '../../../controllers/portal/parentPortal.controller.js';
 import * as leaveRequestsPortal from '../../../controllers/portal/leaveRequests.portal.controller.js';
 import { createLeaveRequestSchema, getMyLeaveRequestsQuerySchema, cancelLeaveRequestSchema } from '../../../validators/leaveRequest.validator.js';
+import * as eventController from '../../../controllers/event.controller.js';
 
 const router = Router();
 
@@ -91,5 +92,8 @@ router.get('/leave-balance', leaveRequestsPortal.getLeaveBalance);
 router.get('/leave-requests', validate(getMyLeaveRequestsQuerySchema, 'query'), leaveRequestsPortal.getMyLeaveRequests);
 router.post('/leave-requests', validate(createLeaveRequestSchema), leaveRequestsPortal.createLeaveRequest);
 router.patch('/leave-requests/:id/cancel', validate(cancelLeaveRequestSchema), leaveRequestsPortal.cancelLeaveRequest);
+
+// EVENTS
+router.get('/events', eventController.getMyEvents);
 
 export default router;

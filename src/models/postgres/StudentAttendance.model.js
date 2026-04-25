@@ -41,6 +41,13 @@ const StudentAttendance = sequelize.define(
       allowNull: false,
       references: { model: "users", key: "id" },
     },
+    event_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'events', key: 'id' },
+      onDelete: 'SET NULL',
+      comment: 'If this attendance is for an event, link to event',
+    },
     // 🔥 Optional: Link to exam if this is exam attendance
     exam_id: {
       type: DataTypes.UUID,
@@ -125,6 +132,10 @@ StudentAttendance.associate = (models) => {
   StudentAttendance.belongsTo(models.LeaveRequest, {
     foreignKey: "leave_request_id",
     as: "leaveRequest",
+  });
+  StudentAttendance.belongsTo(models.Event, {
+    foreignKey: "event_id",
+    as: "event",
   });
 };
 

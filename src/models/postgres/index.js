@@ -38,6 +38,7 @@ import LeaveRequest from './LeaveRequest.model.js';
 import StaffAttendance from './StaffAttendance.model.js';
 import InstituteSettings from "./InstituteSettings.model.js";
 import Payslip from "./Payslip.model.js";
+import Event from "./Event.model.js";
 
 const models = {
   sequelize,
@@ -76,6 +77,7 @@ const models = {
   StaffAttendance,
   InstituteSettings,
   Payslip,
+  Event,
 };
 
 // Run associations — deduplicate so alias School: Institute doesn't call associate twice

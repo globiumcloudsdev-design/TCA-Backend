@@ -22,6 +22,7 @@ import {
   cancelLeaveRequestSchema,
 } from "../../../validators/leaveRequest.validator.js";
 import * as teacherPayroll from "../../../controllers/portal/teacherPayroll.controller.js";
+import * as eventController from '../../../controllers/event.controller.js';
 
 const router = Router();
 router.use(protect);
@@ -129,5 +130,8 @@ router.patch(
 router.get("/payroll", teacherPayroll.getMyPayslips);
 router.get("/payroll/years", teacherPayroll.getMyPayrollYears);
 router.get("/payroll/:id", teacherPayroll.getMyPayslipById);
+
+// EVENTS
+router.get('/events', eventController.getMyEvents);
 
 export default router;

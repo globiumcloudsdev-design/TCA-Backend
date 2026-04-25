@@ -35,6 +35,7 @@ import feeVoucherRoutes from './feeVoucher.routes.js'; // ✅ Import fee voucher
 import notificationRoutes from './notification.routes.js'; // ✅ Import notification routes
 import userRoutes from './user.routes.js'; // ✅ Import user routes
 import payrollRoutes from './payroll.routes.js'; // ✅ Import payroll routes
+import eventRoutes from './event.routes.js'; // ✅ Import event routes
 
 const router = Router();
 
@@ -133,6 +134,9 @@ router.use('/users', userRoutes); // ✅ Mount user routes
 
 // ── Payroll Routes ─────────────────────────────────────────────────────────
 router.use('/payroll', payrollRoutes); // ✅ Mount payroll routes
+
+// ── Event Routes ─────────────────────────────────────────────────────────
+router.use('/events', eventRoutes); // ✅ Mount event routes
 
 // V1 health
 router.get('/ping', (req, res) => res.json({ ok: true, version: 'v1' }));

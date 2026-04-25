@@ -60,6 +60,19 @@ const StaffAttendance = sequelize.define('StaffAttendance', {
     defaultValue: 0,
     comment: 'Minutes worked beyond shift end',
   },
+  // Add inside the model definition
+  event_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    references: { model: 'events', key: 'id' },
+    onDelete: 'SET NULL',
+    comment: 'If this attendance is for an event, link to event',
+  },
+  attendance_type: {
+    type: DataTypes.STRING,
+    defaultValue: 'regular',
+    comment: 'regular = daily attendance, event = event-based attendance',
+  },
   leave_type_id: {
     type: DataTypes.UUID,
     allowNull: true,
@@ -117,6 +130,7 @@ StaffAttendance.associate = (models) => {
   StaffAttendance.belongsTo(models.Branch, { foreignKey: 'branch_id', as: 'branch' });
   StaffAttendance.belongsTo(models.LeaveType, { foreignKey: 'leave_type_id', as: 'leaveType' });
   StaffAttendance.belongsTo(models.LeaveRequest, { foreignKey: 'leave_request_id', as: 'leaveRequest' });
+  StaffAttendance.belongsTo(models.Event, { foreignKey: 'event_id', as: 'event' });
 };
 
 export default StaffAttendance;
