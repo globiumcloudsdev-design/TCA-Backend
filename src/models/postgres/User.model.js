@@ -44,7 +44,7 @@ const User = sequelize.define(
     },
 
     user_type: {
-      type: DataTypes.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF'),
+      type: DataTypes.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF', 'SUPPORT_STAFF', 'SYSTEM_ADMIN'),
       allowNull: false,
       defaultValue: 'STAFF',
     },

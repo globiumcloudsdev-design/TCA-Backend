@@ -10,18 +10,19 @@ import {
 import * as staffAttendanceService from '../../services/staffAttendance.service.js';
 import models from '../../models/postgres/index.js';
 import upload from '../../api/middlewares/upload.middleware.js';
-
-const getInstituteId = (req) => req.user?.institute_id || req.user?.school_id;
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 export const markAttendance = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
     if (!instituteId) return sendBadRequest(res, 'Institute ID not found');
 
+    const branchId = getBranchId(req);
+
     const data = {
       ...req.body,
       institute_id: instituteId,
-      branch_id: req.user.branch_id || req.body.branch_id,
+      branch_id: branchId || req.user.branch_id,
       marked_by: req.user.id,
     };
     const attendance = await staffAttendanceService.markAttendance(data);
@@ -49,9 +50,11 @@ export const getAllAttendances = async (req, res) => {
     const instituteId = getInstituteId(req);
     if (!instituteId) return sendBadRequest(res, 'Institute ID not found');
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
-      branch_id: req.query.branch_id,
+      branch_id: branchId,
       staff_id: req.query.staff_id,
       status: req.query.status,
       staff_type: req.query.staff_type,
@@ -111,15 +114,38 @@ export const getAttendanceReport = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
     if (!instituteId) return sendBadRequest(res, 'Institute ID not found');
+
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
-      branch_id: req.query.branch_id,
+      branch_id: branchId,
       staff_type: req.query.staff_type,
       date_from: req.query.date_from,
       date_to: req.query.date_to,
     };
     const report = await staffAttendanceService.getAttendanceReport(filters);
     return sendSuccess(res, report, 'Attendance report generated');
+  } catch (error) {
+    return sendError(res, error.message);
+  }
+};
+
+export const markHoliday = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    if (!instituteId) return sendBadRequest(res, 'Institute ID not found');
+
+    const branchId = getBranchId(req);
+
+    const result = await staffAttendanceService.markHoliday({
+      ...req.body,
+      institute_id: instituteId,
+      branch_id: branchId,
+      marked_by: req.user.id,
+    });
+
+    return sendSuccess(res, result, 'Staff holiday marked successfully');
   } catch (error) {
     return sendError(res, error.message);
   }

@@ -195,7 +195,7 @@ const createOrUpdateInstituteAdmin = async (institute, data, createdBy, transact
     // Send welcome email with credentials (only on create)
     if (!isEdit) {
       const userType = hasBranches ? 'Institute Admin & Branch Head' : 'Institute Admin';
-      await sendWelcomeEmailWithCredentials(
+    await sendWelcomeEmailWithCredentials(
         adminUser,
         adminPassword,
         institute.institute_name,
@@ -910,6 +910,27 @@ export const markInvoicePaid = async (invoiceId, { payment_method, payment_refer
   return invoice.reload();
 };
 
+// ─── Delete Invoice ───────────────────────────────────────────────────────────
+export const deleteInvoice = async (id) => {
+  const invoice = await Invoice.findByPk(id);
+  if (!invoice) throw new AppError('Invoice not found.', 404);
+  await invoice.destroy();
+  return true;
+};
+
+// ─── Bulk Delete Invoices ─────────────────────────────────────────────────────
+export const bulkDeleteInvoices = async (ids) => {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new AppError('Invalid or empty invoice IDs array', 400);
+  }
+  await Invoice.destroy({
+    where: {
+      id: ids
+    }
+  });
+  return true;
+};
+
 // ─── Subscription History ─────────────────────────────────────────────────────
 export const getSubscriptionHistory = async (instituteId) => {
   const invoices = await Invoice.findAll({
@@ -1389,6 +1410,119 @@ export const getInstituteStaff = async (instituteId, options = {}) => {
       limit,
       totalPages: Math.ceil(count / limit)
     }
+  };
+};
+
+export const getMasterAdminReports = async (query = {}) => {
+  const now = new Date();
+  const currentMonthStart = startOfMonth(now);
+  const currentMonthEnd = endOfMonth(now);
+  
+  const prevMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  const prevMonthEnd = endOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+
+  // 1. Revenue This Month
+  const thisMonthRevenue = await Invoice.sum('total_amount', {
+    where: {
+      status: 'PAID',
+      paid_at: {
+        [Op.between]: [currentMonthStart, currentMonthEnd]
+      }
+    }
+  }) || 0;
+
+  // 2. Revenue Previous Month
+  const prevMonthRevenue = await Invoice.sum('total_amount', {
+    where: {
+      status: 'PAID',
+      paid_at: {
+        [Op.between]: [prevMonthStart, prevMonthEnd]
+      }
+    }
+  }) || 0;
+
+  // 3. Revenue Breakdown by Plan
+  const planBreakdown = await Invoice.findAll({
+    where: { status: 'PAID' },
+    attributes: [
+      'subscription_plan_id',
+      [Invoice.sequelize.fn('SUM', Invoice.sequelize.cast(Invoice.sequelize.col('total_amount'), 'DECIMAL')), 'total'],
+      [Invoice.sequelize.fn('COUNT', Invoice.sequelize.col('Invoice.id')), 'count']
+    ],
+    include: [{
+      model: SubscriptionPlan,
+      as: 'plan',
+      attributes: ['name']
+    }],
+    group: ['subscription_plan_id', 'plan.id'],
+    raw: true,
+    nest: true
+  });
+
+  // 4. Revenue Breakdown by Institute
+  const instituteBreakdown = await Invoice.findAll({
+    where: { status: 'PAID' },
+    attributes: [
+      'institute_id',
+      [Invoice.sequelize.fn('SUM', Invoice.sequelize.cast(Invoice.sequelize.col('total_amount'), 'DECIMAL')), 'total'],
+      [Invoice.sequelize.fn('COUNT', Invoice.sequelize.col('Invoice.id')), 'count']
+    ],
+    include: [{
+      model: Institute,
+      as: 'institute',
+      attributes: ['institute_name']
+    }],
+    group: ['institute_id', 'institute.id'],
+    raw: true,
+    nest: true
+  });
+
+  // 5. Overall Invoice Status Breakdown (Counts and Totals)
+  const statusBreakdown = await Invoice.findAll({
+    attributes: [
+      'status',
+      [Invoice.sequelize.fn('SUM', Invoice.sequelize.cast(Invoice.sequelize.col('total_amount'), 'DECIMAL')), 'total'],
+      [Invoice.sequelize.fn('COUNT', Invoice.sequelize.col('Invoice.id')), 'count']
+    ],
+    group: ['status'],
+    raw: true
+  });
+
+  // 6. Summary Counts
+  const activeInstitutes = await Institute.count({ where: { is_active: true } }) || 0;
+  const overduePayments = await Invoice.count({ where: { status: 'OVERDUE' } }) || 0;
+  
+  const newInstitutesMTD = await Institute.count({
+    where: {
+      created_at: {
+        [Op.between]: [currentMonthStart, currentMonthEnd]
+      }
+    }
+  }) || 0;
+
+  return {
+    thisMonthRevenue: parseFloat(thisMonthRevenue),
+    prevMonthRevenue: parseFloat(prevMonthRevenue),
+    activeInstitutes,
+    overduePayments,
+    newInstitutesMTD,
+    planBreakdown: planBreakdown.map(p => ({
+      plan_id: p.subscription_plan_id,
+      plan_name: p.plan?.name || 'Unknown',
+      total: parseFloat(p.total) || 0,
+      count: parseInt(p.count) || 0
+    })),
+    instituteBreakdown: instituteBreakdown.map(i => ({
+      institute_id: i.institute_id,
+      institute_name: i.institute?.institute_name || 'Unknown',
+      total: parseFloat(i.total) || 0,
+      count: parseInt(i.count) || 0
+    })),
+    statusBreakdown: statusBreakdown.map(s => ({
+      status: s.status,
+      total: parseFloat(s.total) || 0,
+      count: parseInt(s.count) || 0
+    }))
   };
 };
 

@@ -5,6 +5,7 @@ import {
   markAttendance,
   bulkMarkAttendance,
   scanQR,
+  markHoliday,
   getAttendance,
   updateAttendance,
   getAttendanceReport,
@@ -21,6 +22,7 @@ router.post("/scan", hasPermission("attendance.mark"), scanQR);
 // Manual single or bulk marking
 router.post("/mark", hasPermission("attendance.mark"), markAttendance);
 router.post("/bulk", hasPermission("attendance.mark"), bulkMarkAttendance);
+router.post("/holiday", hasPermission("attendance.mark"), markHoliday);
 
 // View attendance (with filters)
 router.get("/", hasPermission("attendance.view"), getAttendance);

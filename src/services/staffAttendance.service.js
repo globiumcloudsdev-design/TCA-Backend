@@ -81,8 +81,8 @@ export const bulkMarkAttendance = async (instituteId, userId, buffer, options = 
       const staff = await User.findOne({
         where: {
           id: record.staff_id,
-          institute_id: instituteId,
-          user_type: 'STAFF',
+          school_id: instituteId,
+          user_type: ['STAFF', 'TEACHER'],
         },
       });
       if (!staff) {
@@ -240,7 +240,7 @@ export const deleteAttendance = async (id, instituteId) => {
 export const getAttendanceReport = async (filters) => {
   const { institute_id, branch_id, staff_type, date_from, date_to } = filters;
 
-  const staffWhere = { institute_id, user_type: 'STAFF' };
+  const staffWhere = { school_id: institute_id, user_type: ['STAFF', 'TEACHER'] };
   if (staff_type) staffWhere.staff_type = staff_type;
   if (branch_id) staffWhere.branch_id = branch_id;
 
@@ -304,4 +304,91 @@ export const getAttendanceReport = async (filters) => {
     },
     staff_wise: report,
   };
+};
+
+/**
+ * Mark a specific date as a holiday for all staff members in the institute
+ */
+export const markHoliday = async (data) => {
+  const { date, institute_id, branch_id, marked_by, remarks } = data;
+
+  const transaction = await sequelize.transaction();
+  try {
+    // 1. Find all active staff members in the institute/branch
+    const staffFilters = {
+      school_id: institute_id,
+      user_type: ["STAFF", "TEACHER"],
+      is_active: true,
+    };
+    if (branch_id) staffFilters.branch_id = branch_id;
+
+    const staffList = await User.findAll({
+      where: staffFilters,
+      attributes: ["id", "branch_id"],
+      transaction,
+    });
+
+    const results = [];
+
+    // 2. Prepare and upsert holiday records for all staff
+    for (const staff of staffList) {
+      const attendanceData = {
+        institute_id,
+        branch_id: staff.branch_id || branch_id || null,
+        date,
+        staff_id: staff.id,
+        status: "HOLIDAY",
+        remarks: remarks || "Public Holiday",
+        marked_by,
+        marked_at: new Date()
+      };
+
+      // 3. Upsert holiday record
+      const existing = await StaffAttendance.findOne({
+        where: { staff_id: staff.id, date },
+        transaction,
+      });
+
+      if (existing) {
+        await existing.update(attendanceData, { transaction });
+        results.push(existing);
+      } else {
+        const created = await StaffAttendance.create(attendanceData, { transaction });
+        results.push(created);
+      }
+    }
+
+    await transaction.commit();
+
+    // 4. Send bulk notification to admins
+    try {
+      await broadcastNotification({
+        institute_id: institute_id,
+        recipient_type: 'ALL_ADMINS',
+        title: `📅 Staff Holiday Marked - ${date}`,
+        body: `${date} has been marked as a holiday for ${results.length} staff members.`,
+        type: 'attendance',
+        channel: 'in_app',
+        data: { date, count: results.length }
+      }, true);
+    } catch (notifError) {
+      logger.error(`Notification error in staff markHoliday: ${notifError.message}`);
+    }
+
+    return { success: true, count: results.length, date };
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+};
+
+export default {
+  markAttendance,
+  bulkMarkAttendance,
+  getAllAttendances,
+  getAttendanceById,
+  updateAttendance,
+  deleteAttendance,
+  getAttendanceReport,
+  markHoliday,
 };

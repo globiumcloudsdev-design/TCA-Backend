@@ -22,8 +22,8 @@ import catchAsync from '../../utils/lib/catchAsync.js';
 import Institute from '../../models/postgres/Institute.model.js';
 
 export const schoolContext = catchAsync(async (req, res, next) => {
-  // Master Admin doesn't need institute context
-  if (req.user?.user_type === 'MASTER_ADMIN') return next();
+  // Master Admin & Platform Users don't need institute context
+  if (['MASTER_ADMIN', 'SYSTEM_ADMIN', 'SUPPORT_STAFF'].includes(req.user?.user_type)) return next();
 
   let institute = null;
 

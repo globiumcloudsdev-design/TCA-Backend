@@ -1,4 +1,4 @@
-// // backend/src/services/auth.service.js
+// backend/src/services/auth.service.js
 
 /**
  * The Clouds Academy - Auth Service
@@ -296,12 +296,15 @@ export const loginService = async (loginId, password) => {
   }
 
   const validAccounts = [];
+  let inactiveAccountMatch = false;
   
   for (const user of users) {
-    if (!user.is_active) continue;
-    
     const isMatch = await comparePassword(password, user.password_hash);
     if (isMatch) {
+      if (!user.is_active) {
+        inactiveAccountMatch = true;
+        continue;
+      }
       let permissions = [];
       if (user.permissions && user.permissions.length > 0) {
         permissions = user.permissions;
@@ -355,6 +358,9 @@ export const loginService = async (loginId, password) => {
   }
 
   if (validAccounts.length === 0) {
+    if (inactiveAccountMatch) {
+      throw new AppError('Account is deactivated. Please contact administrator.', 403);
+    }
     throw new AppError('Invalid credentials.', 401);
   }
 

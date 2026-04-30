@@ -243,13 +243,14 @@ export const getClassOptions = async (instituteId, academicYearId) => {
 
   const classes = await Class.findAll({
     where,
-    attributes: ['id', 'name'],
+    attributes: ['id', 'name', 'sections'],
     order: [['name', 'ASC']]
   });
 
   return classes.map((c) => ({
     value: c.id,
-    label: c.name
+    label: c.name,
+    sections: c.sections || []
   }));
 };
 

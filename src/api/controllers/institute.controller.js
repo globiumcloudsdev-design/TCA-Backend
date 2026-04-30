@@ -129,6 +129,18 @@ export const markInvoicePaid = catchAsync(async (req, res) => {
   sendSuccess(res, invoice, 'Invoice marked as paid');
 });
 
+// NEW: DELETE /master-admin/invoices/:id
+export const deleteInvoice = catchAsync(async (req, res) => {
+  await instituteService.deleteInvoice(req.params.id);
+  sendNoContent(res);
+});
+
+// NEW: POST /master-admin/invoices/bulk-delete
+export const bulkDeleteInvoices = catchAsync(async (req, res) => {
+  await instituteService.bulkDeleteInvoices(req.body.ids);
+  sendNoContent(res);
+});
+
 // NEW: GET /master-admin/institutes/:id/subscription/history
 export const getSubscriptionHistory = catchAsync(async (req, res) => {
   const history = await instituteService.getSubscriptionHistory(req.params.id);
@@ -233,4 +245,12 @@ export const getInstituteStaff = catchAsync(async (req, res) => {
   });
   
   sendPaginated(res, result.data, result.pagination, 'Staff fetched');
+});
+
+/**
+ * Get master admin reports
+ */
+export const getMasterAdminReports = catchAsync(async (req, res) => {
+  const reports = await instituteService.getMasterAdminReports(req.query);
+  sendSuccess(res, reports, 'Reports generated successfully');
 });

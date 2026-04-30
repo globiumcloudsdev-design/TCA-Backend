@@ -6,9 +6,7 @@ import {
   sendError,
   sendNotFound,
 } from "../../utils/helpers/response.helper.js";
-
-// Helper to get institute ID from request
-const getSchoolId = (req) => req.user?.school_id;
+import { getInstituteId, getBranchId } from "../../utils/helpers/request.helper.js";
 
 // Helper to sanitize UUID fields that might be empty strings from frontend
 const sanitizeUUIDs = (data) => {
@@ -22,12 +20,15 @@ const sanitizeUUIDs = (data) => {
 
 export const markAttendance = async (req, res) => {
   try {
-    const schoolId = getSchoolId(req);
+    const schoolId = getInstituteId(req);
     if (!schoolId) return sendError(res, "School ID not found", 400);
+
+    const branchId = getBranchId(req);
 
     const data = sanitizeUUIDs({
       ...req.body,
       school_id: schoolId,
+      branch_id: branchId || req.user.branch_id,
       marked_by: req.user.id,
     });
     const result = await attendanceService.markAttendance(data);
@@ -40,12 +41,15 @@ export const markAttendance = async (req, res) => {
 
 export const bulkMarkAttendance = async (req, res) => {
   try {
-    const schoolId = getSchoolId(req);
+    const schoolId = getInstituteId(req);
     if (!schoolId) return sendError(res, "School ID not found", 400);
+
+    const branchId = getBranchId(req);
 
     const data = sanitizeUUIDs({
       ...req.body,
       school_id: schoolId,
+      branch_id: branchId || req.user.branch_id,
       marked_by: req.user.id,
       skip_existing:
         req.body.skip_existing === true || req.body.skip_existing === "true", // accept boolean or string
@@ -66,19 +70,18 @@ export const bulkMarkAttendance = async (req, res) => {
   }
 };
 
-//
 export const scanQR = async (req, res) => {
   try {
-    const schoolId = getSchoolId(req);
+    const schoolId = getInstituteId(req);
     if (!schoolId) return sendError(res, "School ID not found", 400);
+
+    const branchId = getBranchId(req);
 
     const { student_id, date, type } = req.body;
     if (!student_id) return sendError(res, "Student ID required", 400);
 
-    console.log('Scan QR Api Response', student_id)
-
     const student = await models.User.findByPk(student_id, {
-      attributes: ["user_type", "details", "school_id"],
+      attributes: ["user_type", "details", "school_id", "branch_id"],
     });
     if (!student) return sendError(res, "Student not found", 404);
     if (student.user_type !== "STUDENT")
@@ -88,6 +91,7 @@ export const scanQR = async (req, res) => {
       student_id,
       date,
       school_id: schoolId,
+      branch_id: branchId || student.branch_id,
       marked_by: req.user.id,
       type,
     };
@@ -99,13 +103,41 @@ export const scanQR = async (req, res) => {
   }
 };
 
+export const markHoliday = async (req, res) => {
+  try {
+    const schoolId = getInstituteId(req);
+    if (!schoolId) return sendError(res, "School ID not found", 400);
+
+    const branchId = getBranchId(req);
+
+    const { date, remarks } = req.body;
+    if (!date) return sendError(res, "Date is required", 400);
+
+    const result = await attendanceService.markHoliday({
+      date,
+      remarks,
+      school_id: schoolId,
+      branch_id: branchId || req.body.branch_id,
+      marked_by: req.user.id,
+    });
+
+    return sendSuccess(res, result, `Successfully marked ${date} as a holiday`);
+  } catch (error) {
+    console.error("Mark holiday error:", error);
+    return sendError(res, error.message || "Failed to mark holiday", 400);
+  }
+};
+
 export const getAttendance = async (req, res) => {
   try {
-    const schoolId = getSchoolId(req);
+    const schoolId = getInstituteId(req);
     if (!schoolId) return sendError(res, "School ID not found", 400);
+
+    const branchId = getBranchId(req);
 
     const filters = {
       school_id: schoolId,
+      branch_id: branchId,
       class_id: req.query.class_id,
       section_id: req.query.section_id,
       student_id: req.query.student_id,
@@ -134,8 +166,10 @@ export const getAttendance = async (req, res) => {
 export const updateAttendance = async (req, res) => {
   try {
     const { id } = req.params;
-    const schoolId = getSchoolId(req);
+    const schoolId = getInstituteId(req);
     if (!schoolId) return sendError(res, "School ID not found", 400);
+
+    const branchId = getBranchId(req);
 
     const attendance = await models.StudentAttendance.findOne({
       where: { id, school_id: schoolId },
@@ -147,6 +181,7 @@ export const updateAttendance = async (req, res) => {
       ...sanitizedBody,
       id,
       school_id: schoolId,
+      branch_id: branchId || attendance.branch_id,
     });
     return sendSuccess(res, result, "Attendance updated successfully");
   } catch (error) {
@@ -157,11 +192,14 @@ export const updateAttendance = async (req, res) => {
 
 export const getAttendanceReport = async (req, res) => {
   try {
-    const schoolId = getSchoolId(req);
+    const schoolId = getInstituteId(req);
     if (!schoolId) return sendError(res, "School ID not found", 400);
+
+    const branchId = getBranchId(req);
 
     const params = {
       school_id: schoolId,
+      branch_id: branchId,
       class_id: req.query.class_id,
       section_id: req.query.section_id,
       student_id: req.query.student_id,

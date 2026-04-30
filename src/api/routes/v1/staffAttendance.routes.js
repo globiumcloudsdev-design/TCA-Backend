@@ -21,6 +21,9 @@ router.post(
 // Report
 router.get('/report', hasPermission('staff_attendance.view'), staffAttendanceController.getAttendanceReport);
 
+// Holiday marking
+router.post('/holiday', hasPermission('staff_attendance.mark'), staffAttendanceController.markHoliday);
+
 // CRUD
 router
   .route('/')

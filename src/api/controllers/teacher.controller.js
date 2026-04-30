@@ -11,15 +11,9 @@ import {
   sendError, 
   sendNotFound 
 } from '../../utils/helpers/response.helper.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize, User } = models;
-
-/**
- * Get institute ID from request
- */
-const getInstituteId = (req) => {
-  return req.user?.school_id || req.user?.institute_id || req.query.institute_id || req.headers['x-school-id'] || null;
-};
 
 /**
  * Upload documents to Cloudinary
@@ -99,6 +93,8 @@ export const createTeacher = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     // Parse form data
     const body = { ...req.body };
     
@@ -131,7 +127,6 @@ export const createTeacher = async (req, res) => {
     
     // Upload documents if any
     if (req.files?.length) {
-      console.log('📎 Uploading', req.files.length, 'documents');
       const tempId = `temp_${Date.now()}`;
       const uploadedDocs = await uploadDocuments(req.files, instituteId, tempId);
       
@@ -149,6 +144,7 @@ export const createTeacher = async (req, res) => {
     const teacherData = {
       ...body,
       institute_id: instituteId,
+      branch_id: branchId || body.branch_id,
       created_by: req.user.id,
       date_of_birth: body.dob,
       employee_id: body.employee_id
@@ -159,7 +155,7 @@ export const createTeacher = async (req, res) => {
     
     // Remove password from response
     const { password, ...responseData } = result;
-        
+         
     return sendCreated(res, {
       ...responseData.user.toJSON(),
       temp_password: password,
@@ -185,9 +181,12 @@ export const getAllTeachers = async (req, res) => {
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
+
+    const branchId = getBranchId(req);
     
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId,
       search: req.query.search,
       status: req.query.status,
       role_id: req.query.role_id
@@ -240,91 +239,14 @@ export const getTeacherById = async (req, res) => {
   }
 };
 
-// /**
-//  * Update teacher
-//  * PUT /api/v1/teachers/:id
-//  */
-// export const updateTeacher = async (req, res) => {
-//   const transaction = await sequelize.transaction();
-  
-//   try {
-//     const { id } = req.params;
-//     const instituteId = getInstituteId(req);
-    
-//     if (!instituteId) {
-//       await transaction.rollback();
-//       return sendError(res, 'Institute ID not found', 400);
-//     }
-    
-//     // Parse form data
-//     const body = { ...req.body };
-    
-//     if (body.subjects) {
-//       try { 
-//         body.subjects = JSON.parse(body.subjects); 
-//       } catch { 
-//         body.subjects = []; 
-//       }
-//     }
-    
-//     // Handle existing documents string from multipart/form-data
-//     if (body.documents && typeof body.documents === 'string') {
-//       try {
-//         body.documents = JSON.parse(body.documents);
-//       } catch (e) {
-//         console.warn('⚠️ Failed to parse body.documents:', e.message);
-//         body.documents = [];
-//       }
-//     }
-
-//     // Handle photo upload to Cloudinary
-//     if (req.files?.photo?.[0]) {
-//       const folder = `the-clouds-academy/${instituteId}/teachers/photos`;
-//       const uploaded = await uploadToCloudinary(req.files.photo[0].path, folder);
-//       body.photo_url = uploaded.url;
-//       body.photo_public_id = uploaded.public_id;
-      
-//       try { await unlink(req.files.photo[0].path); } catch { /* ignore */ }
-//     }
-
-//     // Upload new documents
-//     if (req.files?.length && !req.files?.photo?.[0]) {
-//       console.log('📎 Uploading', req.files.length, 'new documents');
-//       const uploadedDocs = await uploadDocuments(req.files, instituteId, id);
-      
-//       if (Array.isArray(body.documents)) {
-//         body.documents = [...body.documents, ...uploadedDocs];
-//       } else {
-//         body.documents = uploadedDocs;
-//       }
-//     }
-    
-//     const updatedTeacher = await teacherService.updateTeacher(
-//       id, instituteId, body, { transaction }
-//     );
-    
-//     await transaction.commit();
-        
-//     return sendSuccess(res, updatedTeacher, 'Teacher updated successfully');
-    
-//   } catch (error) {
-//     await transaction.rollback();
-//     console.error('❌ Update teacher error:', error);
-    
-//     if (error.message === 'Teacher not found') {
-//       return sendNotFound(res, error.message);
-//     }
-//     return sendError(res, error.message || 'Failed to update teacher', 400);
-//   }
-// };
-
-
 export const updateTeacher = async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
     const { id } = req.params;
     const instituteId = getInstituteId(req);
     if (!instituteId) return sendError(res, 'Institute ID not found', 400);
+
+    const branchId = getBranchId(req);
 
     let updateData = { ...req.body };
 
@@ -343,7 +265,6 @@ export const updateTeacher = async (req, res) => {
       updateData.photo_url = uploaded.url;
       updateData.photo_public_id = uploaded.public_id;
       await unlink(req.files.photo[0].path).catch(() => {});
-      // console.log('✅ Avatar uploaded:', updateData.photo_url);
     }
 
     // Handle document uploads
@@ -360,7 +281,7 @@ export const updateTeacher = async (req, res) => {
       }
     }
 
-    // console.log('📝 Final updateData before service:', JSON.stringify(updateData, null, 2));
+    updateData.branch_id = branchId || updateData.branch_id;
 
     const updatedTeacher = await teacherService.updateTeacher(id, instituteId, updateData, { transaction });
     await transaction.commit();
@@ -430,7 +351,6 @@ export const regenerateQRCode = async (req, res) => {
   }
 };
 
-
 /**
  * Toggle teacher status (active/inactive)
  * PATCH /api/v1/teachers/:id/toggle-status
@@ -452,8 +372,6 @@ export const toggleTeacherStatus = async (req, res) => {
       await transaction.rollback();
       return sendError(res, 'is_active field is required', 400);
     }
-    
-    // console.log('🔄 Toggling teacher status:', { id, is_active });
     
     const teacher = await User.findOne({
       where: { id, school_id: instituteId, user_type: 'TEACHER' }

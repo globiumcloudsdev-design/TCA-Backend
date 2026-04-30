@@ -8,6 +8,7 @@
 import { Op } from 'sequelize';
 import { Router } from 'express';
 import { protect, isMasterAdmin } from '../../middlewares/auth.middleware.js';
+import { hasPermission } from '../../middlewares/permission.middleware.js';
 import catchAsync from '../../../utils/lib/catchAsync.js';
 import {
   sendSuccess, sendCreated, sendNoContent, sendPaginated
@@ -37,8 +38,12 @@ import {
   getInstituteStudents,
   getInstituteTeachers,
   getInstituteParents,
-  getInstituteStaff
+  getInstituteStaff,
+  deleteInvoice,
+  bulkDeleteInvoices,
+  getMasterAdminReports
 } from '../../controllers/institute.controller.js';
+import { addPlatformUser, getAllUsers, updatePlatformUser, togglePlatformUserStatus } from '../../controllers/user.controller.js';
 
 const router = Router();
 
@@ -91,59 +96,68 @@ router.get('/subscription-plans', catchAsync(async (req, res) => {
 // =============================================================================
 
 router.route('/institutes')
-  .get(getInstitutes)
-  .post(upload.single('institute_logo'), createInstitute);
+  .get(hasPermission('institute.read'), getInstitutes)
+  .post(hasPermission('institute.create'), upload.single('institute_logo'), createInstitute);
 
 router.route('/institutes/:id')
-  .get(getInstituteById)
-  .put(upload.single('institute_logo'), updateInstitute)
-  .delete(deleteInstitute);
+  .get(hasPermission('institute.read'), getInstituteById)
+  .put(hasPermission('institute.update'), upload.single('institute_logo'), updateInstitute)
+  .delete(hasPermission('institute.delete'), deleteInstitute);
 
-router.patch('/institutes/:id/status', toggleStatus);
-router.patch('/institutes/:id/subscription-status', updateSubscriptionStatus);
-router.patch('/institutes/:id/plan', updateInstitutePlan);
+router.patch('/institutes/:id/status', hasPermission('institute.activate'), toggleStatus);
+router.patch('/institutes/:id/subscription-status', hasPermission('subscription.update'), updateSubscriptionStatus);
+router.patch('/institutes/:id/plan', hasPermission('subscription.update'), updateInstitutePlan);
 
 // =============================================================================
 // NEW: INSTITUTE STORAGE & STATS (REAL DATA)
 // =============================================================================
 
 // GET /master-admin/institutes/:id/storage
-router.get('/institutes/:id/storage', getInstituteStorage);
+router.get('/institutes/:id/storage', hasPermission('institute.view_stats'), getInstituteStorage);
 
 // GET /master-admin/institutes/:id/dashboard-stats
-router.get('/institutes/:id/dashboard-stats', getInstituteDashboardStats);
+router.get('/institutes/:id/dashboard-stats', hasPermission('institute.view_stats'), getInstituteDashboardStats);
 
 // =============================================================================
 // NEW: INSTITUTE PEOPLE (REAL DATA FROM DATABASE)
 // =============================================================================
 
 // GET /master-admin/institutes/:id/students
-router.get('/institutes/:id/students', getInstituteStudents);
+router.get('/institutes/:id/students', hasPermission('institute.read'), getInstituteStudents);
 
 // GET /master-admin/institutes/:id/teachers
-router.get('/institutes/:id/teachers', getInstituteTeachers);
+router.get('/institutes/:id/teachers', hasPermission('institute.read'), getInstituteTeachers);
 
 // GET /master-admin/institutes/:id/parents
-router.get('/institutes/:id/parents', getInstituteParents);
+router.get('/institutes/:id/parents', hasPermission('institute.read'), getInstituteParents);
 
 // GET /master-admin/institutes/:id/staff
-router.get('/institutes/:id/staff', getInstituteStaff);
+router.get('/institutes/:id/staff', hasPermission('institute.read'), getInstituteStaff);
 
 // =============================================================================
 // INVOICE ROUTES
 // =============================================================================
 
+// GET /master-admin/reports (aggregated revenue and metrics)
+router.get('/reports', hasPermission('subscription.read'), getMasterAdminReports);
+
 // GET /master-admin/invoices (all invoices across all institutes)
-router.get('/invoices', getAllInvoices);
+router.get('/invoices', hasPermission('subscription.read'), getAllInvoices);
 
 // GET /master-admin/institutes/:id/invoices
-router.get('/institutes/:id/invoices', getInstituteInvoices);
+router.get('/institutes/:id/invoices', hasPermission('subscription.read'), getInstituteInvoices);
 
 // POST /master-admin/invoices/:id/mark-paid
-router.post('/invoices/:id/mark-paid', markInvoicePaid);
+router.post('/invoices/:id/mark-paid', hasPermission('subscription.update'), markInvoicePaid);
+
+// DELETE /master-admin/invoices/:id
+router.delete('/invoices/:id', hasPermission('subscription.delete'), deleteInvoice);
+
+// POST /master-admin/invoices/bulk-delete
+router.post('/invoices/bulk-delete', hasPermission('subscription.delete'), bulkDeleteInvoices);
 
 // GET /master-admin/institutes/:id/subscription/history
-router.get('/institutes/:id/subscription/history', getSubscriptionHistory);
+router.get('/institutes/:id/subscription/history', hasPermission('subscription.read'), getSubscriptionHistory);
 
 // =============================================================================
 // BACKWARD COMPATIBILITY ALIASES (/schools routes)
@@ -179,12 +193,12 @@ router.get('/schools/:id/subscription/history', getSubscriptionHistory);
 // =============================================================================
 
 // GET /master-admin/roles/permissions – grouped permission catalogue for UI
-router.get('/roles/permissions', catchAsync(async (req, res) => {
+router.get('/roles/permissions', hasPermission('platform_role.read'), catchAsync(async (req, res) => {
   sendSuccess(res, PERMISSION_GROUPS, 'Permission catalogue');
 }));
 
 // GET /master-admin/roles – list all platform template roles
-router.get('/roles', catchAsync(async (req, res) => {
+router.get('/roles', hasPermission('platform_role.read'), catchAsync(async (req, res) => {
   const { search, page = 1, limit = 50 } = req.query;
   const where = { school_id: null };
   if (search) where.name = { [Op.iLike]: `%${search}%` };
@@ -207,7 +221,7 @@ router.get('/roles', catchAsync(async (req, res) => {
 }));
 
 // POST /master-admin/roles – create new platform template role
-router.post('/roles', catchAsync(async (req, res) => {
+router.post('/roles', hasPermission('platform_role.create'), catchAsync(async (req, res) => {
   const { name, code, description, permissions = [] } = req.body;
   if (!name) throw new AppError('Role name is required', 400);
 
@@ -236,7 +250,7 @@ router.post('/roles', catchAsync(async (req, res) => {
 }));
 
 // PUT /master-admin/roles/:id – update platform role
-router.put('/roles/:id', catchAsync(async (req, res) => {
+router.put('/roles/:id', hasPermission('platform_role.update'), catchAsync(async (req, res) => {
   const role = await Role.findByPk(req.params.id);
   if (!role) throw new AppError('Role not found', 404);
 
@@ -256,12 +270,28 @@ router.put('/roles/:id', catchAsync(async (req, res) => {
 }));
 
 // DELETE /master-admin/roles/:id – delete platform role
-router.delete('/roles/:id', catchAsync(async (req, res) => {
+router.delete('/roles/:id', hasPermission('platform_role.delete'), catchAsync(async (req, res) => {
   const role = await Role.findByPk(req.params.id);
   if (!role) throw new AppError('Role not found', 404);
 
   await role.destroy();
   sendNoContent(res);
 }));
+
+// =============================================================================
+// PLATFORM USERS (Master Admin / Support Staff)
+// =============================================================================
+
+// GET /master-admin/users – fetch all users across all institutes
+router.get('/users', hasPermission('platform_user.read'), catchAsync(getAllUsers));
+
+// POST /master-admin/users – create new platform user
+router.post('/users', hasPermission('platform_user.create'), catchAsync(addPlatformUser));
+
+// PUT /master-admin/users/:id – update platform user
+router.put('/users/:id', hasPermission('platform_user.update'), catchAsync(updatePlatformUser));
+
+// PATCH /master-admin/users/:id/status – toggle user status
+router.patch('/users/:id/status', hasPermission('platform_user.update'), catchAsync(togglePlatformUserStatus));
 
 export default router;

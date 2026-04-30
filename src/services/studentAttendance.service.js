@@ -531,10 +531,122 @@ export const getAttendanceReport = async (params) => {
   return classSummary ? { class_summary: classSummary, student_wise: studentWiseReport } : studentWiseReport;
 };
 
+/**
+ * Mark a specific date as a holiday for all students in the institute
+ */
+export const markHoliday = async (data) => {
+  const { date, school_id, branch_id, marked_by, remarks } = data;
+
+  const transaction = await sequelize.transaction();
+  try {
+    // 1. Find all active students in the institute/branch
+    const studentFilters = {
+      school_id,
+      user_type: "STUDENT",
+      is_active: true,
+    };
+    if (branch_id) studentFilters.branch_id = branch_id;
+
+    const students = await User.findAll({
+      where: studentFilters,
+      attributes: ["id", "details"],
+      transaction,
+    });
+
+    const results = [];
+
+    // Cache for existence checks to avoid redundant DB calls during loop
+    const checkedSections = new Map();
+    const checkedClasses = new Map();
+
+    // 2. Prepare attendance records for all students
+    for (const student of students) {
+      let activeSession;
+      try {
+        activeSession = getActiveSession(student);
+      } catch (e) {
+        // Skip students without active session or handle as needed
+        continue;
+      }
+
+      let class_id = activeSession.class_id;
+      let section_id = activeSession.section_id;
+
+      // Validation check for Class (cached)
+      if (class_id) {
+        if (!checkedClasses.has(class_id)) {
+          const exists = await Class.findByPk(class_id, { attributes: ["id"], transaction });
+          checkedClasses.set(class_id, !!exists);
+        }
+        if (!checkedClasses.get(class_id)) class_id = null;
+      }
+
+      // Validation check for Section (cached)
+      if (section_id) {
+        if (!checkedSections.has(section_id)) {
+          const exists = await Section.findByPk(section_id, { attributes: ["id"], transaction });
+          checkedSections.set(section_id, !!exists);
+        }
+        if (!checkedSections.get(section_id)) section_id = null;
+      }
+
+      const attendanceData = {
+        school_id,
+        branch_id: branch_id || null,
+        date,
+        student_id: student.id,
+        status: "holiday",
+        remarks: remarks || "Public Holiday",
+        marked_by,
+        class_id,
+        section_id,
+        academic_year_id: activeSession.academic_year_id,
+      };
+
+      // 3. Upsert holiday record (using findOne + update/create pattern for reliability)
+      const existing = await StudentAttendance.findOne({
+        where: { student_id: student.id, date },
+        transaction,
+      });
+
+      if (existing) {
+        await existing.update(attendanceData, { transaction });
+        results.push(existing);
+      } else {
+        const created = await StudentAttendance.create(attendanceData, { transaction });
+        results.push(created);
+      }
+    }
+
+    await transaction.commit();
+
+    // 4. Send bulk notification to admins
+    try {
+      await broadcastNotification({
+        institute_id: school_id,
+        recipient_type: 'ALL_ADMINS',
+        title: `📅 Holiday Marked - ${date}`,
+        body: `${date} has been marked as a holiday for ${results.length} students.`,
+        type: 'attendance',
+        channel: 'in_app',
+        data: { date, count: results.length }
+      }, true);
+    } catch (notifError) {
+      logger.error(`Notification error in markHoliday: ${notifError.message}`);
+    }
+
+    return { success: true, count: results.length, date };
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+};
+
 export default {
   markAttendance,
   bulkMarkAttendance,
   scanQR,
+  markHoliday,
   getAttendance,
   getAttendanceReport,
 };

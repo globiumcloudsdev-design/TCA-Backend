@@ -155,8 +155,8 @@ export const isMasterAdmin = catchAsync(async (req, res, next) => {
     throw new AppError('Authentication required.', 401);
   }
 
-  if (req.user.user_type !== 'MASTER_ADMIN') {
-    throw new AppError('Master Admin access required.', 403);
+  if (!['MASTER_ADMIN', 'SYSTEM_ADMIN', 'SUPPORT_STAFF'].includes(req.user.user_type)) {
+    throw new AppError('Platform Admin access required.', 403);
   }
 
   next();
