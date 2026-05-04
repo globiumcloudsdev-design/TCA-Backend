@@ -770,6 +770,33 @@ export const deleteInstitute = async (id) => {
   await inst.destroy();
 };
 
+/**
+ * Restore a soft-deleted institute by ID
+ * @param {string} id - Institute UUID
+ * @returns {Promise<Institute>}
+ */
+export const restoreInstitute = async (id) => {
+  // paranoid: false means include soft-deleted records
+  const inst = await Institute.findByPk(id, { paranoid: false });
+  
+  if (!inst) {
+    throw new AppError('Institute not found.', 404);
+  }
+  
+  if (!inst.deletedAt) {
+    throw new AppError('Institute is not deleted (already active).', 400);
+  }
+  
+  // Restore the institute (sets deleted_at = null)
+  await inst.restore();
+  
+  // Optional: Agar aap chahte ho ke is institute ke sare users bhi restore ho jayen (agar unka bhi soft-delete ho)
+  // lekin user model me paranoid nahi hai to kuch karne ki zaroorat nahi. Users already exist karte hain.
+  
+  // Wapas full details fetch karo (include related models)
+  return await getInstituteById(id);
+};
+
 // ─── Toggle active ────────────────────────────────────────────────────────────
 export const toggleInstituteStatus = async (id, is_active) => {
   const inst = await Institute.findByPk(id);

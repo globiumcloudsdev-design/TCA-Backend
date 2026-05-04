@@ -429,6 +429,80 @@ export const createStudent = async (data, options = {}) => {
     throw error;
   }
 };
+/**
+ * Resolve Class and Section names for a list of students
+ */
+const resolveStudentRelations = async (students = []) => {
+  if (!students.length) return students;
+
+  const classIds = new Set();
+  const sectionIds = new Set();
+
+  students.forEach((student) => {
+    const details = student?.details?.studentDetails || student?.details || {};
+    const activeSession = getLatestSessionForStudent(details);
+    const classId = activeSession?.class_id || details?.class_id;
+    const sectionId = activeSession?.section_id || details?.section_id;
+
+    if (classId) classIds.add(classId);
+    if (sectionId) sectionIds.add(sectionId);
+  });
+
+  const [classes, sections] = await Promise.all([
+    classIds.size
+      ? Class.findAll({
+        where: { id: { [Op.in]: Array.from(classIds) } },
+        attributes: ["id", "name"],
+      })
+      : Promise.resolve([]),
+    sectionIds.size
+      ? Section.findAll({
+        where: { id: { [Op.in]: Array.from(sectionIds) } },
+        attributes: ["id", "name"],
+      })
+      : Promise.resolve([]),
+  ]);
+
+  const classNameMap = new Map(classes.map((cls) => [cls.id, cls.name]));
+  const sectionNameMap = new Map(
+    sections.map((section) => [section.id, section.name]),
+  );
+
+  students.forEach((student) => {
+    const details = student?.details || {};
+    const studentDetails = details?.studentDetails || {};
+    const activeSession = getLatestSessionForStudent(studentDetails);
+    const classId = activeSession?.class_id || studentDetails?.class_id;
+    const sectionId = activeSession?.section_id || studentDetails?.section_id;
+
+    const resolvedClassName = classId
+      ? classNameMap.get(classId) ||
+      activeSession?.class_name ||
+      studentDetails.class_name ||
+      null
+      : activeSession?.class_name || studentDetails.class_name;
+    const resolvedSectionName = sectionId
+      ? sectionNameMap.get(sectionId) ||
+      activeSession?.section_name ||
+      studentDetails.section_name ||
+      null
+      : activeSession?.section_name || studentDetails.section_name;
+
+    if (!details.studentDetails) {
+      details.studentDetails = {};
+    }
+
+    details.studentDetails.class_id =
+      classId || details.studentDetails.class_id || null;
+    details.studentDetails.section_id =
+      sectionId || details.studentDetails.section_id || null;
+    details.studentDetails.class_name = resolvedClassName;
+    details.studentDetails.section_name = resolvedSectionName;
+    student.details = details;
+  });
+
+  return students;
+};
 
 /**
  * Get all students with class and section details
@@ -509,72 +583,7 @@ export const getAllStudents = async (filters = {}, pagination = {}) => {
     subQuery: false,
   });
 
-  // Normalize class/section names from source tables to avoid stale JSON values.
-  const classIds = new Set();
-  const sectionIds = new Set();
-
-  rows.forEach((student) => {
-    const details = student?.details?.studentDetails || student?.details || {};
-    const activeSession = getLatestSessionForStudent(details);
-    const classId = activeSession?.class_id || details?.class_id;
-    const sectionId = activeSession?.section_id || details?.section_id;
-
-    if (classId) classIds.add(classId);
-    if (sectionId) sectionIds.add(sectionId);
-  });
-
-  const [classes, sections] = await Promise.all([
-    classIds.size
-      ? Class.findAll({
-        where: { id: { [Op.in]: Array.from(classIds) } },
-        attributes: ["id", "name"],
-      })
-      : Promise.resolve([]),
-    sectionIds.size
-      ? Section.findAll({
-        where: { id: { [Op.in]: Array.from(sectionIds) } },
-        attributes: ["id", "name"],
-      })
-      : Promise.resolve([]),
-  ]);
-
-  const classNameMap = new Map(classes.map((cls) => [cls.id, cls.name]));
-  const sectionNameMap = new Map(
-    sections.map((section) => [section.id, section.name]),
-  );
-
-  rows.forEach((student) => {
-    const details = student?.details || {};
-    const studentDetails = details?.studentDetails || {};
-    const activeSession = getLatestSessionForStudent(studentDetails);
-    const classId = activeSession?.class_id || studentDetails?.class_id;
-    const sectionId = activeSession?.section_id || studentDetails?.section_id;
-
-    const resolvedClassName = classId
-      ? classNameMap.get(classId) ||
-      activeSession?.class_name ||
-      studentDetails.class_name ||
-      null
-      : activeSession?.class_name || studentDetails.class_name;
-    const resolvedSectionName = sectionId
-      ? sectionNameMap.get(sectionId) ||
-      activeSession?.section_name ||
-      studentDetails.section_name ||
-      null
-      : activeSession?.section_name || studentDetails.section_name;
-
-    if (!details.studentDetails) {
-      details.studentDetails = {};
-    }
-
-    details.studentDetails.class_id =
-      classId || details.studentDetails.class_id || null;
-    details.studentDetails.section_id =
-      sectionId || details.studentDetails.section_id || null;
-    details.studentDetails.class_name = resolvedClassName;
-    details.studentDetails.section_name = resolvedSectionName;
-    student.details = details;
-  });
+  await resolveStudentRelations(rows);
 
   return {
     data: rows,
@@ -1985,19 +1994,22 @@ export const searchStudents = async (instituteId, searchQuery, limit = 20) => {
     { email: { [Op.iLike]: searchTerm } },
     { phone: { [Op.iLike]: searchTerm } },
     { registration_no: { [Op.iLike]: searchTerm } },
-    sequelize.literal(`details->'studentDetails'->>'roll_no' ILIKE '${searchTerm.replace(/'/g, "''")}'`)
+    sequelize.literal(`details->'studentDetails'->>'roll_no' ILIKE '${searchTerm.replace(/'/g, "''")}'`),
+    sequelize.literal(`CONCAT(first_name, ' ', last_name) ILIKE '${searchTerm.replace(/'/g, "''")}'`)
   ];
   
-  // Handle multi-word names
+  // Handle multi-word names with AND logic (all words must appear in name)
   if (words.length > 1) {
-    for (const word of words) {
+    const wordAndConditions = words.map(word => {
       const wordTerm = `%${word}%`;
-      orConditions.push(
-        { first_name: { [Op.iLike]: wordTerm } },
-        { last_name: { [Op.iLike]: wordTerm } },
-        sequelize.literal(`CONCAT(first_name, ' ', last_name) ILIKE '${wordTerm.replace(/'/g, "''")}'`)
-      );
-    }
+      return {
+        [Op.or]: [
+          { first_name: { [Op.iLike]: wordTerm } },
+          { last_name: { [Op.iLike]: wordTerm } }
+        ]
+      };
+    });
+    orConditions.push({ [Op.and]: wordAndConditions });
   }
   
   const students = await User.findAll({
@@ -2006,31 +2018,27 @@ export const searchStudents = async (instituteId, searchQuery, limit = 20) => {
       user_type: 'STUDENT',
       [Op.or]: orConditions
     },
-    attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'registration_no', 'avatar_url', 'is_active', 'details'],
+    // Fetch all needed attributes including details
+    attributes: [
+      'id', 'school_id', 'role_id', 'user_type', 'first_name', 'last_name', 
+      'email', 'phone', 'registration_no', 'avatar_url', 'is_active', 'details',
+      'created_at', 'updated_at'
+    ],
+    include: [
+      {
+        model: Role,
+        as: "Role",
+        attributes: ["id", "name", "permissions"],
+      },
+    ],
     limit: parseInt(limit),
     order: [['first_name', 'ASC']]
   });
 
-  const processed = students.map(student => {
-    const sessions = student.details?.studentDetails?.academicSessions || [];
-    const activeSession = sessions.find(s => s.status === 'active');
-    return {
-      id: student.id,
-      first_name: student.first_name,
-      last_name: student.last_name,
-      email: student.email,
-      phone: student.phone,
-      registration_no: student.registration_no,
-      avatar_url: student.avatar_url,
-      is_active: student.is_active,
-      current_class: activeSession?.class_name || null,
-      current_section: activeSession?.section_name || null,
-      current_roll_no: activeSession?.roll_no || null,
-      current_academic_year_id: activeSession?.academic_year_id || null,
-    };
-  });
+  // Resolve Class/Section names just like in getAllStudents
+  await resolveStudentRelations(students);
 
-  return { data: processed, total: processed.length, query: searchQuery };
+  return { data: students, total: students.length, query: searchQuery };
 };
 
 export default {

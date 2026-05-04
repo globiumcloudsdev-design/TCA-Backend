@@ -24,6 +24,7 @@ const {
   Exam,
   AcademicYear,
   Institute,
+  Payslip,
   sequelize
 } = models;
 
@@ -495,17 +496,76 @@ export const generateExamReport = async (filters) => {
  */
 export const generatePayrollReport = async (filters) => {
   try {
-    // TODO: Implement payroll report based on your Payroll/Invoice model
+    const query = {
+      where: {
+        institute_id: filters.institute_id
+      },
+      include: [
+        {
+          model: User,
+          as: 'staff',
+          attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'details'],
+          where: {}
+        }
+      ],
+      order: [['year', 'DESC'], ['month', 'DESC']],
+      raw: false
+    };
+
+    // Filter by month
+    if (filters.month) {
+      query.where.month = parseInt(filters.month);
+    }
+
+    // Filter by year
+    if (filters.year) {
+      query.where.year = parseInt(filters.year);
+    }
+
+    // Filter by status
+    if (filters.status) {
+      query.where.status = filters.status;
+    }
+
+    // Search by staff name
+    if (filters.search) {
+      query.include[0].where[Op.or] = [
+        { first_name: { [Op.iLike]: `%${filters.search}%` } },
+        { last_name: { [Op.iLike]: `%${filters.search}%` } }
+      ];
+    }
+
+    const payslips = await Payslip.findAll(query);
+
+    const formattedRecords = payslips.map(p => ({
+      id: p.id,
+      month: p.month,
+      year: p.year,
+      staff_name: p.staff ? `${p.staff.first_name} ${p.staff.last_name}` : 'N/A',
+      basic_salary: formatCurrency(p.basic_salary),
+      total_allowances: formatCurrency(p.total_allowances),
+      total_deductions: formatCurrency(p.total_deductions),
+      net_salary: formatCurrency(p.net_salary),
+      net_salary_raw: parseFloat(p.net_salary),
+      status: p.status,
+      paid_on: p.paid_on ? formatDate(p.paid_on) : 'N/A',
+      payment_method: p.payment_method || 'N/A'
+    }));
+
+    const totalPayroll = payslips.reduce((sum, p) => sum + parseFloat(p.net_salary || 0), 0);
+    const paidCount = payslips.filter(p => p.status === 'paid').length;
+    const pendingCount = payslips.filter(p => p.status === 'pending').length;
+
     return {
       type: 'payroll_report',
       summary: {
-        total_staff: 0,
-        total_payroll: 0,
-        processed: 0,
-        pending: 0
+        total_staff: new Set(payslips.map(p => p.staff_id)).size,
+        total_records: payslips.length,
+        total_payroll: formatCurrency(totalPayroll),
+        processed: paidCount,
+        pending: pendingCount
       },
-      records: [],
-      message: 'Payroll report coming soon',
+      records: formattedRecords,
       timestamp: new Date()
     };
   } catch (error) {
@@ -600,6 +660,9 @@ export const exportReport = async (data) => {
         break;
       case 'exam':
         report = await generateExamReport(filters);
+        break;
+      case 'payroll':
+        report = await generatePayrollReport(filters);
         break;
       default:
         throw new Error(`Unknown report type: ${report_type}`);

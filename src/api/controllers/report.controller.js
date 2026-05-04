@@ -185,14 +185,12 @@ export const getPayrollReport = async (req, res) => {
 
     const filters = {
       institute_id: instituteId,
-      from_date: req.query.from_date,
-      to_date: req.query.to_date,
+      month: req.query.month,
+      year: req.query.year,
       staff_id: req.query.staff_id,
       branch_id: req.query.branch_id,
-      status: req.query.status, // processed, pending, cancelled
-      type: req.query.type || 'monthly', // monthly, custom
-      orderBy: req.query.orderBy || 'date',
-      orderDirection: req.query.orderDirection || 'DESC',
+      status: req.query.status, // pending, paid, on_hold
+      search: req.query.search,
       skip: parseInt(req.query.skip) || 0,
       limit: parseInt(req.query.limit) || 100
     };

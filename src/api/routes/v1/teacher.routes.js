@@ -45,6 +45,16 @@ router.get(
 );
 
 /**
+ * SEARCH - Teachers (Space-insensitive)
+ * GET /api/v1/teachers/search
+ */
+router.get(
+  '/search',
+  hasPermission('teachers.read'),
+  teacherController.searchTeachers
+);
+
+/**
  * GET - Teacher by ID
  * GET /api/v1/teachers/:id
  */

@@ -166,3 +166,19 @@ export const regenerateQRCode = catchAsync(async (req, res) => {
   
   sendSuccess(res, { qr_code: qrCodeUrl }, 'QR Code regenerated successfully');
 });
+
+// ─── Search staff ────────────────────────────────────────────────────────────
+export const searchStaff = catchAsync(async (req, res) => {
+  const instituteId = getInstituteId(req);
+  if (!instituteId) {
+    return sendPaginated(res, [], { total: 0, page: 1, limit: 20, totalPages: 0 }, 'No institute context');
+  }
+
+  const result = await staffService.searchStaff(instituteId, req.query);
+  sendPaginated(res, result.rows, {
+    total: result.total,
+    page: result.page,
+    limit: result.limit,
+    totalPages: result.totalPages
+  }, 'Staff members searched successfully');
+});

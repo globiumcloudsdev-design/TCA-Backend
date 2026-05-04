@@ -75,7 +75,8 @@ const Role = sequelize.define(
 
 Role.associate = (models) => {
   Role.belongsTo(models.Institute, { foreignKey: 'school_id', as: 'Institute' });
-  Role.hasMany(models.Institute, { foreignKey: 'role_id', as: 'AssignedInstitutes' });
+  // Role.hasMany(models.Institute, { foreignKey: 'role_id', as: 'AssignedInstitutes' });
+    Role.hasMany(models.Institute, { foreignKey: 'institute_role_id', as: 'AssignedInstitutes' });
   Role.hasMany(models.User, { foreignKey: 'role_id', as: 'Users' });
 };
 

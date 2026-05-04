@@ -240,6 +240,7 @@ export const getAllStudents = async (req, res) => {
       class_id: req.query.class_id,
       section_id: req.query.section_id,
       academic_year_id: req.query.academic_year_id,
+      is_active: req.query.is_active,
     };
     
     const pagination = {

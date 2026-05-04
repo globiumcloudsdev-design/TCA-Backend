@@ -3,7 +3,7 @@
  * 
  * IMPORTANT: 
  * - Set your environment to 'production' before running this
- * - This script ONLY copies: MASTER_ADMIN users, template roles, subscription plans
+ * - This script ONLY copies: MASTER_ADMIN users, template roles, subscription plans, institute types
  * - Custom institute data is NOT migrated (only template/global data)
  * 
  * Usage:
@@ -131,6 +131,16 @@ const DevSubscriptionPlan = devSequelize.define('SubscriptionPlan', {
   display_order: Sequelize.INTEGER,
 }, { tableName: 'subscription_plans', timestamps: true, underscored: true });
 
+const DevInstituteType = devSequelize.define('InstituteType', {
+  id: { type: Sequelize.INTEGER, primaryKey: true, autoIncrement: true },
+  name: Sequelize.STRING,
+  slug: Sequelize.STRING,
+  description: Sequelize.STRING,
+  icon: Sequelize.STRING,
+  is_active: Sequelize.BOOLEAN,
+  sort_order: Sequelize.INTEGER,
+}, { tableName: 'institute_types', timestamps: true, underscored: true });
+
 // Define models for Prod DB
 const ProdUser = prodSequelize.define('User', {
   id: { type: Sequelize.UUID, primaryKey: true },
@@ -192,6 +202,16 @@ const ProdSubscriptionPlan = prodSequelize.define('SubscriptionPlan', {
   display_order: Sequelize.INTEGER,
 }, { tableName: 'subscription_plans', timestamps: true, underscored: true });
 
+const ProdInstituteType = prodSequelize.define('InstituteType', {
+  id: { type: Sequelize.INTEGER, primaryKey: true, autoIncrement: true },
+  name: Sequelize.STRING,
+  slug: Sequelize.STRING,
+  description: Sequelize.STRING,
+  icon: Sequelize.STRING,
+  is_active: Sequelize.BOOLEAN,
+  sort_order: Sequelize.INTEGER,
+}, { tableName: 'institute_types', timestamps: true, underscored: true });
+
 /**
  * Main migration function
  */
@@ -215,11 +235,33 @@ async function runMigration() {
       users: 0,
       roles: 0,
       plans: 0,
+      types: 0,
       skipped: 0,
     };
 
-    // ============ 1. MIGRATE MASTER_ADMIN USERS ============
-    console.log('👤 [1/3] Migrating MASTER_ADMIN users...');
+    // ============ 1. MIGRATE INSTITUTE TYPES ============
+    console.log('🏫 [1/4] Migrating Institute Types...');
+    const devTypes = await DevInstituteType.findAll({ raw: true });
+
+    for (const typeData of devTypes) {
+      try {
+        const exists = await ProdInstituteType.findByPk(typeData.id);
+        if (exists) {
+          console.log(`  ⏭️  Already exists: ${typeData.slug}`);
+          stats.skipped++;
+          continue;
+        }
+        await ProdInstituteType.create(typeData);
+        console.log(`  ✅ Created: ${typeData.name} (${typeData.slug})`);
+        stats.types++;
+      } catch (err) {
+        console.log(`  ❌ Error: ${typeData.slug} - ${err.message}`);
+      }
+    }
+    console.log();
+
+    // ============ 2. MIGRATE MASTER_ADMIN USERS ============
+    console.log('👤 [2/4] Migrating MASTER_ADMIN users...');
     const devAdmins = await DevUser.findAll({
       where: { user_type: 'MASTER_ADMIN' },
       raw: true,
@@ -242,8 +284,8 @@ async function runMigration() {
     }
     console.log();
 
-    // ============ 2. MIGRATE TEMPLATE ROLES ============
-    console.log('🔐 [2/3] Migrating Template Roles...');
+    // ============ 3. MIGRATE TEMPLATE ROLES ============
+    console.log('🔐 [3/4] Migrating Template Roles...');
     const devRoles = await DevRole.findAll({
       where: { is_template: true },
       raw: true,
@@ -266,8 +308,8 @@ async function runMigration() {
     }
     console.log();
 
-    // ============ 3. MIGRATE SUBSCRIPTION PLANS ============
-    console.log('📊 [3/3] Migrating Subscription Plans...');
+    // ============ 4. MIGRATE SUBSCRIPTION PLANS ============
+    console.log('📊 [4/4] Migrating Subscription Plans...');
     const devPlans = await DevSubscriptionPlan.findAll({ raw: true });
 
     for (const planData of devPlans) {
@@ -289,14 +331,15 @@ async function runMigration() {
 
     // ============ SUMMARY ============
     console.log('📋 Migration Summary:');
+    console.log(`  ✅ Institute types migrated: ${stats.types}`);
     console.log(`  ✅ MASTER_ADMIN users migrated: ${stats.users}`);
     console.log(`  ✅ Template roles migrated: ${stats.roles}`);
     console.log(`  ✅ Subscription plans migrated: ${stats.plans}`);
     console.log(`  ⏭️  Records skipped (already exist): ${stats.skipped}`);
-    console.log(`  📊 Total processed: ${devAdmins.length + devRoles.length + devPlans.length}\n`);
+    console.log(`  📊 Total processed: ${devTypes.length + devAdmins.length + devRoles.length + devPlans.length}\n`);
 
     console.log('✨ Migration completed successfully!');
-    console.log('🔒 Only template data migrated (MASTER_ADMIN, roles, plans)');
+    console.log('🔒 Only template data migrated (MASTER_ADMIN, roles, plans, types)');
     console.log('ℹ️  Custom institute data remains in development DB\n');
 
     process.exit(0);

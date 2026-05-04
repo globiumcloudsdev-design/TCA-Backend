@@ -13,7 +13,7 @@ router.post('/find-students', hasPermission('parents.read'), parentController.fi
 router.post('/', hasPermission('parents.create'), parentController.createParent);
 
 router.get('/', hasPermission('parents.read'), parentController.getAllParents);
-
+router.get('/search', hasPermission('parents.read'), parentController.searchParents);
 router.get('/:id', hasPermission('parents.read'), parentController.getParentById);
 
 router.put('/:id', hasPermission('parents.update'), parentController.updateParent);

@@ -27,6 +27,10 @@ const {
   FeeVoucher,
   Exam,
   Branch,
+  Expense,
+  LeaveRequest,
+  StaffAttendance,
+  Event,
 } = models;
 
 const STUDENT_PATHS = [
@@ -87,6 +91,10 @@ const getOverviewStats = async ({ instituteId, branchId }) => {
     monthlyCollected,
     monthlyPending,
     upcomingExams,
+    monthlyExpenses,
+    pendingLeaves,
+    todayStaffAttendance,
+    upcomingEvents,
   ] = await Promise.all([
     User.count({ where: { ...userWhere, user_type: 'STUDENT' } }),
     User.count({ where: { ...userWhere, user_type: 'TEACHER' } }),
@@ -145,6 +153,37 @@ const getOverviewStats = async ({ instituteId, branchId }) => {
         },
       },
     }),
+    Expense.sum('amount', {
+      where: {
+        ...buildWhere(instituteId, branchId, true),
+        status: 'paid',
+        date: {
+          [Op.between]: [startOfMonth(new Date()), endOfMonth(new Date())],
+        },
+      },
+    }),
+    LeaveRequest.count({
+      where: {
+        ...buildWhere(instituteId, branchId, true),
+        status: 'PENDING',
+      },
+    }),
+    StaffAttendance.findAll({
+      where: {
+        ...buildWhere(instituteId, branchId, true),
+        date: new Date().toISOString().slice(0, 10),
+      },
+      attributes: ['status'],
+      raw: true,
+    }),
+    Event.count({
+      where: {
+        ...buildWhere(instituteId, branchId, true),
+        date: {
+          [Op.between]: [new Date(), addDays(new Date(), 30)],
+        },
+      },
+    }),
   ]);
 
   const attendanceTotal = monthlyAttendance.filter((row) => row.status !== 'holiday').length;
@@ -154,6 +193,10 @@ const getOverviewStats = async ({ instituteId, branchId }) => {
   const todayTotal = todayAttendance.filter((row) => row.status !== 'holiday').length;
   const todayPresent = todayAttendance.filter((row) => row.status === 'present').length;
   const todayPct = todayTotal ? Math.round((todayPresent / todayTotal) * 100) : 0;
+
+  const staffTotal = todayStaffAttendance.filter((row) => row.status !== 'HOLIDAY').length;
+  const staffPresent = todayStaffAttendance.filter((row) => row.status === 'PRESENT').length;
+  const staffPct = staffTotal ? Math.round((staffPresent / staffTotal) * 100) : 0;
 
   return {
     total_students: totalStudents,
@@ -165,6 +208,10 @@ const getOverviewStats = async ({ instituteId, branchId }) => {
     avg_attendance_pct: attendancePct,
     today_attendance_pct: todayPct,
     upcoming_exams: upcomingExams,
+    total_expenses: parseAmount(monthlyExpenses),
+    pending_leaves: pendingLeaves,
+    staff_attendance_pct: staffPct,
+    upcoming_events: upcomingEvents,
   };
 };
 
@@ -194,6 +241,42 @@ const getAttendanceChart = async ({ instituteId, branchId }) => {
         present: total ? Math.round((present / total) * 100) : 0,
         absent: total ? Math.round((absent / total) * 100) : 0,
         late: total ? Math.round((late / total) * 100) : 0,
+      };
+    }),
+  );
+
+  return chart;
+};
+
+const getIncomeExpenseChart = async ({ instituteId, branchId }) => {
+  const months = Array.from({ length: 6 }).map((_, i) => subMonths(new Date(), 5 - i));
+
+  const chart = await Promise.all(
+    months.map(async (monthDate) => {
+      const monthStart = startOfMonth(monthDate);
+      const monthEnd = endOfMonth(monthDate);
+
+      const [income, expense] = await Promise.all([
+        FeeVoucher.sum('net_amount', {
+          where: {
+            ...buildWhere(instituteId, branchId, true),
+            status: 'paid',
+            due_date: { [Op.between]: [monthStart, monthEnd] },
+          },
+        }),
+        Expense.sum('amount', {
+          where: {
+            ...buildWhere(instituteId, branchId, true),
+            status: 'paid',
+            date: { [Op.between]: [monthStart, monthEnd] },
+          },
+        }),
+      ]);
+
+      return {
+        month: format(monthDate, 'MMM'),
+        income: Math.round(parseAmount(income)),
+        expense: Math.round(parseAmount(expense)),
       };
     }),
   );
@@ -319,7 +402,7 @@ const getFeeStatusChart = async ({ instituteId, branchId }) => {
 };
 
 const getRecentActivity = async ({ instituteId, branchId }) => {
-  const [recentStudents, recentVouchers, recentExams] = await Promise.all([
+  const [recentStudents, recentVouchers, recentExams, recentExpenses, recentEvents] = await Promise.all([
     User.findAll({
       where: {
         ...buildWhere(instituteId, branchId),
@@ -342,6 +425,20 @@ const getRecentActivity = async ({ instituteId, branchId }) => {
       attributes: ['id', 'name', 'start_date', 'created_at'],
       order: [['created_at', 'DESC']],
       limit: 3,
+      raw: true,
+    }),
+    Expense.findAll({
+      where: buildWhere(instituteId, branchId, true),
+      attributes: ['id', 'title', 'amount', 'created_at'],
+      order: [['created_at', 'DESC']],
+      limit: 3,
+      raw: true,
+    }),
+    Event.findAll({
+      where: buildWhere(instituteId, branchId, true),
+      attributes: ['id', 'event_name', 'date', 'created_at'],
+      order: [['created_at', 'DESC']],
+      limit: 2,
       raw: true,
     }),
   ]);
@@ -375,6 +472,26 @@ const getRecentActivity = async ({ instituteId, branchId }) => {
       message: `Exam scheduled: ${exam.name}`,
       time: format(new Date(exam.created_at), 'dd MMM, hh:mm a'),
       created_at: exam.created_at,
+    });
+  });
+
+  recentExpenses.forEach((expense) => {
+    activity.push({
+      id: `expense-${expense.id}`,
+      type: 'fee', // Reuse fee icon/color or add 'expense'
+      message: `Expense added: ${expense.title} (${formatMoney(expense.amount)})`,
+      time: format(new Date(expense.created_at), 'dd MMM, hh:mm a'),
+      created_at: expense.created_at,
+    });
+  });
+
+  recentEvents.forEach((event) => {
+    activity.push({
+      id: `event-${event.id}`,
+      type: 'info',
+      message: `New event: ${event.event_name}`,
+      time: format(new Date(event.created_at), 'dd MMM, hh:mm a'),
+      created_at: event.created_at,
     });
   });
 
@@ -447,6 +564,27 @@ const buildStatCards = (typeSlug, stats) => {
       trend: null,
       description: 'Next 30 days',
     },
+    {
+      label: 'Total Expenses',
+      value: formatMoney(stats.total_expenses),
+      icon: 'DollarSign',
+      trend: null,
+      description: 'Current month paid',
+    },
+    {
+      label: 'Pending Leaves',
+      value: stats.pending_leaves.toLocaleString('en-PK'),
+      icon: 'ClipboardCheck',
+      trend: null,
+      description: 'Staff requests',
+    },
+    {
+      label: 'Staff Attendance',
+      value: `${stats.staff_attendance_pct}%`,
+      icon: 'Users',
+      trend: null,
+      description: 'Today present',
+    },
   ];
 };
 
@@ -489,13 +627,14 @@ export const getInstituteDashboard = async ({
 
   const typeSlug = String(type || resolveTypeSlug(institute.type)).trim().toLowerCase() || 'school';
 
-  const [overviewStats, attendance, fees, enrollmentData, feeStatus, recentActivity] = await Promise.all([
+  const [overviewStats, attendance, fees, enrollmentData, feeStatus, recentActivity, incomeExpense] = await Promise.all([
     getOverviewStats({ instituteId, branchId: resolvedBranchId }),
     getAttendanceChart({ instituteId, branchId: resolvedBranchId }),
     getFeesChart({ instituteId, branchId: resolvedBranchId }),
     getEnrollmentCharts({ instituteId, branchId: resolvedBranchId }),
     getFeeStatusChart({ instituteId, branchId: resolvedBranchId }),
     getRecentActivity({ instituteId, branchId: resolvedBranchId }),
+    getIncomeExpenseChart({ instituteId, branchId: resolvedBranchId }),
   ]);
 
   return {
@@ -513,6 +652,7 @@ export const getInstituteDashboard = async ({
       enrollment: enrollmentData.enrollment,
       gender: enrollmentData.gender,
       feeStatus,
+      incomeExpense,
     },
     recentActivity,
     scope: {

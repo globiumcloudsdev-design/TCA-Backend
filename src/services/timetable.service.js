@@ -29,7 +29,7 @@ const { Timetable, Class, User, Subject, AcademicYear } = models;
  * - Courses, Batches, Programs, Departments, Semesters
  */
 export const getTimetableEntities = async (instituteId, academicYearId) => {
-  console.log('📋 Entities fetch ho rahi hain institute:', instituteId);
+  // console.log('📋 Entities fetch ho rahi hain institute:', instituteId);
 
   const entities = {};
 
@@ -135,7 +135,7 @@ export const getTimetableEntities = async (instituteId, academicYearId) => {
 export const createTimetable = async (data, options = {}) => {
   const { transaction } = options;
 
-  console.log('📝 Naya timetable create ho raha hai:', data.name);
+  // console.log('📝 Naya timetable create ho raha hai:', data.name);
 
   // Pehle check karo ke is entity ke liye already active timetable to nahi hai
   const existing = await Timetable.findOne({
@@ -210,7 +210,7 @@ export const createTimetable = async (data, options = {}) => {
     updated_at: new Date()
   }, { transaction });
 
-  console.log('✅ Timetable create ho gaya:', timetable.id);
+  // console.log('✅ Timetable create ho gaya:', timetable.id);
   return timetable;
 };
 
@@ -222,7 +222,7 @@ export const createTimetable = async (data, options = {}) => {
 export const updateTimetable = async (id, instituteId, updateData, options = {}) => {
   const { transaction } = options;
 
-  console.log('📝 Timetable update ho raha hai:', id);
+  // console.log('📝 Timetable update ho raha hai:', id);
 
   const timetable = await Timetable.findOne({
     where: { id, school_id: instituteId }
@@ -317,7 +317,7 @@ export const updateTimetable = async (id, instituteId, updateData, options = {})
 
   await timetable.save({ transaction });
 
-  console.log('✅ Timetable update ho gaya:', timetable.id);
+  // console.log('✅ Timetable update ho gaya:', timetable.id);
   return timetable;
 };
 
@@ -330,7 +330,7 @@ export const getAllTimetables = async (filters = {}, pagination = {}) => {
   const { page = 1, limit = 10 } = pagination;
   const offset = (page - 1) * limit;
 
-  console.log('📋 Timetables fetch ho rahe hain, page:', page);
+  // console.log('📋 Timetables fetch ho rahe hain, page:', page);
 
   const where = { school_id: filters.institute_id };
 
@@ -379,7 +379,7 @@ export const getAllTimetables = async (filters = {}, pagination = {}) => {
     offset
   });
 
-  console.log(`✅ ${rows.length} timetables mile`);
+  // console.log(`✅ ${rows.length} timetables mile`);
 
   return {
     data: rows,
@@ -398,7 +398,7 @@ export const getAllTimetables = async (filters = {}, pagination = {}) => {
  * Ek timetable ki details fetch karta hai
  */
 export const getTimetableById = async (id, instituteId) => {
-  console.log('🔍 Timetable dhond rahe hain:', id);
+  // console.log('🔍 Timetable dhond rahe hain:', id);
 
   const timetable = await Timetable.findOne({
     where: { id, school_id: instituteId },
@@ -420,7 +420,7 @@ export const getTimetableById = async (id, instituteId) => {
  * Timetable delete karta hai
  */
 export const deleteTimetable = async (id, instituteId) => {
-  console.log('🗑️ Timetable delete ho raha hai:', id);
+  // console.log('🗑️ Timetable delete ho raha hai:', id);
 
   const timetable = await Timetable.findOne({
     where: { id, school_id: instituteId }
@@ -432,7 +432,7 @@ export const deleteTimetable = async (id, instituteId) => {
 
   await timetable.destroy();
 
-  console.log('✅ Timetable delete ho gaya');
+  // console.log('✅ Timetable delete ho gaya');
   return { message: 'Timetable delete ho gaya' };
 };
 
@@ -442,7 +442,7 @@ export const deleteTimetable = async (id, instituteId) => {
  * Timetable ko activate/deactivate karta hai
  */
 export const toggleTimetableStatus = async (id, instituteId, isActive) => {
-  console.log('🔄 Timetable status change ho raha hai:', id, 'to:', isActive);
+  // console.log('🔄 Timetable status change ho raha hai:', id, 'to:', isActive);
 
   const timetable = await Timetable.findOne({
     where: { id, school_id: instituteId }
@@ -456,7 +456,7 @@ export const toggleTimetableStatus = async (id, instituteId, isActive) => {
   timetable.updated_at = new Date();
   await timetable.save();
 
-  console.log('✅ Timetable status change ho gaya');
+  // console.log('✅ Timetable status change ho gaya');
   return timetable;
 };
 
@@ -511,7 +511,7 @@ export const toggleTimetableStatus = async (id, instituteId, isActive) => {
  * Agar koi teacher already kisi class mein busy hai to woh yahan aayega
  */
 export const getBusyTeachers = async (instituteId, day, period, startTime, endTime, excludeTimetableId, classId, sectionId) => {
-  console.log('🔍 Busy teachers fetch ho rahe hain:', { day, period, classId, sectionId });
+  // console.log('🔍 Busy teachers fetch ho rahe hain:', { day, period, classId, sectionId });
 
   // Active timetables fetch karo
   const timetables = await Timetable.findAll({

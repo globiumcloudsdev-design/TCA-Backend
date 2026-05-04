@@ -14,8 +14,8 @@ const Institute = sequelize.define(
 
         // Basic Info
         institute_name: { type: DataTypes.STRING(200), allowNull: false },
-        institute_code: { type: DataTypes.STRING(20), allowNull: false, unique: true },
-        institute_email: { type: DataTypes.STRING, allowNull: false, unique: true },
+        institute_code: { type: DataTypes.STRING(20), allowNull: false },
+        institute_email: { type: DataTypes.STRING, allowNull: false },
         institute_contact: { type: DataTypes.STRING(20), allowNull: false },
         institute_type_id: {
             type: DataTypes.INTEGER,

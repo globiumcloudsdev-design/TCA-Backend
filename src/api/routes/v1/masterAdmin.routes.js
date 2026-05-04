@@ -41,7 +41,8 @@ import {
   getInstituteStaff,
   deleteInvoice,
   bulkDeleteInvoices,
-  getMasterAdminReports
+  getMasterAdminReports,
+  restoreInstitute
 } from '../../controllers/institute.controller.js';
 import { addPlatformUser, getAllUsers, updatePlatformUser, togglePlatformUserStatus } from '../../controllers/user.controller.js';
 
@@ -107,6 +108,8 @@ router.route('/institutes/:id')
 router.patch('/institutes/:id/status', hasPermission('institute.activate'), toggleStatus);
 router.patch('/institutes/:id/subscription-status', hasPermission('subscription.update'), updateSubscriptionStatus);
 router.patch('/institutes/:id/plan', hasPermission('subscription.update'), updateInstitutePlan);
+// Restore soft-deleted institute
+router.patch('/institutes/:id/restore', restoreInstitute);
 
 // =============================================================================
 // NEW: INSTITUTE STORAGE & STATS (REAL DATA)

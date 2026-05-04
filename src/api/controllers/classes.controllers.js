@@ -263,7 +263,9 @@ export const getAllClasses = async (req, res) => {
     const filters = {
       institute_id: instituteId,
       academic_year_id: req.query.academic_year_id,
-      status: req.query.status
+      status: req.query.status,
+      is_active: req.query.is_active,
+      search: req.query.search
     };
 
     const pagination = {

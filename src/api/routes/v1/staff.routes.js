@@ -21,6 +21,7 @@ router.use(setInstitute);
 // Staff management routes
 router.get('/available-roles', staffController.getAvailableRoles);
 router.get('/', staffController.getAllStaff);
+router.get('/search', staffController.searchStaff);
 router.get('/:id', staffController.getStaffById);
 
 // File upload handling for multiple files

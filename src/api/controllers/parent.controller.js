@@ -141,11 +141,34 @@ export const deleteParent = async (req, res) => {
   }
 };
 
+/**
+ * Search parents controller
+ */
+export const searchParents = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    if (!instituteId) return sendError(res, 'Institute ID not found', 400);
+
+    const query = {
+      search: req.query.search,
+      page: req.query.page,
+      limit: req.query.limit,
+      is_active: req.query.is_active
+    };
+
+    const result = await parentService.searchParents(instituteId, query);
+    return sendPaginated(res, result.data, result.pagination, 'Parents searched successfully');
+  } catch (error) {
+    return sendError(res, error.message || 'Failed to search parents', 500);
+  }
+};
+
 export default {
   findStudentsByParentInfo,
   createParent,
   getAllParents,
   getParentById,
   updateParent,
-  deleteParent
+  deleteParent,
+  searchParents
 };

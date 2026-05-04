@@ -10,9 +10,7 @@
 import { Op } from 'sequelize';
 import bcrypt from 'bcryptjs';
 import sequelize from '../config/database.js';
-import User from '../models/postgres/User.model.js';
-import Institute from '../models/postgres/Institute.model.js';
-import Role from '../models/postgres/Role.model.js';
+import models from '../models/postgres/index.js';
 import { AppError } from '../utils/lib/AppError.js';
 import { uploadToCloudinary, deleteFromCloudinary } from '../config/cloudinary.js';
 import { generateAndUploadQRCode } from '../utils/qrCodeGenerator.js';
@@ -20,6 +18,8 @@ import { sendWelcomeEmailWithCredentials } from './email.service.js';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { generateRandomPassword, generateNumericPassword } from '../utils/passwordGenerator.js';
+
+const { User, Role, Institute, StaffAttendance, Payslip, LeaveRequest } = models;
 
 // Staff Types (from User model enum)
 export const STAFF_TYPES = ['Accountant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper'];
@@ -147,7 +147,34 @@ export const getStaffById = async (id, instituteId) => {
       school_id: instituteId,
       user_type: 'STAFF'
     },
-    attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] }
+    attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] },
+    include: [
+      {
+        model: Role,
+        as: 'Role',
+        attributes: ['id', 'name', 'code', 'permissions']
+      },
+      {
+        model: StaffAttendance,
+        as: 'staffAttendances',
+        attributes: ['id', 'date', 'status', 'check_in', 'check_out', 'remarks'],
+      },
+      {
+        model: Payslip,
+        as: 'payslips',
+        attributes: ['id', 'month', 'year', 'basic_salary', 'total_allowances', 'total_deductions', 'net_salary', 'status', 'paid_on']
+      },
+      {
+        model: LeaveRequest,
+        as: 'leaveRequests',
+        attributes: ['id', 'from_date', 'to_date', 'status', 'reason', 'leave_type_id']
+      }
+    ],
+    order: [
+      [{ model: StaffAttendance, as: 'staffAttendances' }, 'date', 'DESC'],
+      [{ model: Payslip, as: 'payslips' }, 'year', 'DESC'],
+      [{ model: Payslip, as: 'payslips' }, 'month', 'DESC']
+    ]
   });
 
   if (!staff) {
@@ -725,3 +752,60 @@ export const regenerateQRCode = async (id, instituteId) => {
 
   return qrCodeResult.url;
 };
+
+/**
+ * Search staff with space-insensitive logic
+ */
+export const searchStaff = async (instituteId, query = {}) => {
+  const page = Math.max(1, parseInt(query.page) || 1);
+  const limit = Math.min(100, parseInt(query.limit) || 20);
+  const offset = (page - 1) * limit;
+  const searchTerm = (query.search || '').trim().replace(/\s+/g, ' '); // Normalize spaces
+  const searchTermNoSpaces = searchTerm.replace(/\s+/g, ''); // Remove all spaces
+
+  const where = {
+    school_id: instituteId,
+    user_type: 'STAFF'
+  };
+
+  if (searchTerm) {
+    where[Op.or] = [
+      { first_name: { [Op.iLike]: `%${searchTerm}%` } },
+      { last_name: { [Op.iLike]: `%${searchTerm}%` } },
+      { email: { [Op.iLike]: `%${searchTerm}%` } },
+      { registration_no: { [Op.iLike]: `%${searchTerm}%` } },
+      // Concatenated name search (space-insensitive)
+      sequelize.where(
+        sequelize.fn('replace', 
+          sequelize.fn('concat', sequelize.col('first_name'), sequelize.col('last_name')), 
+          ' ', ''
+        ),
+        { [Op.iLike]: `%${searchTermNoSpaces}%` }
+      )
+    ];
+  }
+
+  if (query.staff_type) {
+    where.staff_type = query.staff_type;
+  }
+
+  if (query.is_active !== undefined && query.is_active !== '') {
+    where.is_active = query.is_active === 'true' || query.is_active === true;
+  }
+
+  const { count, rows } = await User.findAndCountAll({
+    where,
+    attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] },
+    order: [['first_name', 'ASC']],
+    limit,
+    offset
+  });
+
+  return {
+    rows,
+    total: count,
+    page,
+    limit,
+    totalPages: Math.ceil(count / limit)
+  };
+};

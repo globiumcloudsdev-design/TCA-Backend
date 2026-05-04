@@ -377,11 +377,89 @@ export const deleteParent = async (id, instituteId) => {
   return { success: true };
 };
 
+/**
+ * Global Search for Parents (Space-insensitive)
+ */
+export const searchParents = async (instituteId, query = {}) => {
+  const page = Math.max(1, parseInt(query.page) || 1);
+  const limit = Math.min(100, parseInt(query.limit) || 20);
+  const offset = (page - 1) * limit;
+  const searchTerm = (query.search || '').trim();
+  const searchTermNoSpaces = searchTerm.replace(/\s+/g, '');
+
+  const where = {
+    school_id: instituteId,
+    user_type: 'PARENT'
+  };
+
+  if (searchTerm) {
+    where[Op.or] = [
+      { first_name: { [Op.iLike]: `%${searchTerm}%` } },
+      { last_name: { [Op.iLike]: `%${searchTerm}%` } },
+      { email: { [Op.iLike]: `%${searchTerm}%` } },
+      { phone: { [Op.iLike]: `%${searchTerm}%` } },
+      { registration_no: { [Op.iLike]: `%${searchTerm}%` } },
+      // Concatenated name search
+      models.sequelize.where(
+        models.sequelize.fn('replace', 
+          models.sequelize.fn('concat', models.sequelize.col('first_name'), models.sequelize.col('last_name')), 
+          ' ', ''
+        ),
+        { [Op.iLike]: `%${searchTermNoSpaces}%` }
+      )
+    ];
+  }
+
+  if (query.is_active !== undefined) {
+    where.is_active = String(query.is_active) === 'true';
+  }
+
+  const { count, rows } = await User.findAndCountAll({
+    where,
+    attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'registration_no', 'is_active', 'details', 'created_at'],
+    order: [['first_name', 'ASC']],
+    limit,
+    offset
+  });
+
+  const data = rows.map((row) => {
+    const pd = row.details?.parentDetails || {};
+    const studentIds = Array.isArray(pd.student_ids) ? pd.student_ids : [];
+    return {
+      id: row.id,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      email: row.email,
+      phone: row.phone,
+      relation: pd.relation || 'guardian',
+      cnic: pd.cnic || null,
+      occupation: pd.occupation || null,
+      address: pd.address || null,
+      status: row.is_active ? 'active' : 'inactive',
+      student_ids: studentIds,
+      students: Array.isArray(pd.students) ? pd.students : [],
+      children: studentIds.length,
+      created_at: row.created_at
+    };
+  });
+
+  return {
+    data,
+    pagination: {
+      total: count,
+      page,
+      limit,
+      totalPages: Math.ceil(count / limit)
+    }
+  };
+};
+
 export default {
   findStudentsByParentInfo,
   createParent,
   getAllParents,
   getParentById,
   updateParent,
-  deleteParent
+  deleteParent,
+  searchParents
 };

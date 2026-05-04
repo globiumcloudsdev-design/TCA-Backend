@@ -169,6 +169,7 @@ User.associate = (models) => {
   User.hasMany(models.ExamResult, { foreignKey: 'student_id', as: 'examResults' });
   User.hasMany(models.FeeVoucher, { foreignKey: 'student_id', as: 'feeVouchers' });
   User.hasMany(models.LeaveRequest, { foreignKey: 'user_id', as: 'leaveRequests' });
+  User.hasMany(models.Payslip, { foreignKey: 'staff_id', as: 'payslips' });
 };
 
 export default User;

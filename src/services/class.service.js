@@ -212,6 +212,17 @@ export const getAllClasses = async (filters = {}, pagination = {}) => {
 
   const where = { school_id: filters.institute_id };
   if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
+  
+  if (filters.search) {
+    const { Op } = models.Sequelize;
+    where.name = { [Op.iLike]: `%${filters.search}%` };
+  }
+  
+  if (filters.status !== undefined && filters.status !== '') {
+    where.is_active = filters.status === 'active' || filters.status === 'true' || filters.status === true;
+  } else if (filters.is_active !== undefined && filters.is_active !== '') {
+    where.is_active = filters.is_active === 'active' || filters.is_active === 'true' || filters.is_active === true;
+  }
 
   const { count, rows } = await Class.findAndCountAll({
     where,

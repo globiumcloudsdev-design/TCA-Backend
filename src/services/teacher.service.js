@@ -10,7 +10,7 @@ import { generateAndUploadQRCode } from '../utils/qrCodeGenerator.js';
 import { sendWelcomeEmailWithCredentials } from './email.service.js';
 import { deleteFromCloudinary } from '../config/cloudinary.js';
 
-const { User, Role, Institute } = models;
+const { User, Role, Institute, StaffAttendance, Payslip, LeaveRequest, Timetable } = models;
 
 /**
  * Get teacher role for institute
@@ -401,16 +401,79 @@ export const getAllTeachers = async (filters = {}, pagination = {}) => {
  * Get teacher by ID with role
  */
 export const getTeacherById = async (id, instituteId) => {
-  return await User.findOne({
+  const teacher = await User.findOne({
     where: { id, school_id: instituteId, user_type: 'TEACHER' },
     include: [
       {
         model: Role,
         as: 'Role',
         attributes: ['id', 'name', 'code', 'permissions']
+      },
+      {
+        model: StaffAttendance,
+        as: 'staffAttendances',
+        attributes: ['id', 'date', 'status', 'check_in', 'check_out', 'remarks']
+      },
+      {
+        model: Payslip,
+        as: 'payslips',
+        attributes: ['id', 'month', 'year', 'basic_salary', 'total_allowances', 'total_deductions', 'net_salary', 'status', 'paid_on']
+      },
+      {
+        model: LeaveRequest,
+        as: 'leaveRequests',
+        attributes: ['id', 'from_date', 'to_date', 'status', 'reason', 'leave_type_id']
       }
+    ],
+    order: [
+      [{ model: StaffAttendance, as: 'staffAttendances' }, 'date', 'DESC'],
+      [{ model: Payslip, as: 'payslips' }, 'year', 'DESC'],
+      [{ model: Payslip, as: 'payslips' }, 'month', 'DESC']
     ]
   });
+
+  if (!teacher) return null;
+
+  // Fetch all active timetables for this institute
+  const timetables = await Timetable.findAll({
+    where: {
+      school_id: instituteId,
+      is_active: true
+    },
+    attributes: ['id', 'name', 'slots', 'period_config']
+  });
+
+  // Extract relevant slots for this teacher manually to avoid complex JSONB query issues
+  const teacherSlots = [];
+  timetables.forEach(tt => {
+    if (tt.slots && Array.isArray(tt.slots)) {
+      const periodMap = {};
+      if (tt.period_config?.periods) {
+        tt.period_config.periods.forEach(p => {
+          periodMap[p.period] = p;
+        });
+      }
+
+      tt.slots.forEach(slot => {
+        if (slot.teacher_id === id) {
+          // Fallback to period config timings if slot timings are missing
+          const periodInfo = periodMap[slot.period] || {};
+          teacherSlots.push({
+            ...slot,
+            start_time: slot.start_time || periodInfo.start_time,
+            end_time: slot.end_time || periodInfo.end_time,
+            timetable_name: tt.name,
+            timetable_id: tt.id
+          });
+        }
+      });
+    }
+  });
+
+  const teacherJson = teacher.toJSON();
+  teacherJson.timetableSlots = teacherSlots;
+
+  return teacherJson;
 };
 
 /**
@@ -454,11 +517,70 @@ export const regenerateQRCode = async (id, instituteId) => {
   }
 };
 
+/**
+ * Search teachers with space-insensitive logic
+ */
+export const searchTeachers = async (instituteId, query = {}) => {
+  const page = Math.max(1, parseInt(query.page) || 1);
+  const limit = Math.min(100, parseInt(query.limit) || 20);
+  const offset = (page - 1) * limit;
+  const searchTerm = (query.search || '').trim().replace(/\s+/g, ' '); // Normalize spaces
+  const searchTermNoSpaces = searchTerm.replace(/\s+/g, ''); // Remove all spaces
+
+  const where = {
+    school_id: instituteId,
+    user_type: 'TEACHER'
+  };
+
+  if (searchTerm) {
+    where[Op.or] = [
+      { first_name: { [Op.iLike]: `%${searchTerm}%` } },
+      { last_name: { [Op.iLike]: `%${searchTerm}%` } },
+      { email: { [Op.iLike]: `%${searchTerm}%` } },
+      { registration_no: { [Op.iLike]: `%${searchTerm}%` } },
+      // Concatenated name search (space-insensitive)
+      sequelize.where(
+        sequelize.fn('replace', 
+          sequelize.fn('concat', sequelize.col('first_name'), sequelize.col('last_name')), 
+          ' ', ''
+        ),
+        { [Op.iLike]: `%${searchTermNoSpaces}%` }
+      )
+    ];
+  }
+
+  if (query.is_active !== undefined && query.is_active !== '') {
+    where.is_active = query.is_active === 'true' || query.is_active === true;
+  }
+
+  const { count, rows } = await User.findAndCountAll({
+    where,
+    attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] },
+    include: [{
+      model: Role,
+      as: 'Role',
+      attributes: ['id', 'name', 'code']
+    }],
+    order: [['first_name', 'ASC']],
+    limit,
+    offset
+  });
+
+  return {
+    rows,
+    total: count,
+    page,
+    limit,
+    totalPages: Math.ceil(count / limit)
+  };
+};
+
 export default {
   createTeacher,
   updateTeacher,
   getAllTeachers,
   getTeacherById,
   getTeacherRoles,
-  regenerateQRCode
-};
+  regenerateQRCode,
+  searchTeachers
+};

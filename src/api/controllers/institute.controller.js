@@ -85,6 +85,16 @@ export const toggleStatus = catchAsync(async (req, res) => {
   sendSuccess(res, inst, 'Status updated');
 });
 
+/**
+ * PATCH /master-admin/institutes/:id/restore
+ * Restore a soft-deleted institute
+ */
+export const restoreInstitute = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const restoredInstitute = await instituteService.restoreInstitute(id);
+  sendSuccess(res, restoredInstitute, 'Institute restored successfully');
+});
+
 // PATCH /master-admin/institutes/:id/subscription-status
 export const updateSubscriptionStatus = catchAsync(async (req, res) => {
   const inst = await instituteService.updateSubscriptionStatus(

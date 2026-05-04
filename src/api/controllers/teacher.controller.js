@@ -398,3 +398,17 @@ export const toggleTeacherStatus = async (req, res) => {
     return sendError(res, error.message || 'Failed to toggle teacher status', 400);
   }
 };
+
+/**
+ * Search teachers
+ */
+export const searchTeachers = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    const results = await teacherService.searchTeachers(instituteId, req.query);
+    return sendPaginated(res, results.rows, results.total, results.page, results.limit, 'Teachers searched successfully');
+  } catch (error) {
+    console.error('❌ Search teachers error:', error);
+    return sendError(res, error.message || 'Failed to search teachers');
+  }
+};
