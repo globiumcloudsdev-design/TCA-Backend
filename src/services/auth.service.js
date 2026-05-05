@@ -540,36 +540,7 @@ export const getInstituteDataService = async (instituteId) => {
  * Refresh institute data in user session (call after settings update)
  */
 export const refreshInstituteDataService = async (userId) => {
-    const user = await User.findByPk(userId, {
-        include: [
-            { model: Role, as: 'Role' },
-            { model: Institute, as: 'institute' },
-            { model: Branch, as: 'branch' }
-        ]
-    });
-    
-    if (!user) return null;
-    
-    let instituteData = null;
-    if (user.school_id) {
-        instituteData = await getCompleteInstituteData(user.school_id);
-    }
-    
-    return {
-        id: user.id,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        email: user.email,
-        user_type: user.user_type,
-        school_id: user.school_id,
-        institute: instituteData,
-        branch: user.branch ? {
-            id: user.branch.id,
-            name: user.branch.name,
-            code: user.branch.code
-        } : null,
-        permissions: user.permissions || []
-    };
+    return await getUserProfile(userId);
 };
 
 export default { 

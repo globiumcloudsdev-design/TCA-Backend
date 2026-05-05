@@ -16,6 +16,7 @@ import {
   addDays,
 } from 'date-fns';
 import models from '../../models/postgres/index.js';
+import { hashPassword } from '../../utils/helpers/password.helper.js';
 
 const {
   Institute,
@@ -25,6 +26,7 @@ const {
   Section,
   StudentAttendance: Attendance,
   FeeVoucher,
+  FeePayment,
   Exam,
   Branch,
   Expense,
@@ -121,11 +123,10 @@ const getOverviewStats = async ({ instituteId, branchId }) => {
       attributes: ['status'],
       raw: true,
     }),
-    FeeVoucher.sum('net_amount', {
+    FeePayment.sum('amount_paid', {
       where: {
-        ...buildWhere(instituteId, branchId, true),
-        status: 'paid',
-        due_date: {
+        ...buildWhere(instituteId, branchId, false),
+        payment_date: {
           [Op.between]: [
             startOfMonth(new Date()),
             endOfMonth(new Date()),
@@ -133,18 +134,32 @@ const getOverviewStats = async ({ instituteId, branchId }) => {
         },
       },
     }),
-    FeeVoucher.sum('net_amount', {
-      where: {
-        ...buildWhere(instituteId, branchId, true),
-        status: { [Op.in]: ['pending', 'overdue', 'partial'] },
-        due_date: {
-          [Op.between]: [
-            startOfMonth(new Date()),
-            endOfMonth(new Date()),
-          ],
-        },
-      },
-    }),
+    (async () => {
+      const monthStart = startOfMonth(new Date());
+      const monthEnd = endOfMonth(new Date());
+      const whereBase = buildWhere(instituteId, branchId, true);
+      
+      // Sum net_amount of all vouchers due this month
+      const totalDue = await FeeVoucher.sum('net_amount', {
+        where: {
+          ...whereBase,
+          due_date: { [Op.between]: [monthStart, monthEnd] },
+          status: { [Op.ne]: 'cancelled' }
+        }
+      });
+
+      // Sum payments specifically against vouchers due this month
+      // Note: This is a bit complex for a single sum if payments have different dates, 
+      // but for "Monthly Pending" it's usually (Expected for month - Received for month)
+      const paidForMonth = await FeePayment.sum('amount_paid', {
+        where: {
+          ...buildWhere(instituteId, branchId, false),
+          payment_date: { [Op.between]: [monthStart, monthEnd] }
+        }
+      });
+
+      return Math.max(parseAmount(totalDue) - parseAmount(paidForMonth), 0);
+    })(),
     Exam.count({
       where: {
         ...buildWhere(instituteId, branchId),
@@ -257,11 +272,10 @@ const getIncomeExpenseChart = async ({ instituteId, branchId }) => {
       const monthEnd = endOfMonth(monthDate);
 
       const [income, expense] = await Promise.all([
-        FeeVoucher.sum('net_amount', {
+        FeePayment.sum('amount_paid', {
           where: {
-            ...buildWhere(instituteId, branchId, true),
-            status: 'paid',
-            due_date: { [Op.between]: [monthStart, monthEnd] },
+            ...buildWhere(instituteId, branchId, false),
+            payment_date: { [Op.between]: [monthStart, monthEnd] },
           },
         }),
         Expense.sum('amount', {
@@ -289,27 +303,33 @@ const getFeesChart = async ({ instituteId, branchId }) => {
 
   const chart = await Promise.all(
     months.map(async (monthDate) => {
+      const monthStart = startOfMonth(monthDate);
+      const monthEnd = endOfMonth(monthDate);
+
       const whereBase = {
         ...buildWhere(instituteId, branchId, true),
         due_date: {
-          [Op.between]: [startOfMonth(monthDate), endOfMonth(monthDate)],
+          [Op.between]: [monthStart, monthEnd],
         },
       };
 
-      const [collected, pending] = await Promise.all([
-        FeeVoucher.sum('net_amount', {
+      const [collected, totalExpected] = await Promise.all([
+        FeePayment.sum('amount_paid', {
           where: {
-            ...whereBase,
-            status: 'paid',
+            ...buildWhere(instituteId, branchId, false),
+            payment_date: { [Op.between]: [monthStart, monthEnd] },
           },
         }),
         FeeVoucher.sum('net_amount', {
           where: {
-            ...whereBase,
-            status: { [Op.in]: ['pending', 'overdue', 'partial'] },
+            ...buildWhere(instituteId, branchId, true),
+            due_date: { [Op.between]: [monthStart, monthEnd] },
+            status: { [Op.ne]: 'cancelled' }
           },
         }),
       ]);
+
+      const pending = Math.max(parseAmount(totalExpected) - parseAmount(collected), 0);
 
       return {
         month: format(monthDate, 'MMM'),
@@ -382,22 +402,28 @@ const getEnrollmentCharts = async ({ instituteId, branchId }) => {
 };
 
 const getFeeStatusChart = async ({ instituteId, branchId }) => {
-  const [paid, pending, overdue] = await Promise.all([
-    FeeVoucher.sum('net_amount', {
-      where: { ...buildWhere(instituteId, branchId, true), status: 'paid' },
+  const [totalPaid, totalNet] = await Promise.all([
+    FeePayment.sum('amount_paid', {
+      where: buildWhere(instituteId, branchId, false),
     }),
     FeeVoucher.sum('net_amount', {
-      where: { ...buildWhere(instituteId, branchId, true), status: { [Op.in]: ['pending', 'partial'] } },
-    }),
-    FeeVoucher.sum('net_amount', {
-      where: { ...buildWhere(instituteId, branchId, true), status: 'overdue' },
+      where: {
+        ...buildWhere(instituteId, branchId, true),
+        status: { [Op.ne]: 'cancelled' }
+      }
     }),
   ]);
 
+  const totalOverdue = await FeeVoucher.sum('net_amount', {
+    where: { ...buildWhere(instituteId, branchId, true), status: 'overdue' },
+  });
+
+  const pending = Math.max(parseAmount(totalNet) - parseAmount(totalPaid), 0);
+
   return [
-    { name: 'Paid', value: Math.round(parseAmount(paid)), fill: 'hsl(var(--chart-1))' },
-    { name: 'Pending', value: Math.round(parseAmount(pending)), fill: 'hsl(var(--chart-3))' },
-    { name: 'Overdue', value: Math.round(parseAmount(overdue)), fill: 'hsl(var(--chart-4))' },
+    { name: 'Paid', value: Math.round(parseAmount(totalPaid)), fill: 'hsl(var(--chart-1))' },
+    { name: 'Pending', value: Math.round(pending), fill: 'hsl(var(--chart-3))' },
+    { name: 'Overdue', value: Math.round(parseAmount(totalOverdue)), fill: 'hsl(var(--chart-4))' },
   ];
 };
 
@@ -663,6 +689,23 @@ export const getInstituteDashboard = async ({
   };
 };
 
+export const changeUserPassword = async ({ userId, newPassword }) => {
+  const user = await User.unscoped().findByPk(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await user.update({ password_hash: passwordHash });
+
+  return {
+    id: user.id,
+    name: `${user.first_name} ${user.last_name}`,
+    type: user.user_type,
+  };
+};
+
 export default {
   getInstituteDashboard,
+  changeUserPassword,
 };

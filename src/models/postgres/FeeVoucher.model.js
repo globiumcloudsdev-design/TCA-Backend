@@ -73,7 +73,7 @@ FeeVoucher.associate = (models) => {
   FeeVoucher.belongsTo(models.Institute, { foreignKey: 'institute_id', as: 'institute' });
   FeeVoucher.belongsTo(models.AcademicYear, { foreignKey: 'academic_year_id', as: 'AcademicYear' });
   FeeVoucher.belongsTo(models.User, { foreignKey: 'student_id', as: 'Student' });
-  FeeVoucher.hasMany(models.FeePayment, { foreignKey: 'voucher_id' });
+  FeeVoucher.hasMany(models.FeePayment, { foreignKey: 'voucher_id', as: 'payments' });
 };
 
 export default FeeVoucher;

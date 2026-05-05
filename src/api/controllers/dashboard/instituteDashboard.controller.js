@@ -29,6 +29,27 @@ export const getInstituteDashboard = async (req, res) => {
   }
 };
 
+export const changeUserPassword = async (req, res) => {
+  try {
+    const { userId, password } = req.body;
+
+    if (!userId || !password) {
+      return sendError(res, 'User ID and new password are required', 400);
+    }
+
+    const data = await instituteDashboardService.changeUserPassword({
+      userId,
+      newPassword: password,
+    });
+
+    return sendSuccess(res, data, 'Password changed successfully');
+  } catch (error) {
+    console.error('❌ Change password error:', error);
+    return sendError(res, error.message || 'Failed to change password', 500);
+  }
+};
+
 export default {
   getInstituteDashboard,
+  changeUserPassword,
 };

@@ -126,6 +126,18 @@ router.get(
 );
 
 /**
+ * POST /api/v1/dashboard/change-password
+ * Change user password
+ * Access: INSTITUTE_ADMIN, BRANCH_ADMIN, STAFF
+ */
+router.post(
+  '/change-password',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),
+  belongsToInstitute,
+  instituteDashboardController.changeUserPassword
+);
+
+/**
  * GET /api/v1/dashboard/branch
  * Branch Admin Dashboard
  * Access: BRANCH_ADMIN only

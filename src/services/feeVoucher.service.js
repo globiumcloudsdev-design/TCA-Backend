@@ -13,6 +13,7 @@ import generateVoucherNumber from '../utils/fee/generateVoucherNumber.js';
 import { AppError } from '../utils/lib/AppError.js';
 import logger from '../config/logger.js';
 import { broadcastNotification, createNotification } from './notification.service.js';
+import FeePayment from '../models/postgres/FeePayment.model.js';
 
 /**
  * Get next sequence number for voucher numbering per institute & month
@@ -68,13 +69,13 @@ const getPreviousBalance = async (studentId, instituteId, feeType, currentYear) 
     // Calculate total pending: sum of unpaid portions
     let totalPending = 0;
     for (const voucher of previousVouchers) {
-      if (voucher.status === 'partial') {
-        // For partial: net_amount - amount_paid
-        totalPending += (voucher.net_amount || 0);
-      } else {
-        // For pending/overdue: full net amount is due
-        totalPending += (voucher.net_amount || 0);
-      }
+      // Get sum of payments for this voucher
+      const payments = await sequelize.models.FeePayment.findAll({
+        where: { voucher_id: voucher.id }
+      });
+      const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount_paid), 0);
+      const remaining = Math.max(parseFloat(voucher.net_amount) - totalPaid, 0);
+      totalPending += remaining;
     }
 
     return totalPending;
@@ -573,15 +574,37 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
                 model: User,
                 as: 'Student',
                 attributes: ['id', 'first_name', 'last_name', 'registration_no', 'details']
+            },
+            {
+                model: FeePayment,
+                as: 'payments',
+                attributes: ['id', 'amount_paid', 'payment_method', 'payment_date', 'transaction_id', 'receipt_number']
             }
         ],
         order: [['issued_date', 'DESC']],
         limit,
-        offset
+        offset,
+        distinct: true
+    });
+
+    const enrichedRows = rows.map(row => {
+        const voucher = row.toJSON();
+        const payments = voucher.payments || [];
+        const paidAmount = payments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+        const netAmt = Number(voucher.net_amount || 0);
+        const pendingAmt = Math.max(netAmt - paidAmount, 0);
+        
+        return {
+            ...voucher,
+            netAmount: netAmt, // Compatibility
+            paid_amount: Number(paidAmount.toFixed(2)),
+            pending_amount: Number(pendingAmt.toFixed(2)),
+            FeePayments: payments // Compatibility for frontend
+        };
     });
 
     return {
-        vouchers: rows,
+        vouchers: enrichedRows,
         pagination: {
             total: count,
             page,
@@ -644,9 +667,7 @@ export const updateVoucherStatus = async (voucherId, instituteId, newStatus, par
     let updateData = { status: newStatus, updated_at: new Date() };
 
     if (newStatus === 'partial' && partialAmount) {
-        const paidAmount = Math.min(partialAmount, voucher.net_amount);
-        const remainingBalance = voucher.net_amount - paidAmount;
-        updateData.previous_balance = remainingBalance;
+        // Just record updated_at, the status is already set above
     }
 
     await voucher.update(updateData, { transaction });
@@ -688,7 +709,7 @@ export const updateVoucherStatus = async (voucherId, instituteId, newStatus, par
  */
 export const recordPayment = async (voucherId, instituteId, paymentData, options = {}) => {
     const { transaction } = options;
-    const { amount, paymentMethod, reference, paidDate, collectedBy } = paymentData;
+    const { amount, paymentMethod, reference, paidDate = new Date(), collectedBy } = paymentData;
 
     const voucher = await FeeVoucher.findOne({
         where: { id: voucherId, institute_id: instituteId },
@@ -703,12 +724,22 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
         throw new AppError('Cannot record payment against archived voucher', 400);
     }
 
-    if (amount > voucher.net_amount) {
-        throw new AppError(`Payment amount exceeds voucher amount. Voucher amount: ${voucher.net_amount}`, 400);
-    }
-
     // Import FeePayment model
     const { default: FeePayment } = await import('../models/postgres/FeePayment.model.js');
+
+    // Calculate current paid amount so far
+    const previousPayments = await FeePayment.findAll({
+        where: { voucher_id: voucherId },
+        transaction
+    });
+    const totalPaidSoFar = previousPayments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+    const netAmount = Number(voucher.net_amount || 0);
+    const outstanding = Number(Math.max(netAmount - totalPaidSoFar, 0).toFixed(2));
+    const payAmount = Number(Number(amount).toFixed(2));
+
+    if (payAmount > outstanding + 0.01) { // 0.01 buffer for float precision
+        throw new AppError(`Payment amount PKR ${payAmount} exceeds outstanding balance PKR ${outstanding}`, 400);
+    }
 
     // Create payment record
     const paymentRecord = await FeePayment.create(
@@ -725,12 +756,13 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
         { transaction }
     );
 
-    // Calculate remaining balance
-    const remainingBalance = voucher.net_amount - amount;
+    // Calculate remaining balance correctly (Total Net - All Payments)
+    const totalPaidAfterThis = Number((totalPaidSoFar + payAmount).toFixed(2));
+    const remainingBalance = Number(Math.max(netAmount - totalPaidAfterThis, 0).toFixed(2));
 
-    // Update voucher status based on payment amount
+    // Update voucher status based on total payment amount
     let newStatus = 'partial';
-    if (remainingBalance <= 0) {
+    if (remainingBalance <= 0.01) { 
         newStatus = 'paid';
     }
 

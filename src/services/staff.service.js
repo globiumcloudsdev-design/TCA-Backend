@@ -550,8 +550,7 @@ export const updateStaff = async (id, instituteId, data, updatedBy, file = null,
         email: data.email.toLowerCase(),
         user_type: 'STAFF',
         school_id: instituteId
-      },
-      transaction: t
+      }
     });
     if (existingStaff) {
       throw new AppError('A staff member with this email already exists in this institute', 409);
@@ -808,4 +807,4 @@ export const searchStaff = async (instituteId, query = {}) => {
     limit,
     totalPages: Math.ceil(count / limit)
   };
-};
+};
