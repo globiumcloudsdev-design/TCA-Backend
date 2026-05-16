@@ -5,6 +5,7 @@ import { unlink } from 'fs/promises';
 import { Op } from 'sequelize';
 import User from '../../models/postgres/User.model.js';
 import { createPlatformUser } from '../../services/user.service.js';
+import { hashPassword } from '../../utils/helpers/password.helper.js';
 
 /**
  * Get current user's profile (same as /auth/me)
@@ -177,4 +178,25 @@ export const togglePlatformUserStatus = async (req, res) => {
   await user.save();
 
   sendSuccess(res, null, `User ${is_active ? 'activated' : 'deactivated'} successfully`);
+};
+
+/**
+ * Change Platform User Password (Master Admin)
+ */
+export const changePlatformUserPassword = async (req, res) => {
+  const { id } = req.params;
+  const { password } = req.body;
+
+  if (!password) throw new AppError('New password is required', 400);
+
+  const user = await User.findOne({ where: { id, school_id: null } });
+  if (!user) throw new AppError('Platform user not found', 404);
+
+  user.password_hash = await hashPassword(password);
+  await user.save();
+
+  sendSuccess(res, {
+    id: user.id,
+    name: `${user.first_name} ${user.last_name}`,
+  }, 'Password updated successfully');
 };

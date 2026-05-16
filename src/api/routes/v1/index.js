@@ -36,8 +36,12 @@ import notificationRoutes from './notification.routes.js'; // ✅ Import notific
 import userRoutes from './user.routes.js'; // ✅ Import user routes
 import payrollRoutes from './payroll.routes.js'; // ✅ Import payroll routes
 import eventRoutes from './event.routes.js'; // ✅ Import event routes
+import publicRoutes from './public.routes.js'; // ✅ Import public routes
 
 const router = Router();
+
+// ── Public Routes (Landing Page, etc.) ───────────────────────────────────
+router.use('/public', publicRoutes);
 
 // ── Core Auth ──────────────────────────────────────────────────────────────
 router.use('/auth', authRoutes);

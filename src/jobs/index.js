@@ -7,30 +7,17 @@ import cron from 'node-cron';
 import logger from '../config/logger.js';
 
 // Import jobs
-import { runInvoiceJob } from './invoice.job.js';
-import { runReminderJob } from './reminder.job.js';
-import { runCleanupJob } from './cleanup.job.js';
+import { runSystemDailyJobs } from './system.job.js';
 
 export const initJobs = () => {
-  // Generate monthly invoices everyday at midnight
+  // Global System Daily Job - Runs at 00:00 (Midnight)
+  // This orchestrates SaaS (Trials/Invoices), Attendance, Reminders, and Cleanup
   cron.schedule('0 0 * * *', async () => {
-    logger.info('⏰ Running: Invoice Job');
-    await runInvoiceJob();
+    logger.info('⏰ Triggering: Global System Daily Jobs');
+    await runSystemDailyJobs();
   });
 
-  // Send fee reminders every day at 9 AM
-  cron.schedule('0 9 * * *', async () => {
-    logger.info('⏰ Running: Fee Reminder Job');
-    await runReminderJob();
-  });
-
-  // Cleanup temp files every Sunday at 2 AM
-  cron.schedule('0 2 * * 0', async () => {
-    logger.info('⏰ Running: Cleanup Job');
-    await runCleanupJob();
-  });
-
-  logger.info('✅ Background jobs initialized');
+  logger.info('✅ Centralized background jobs initialized');
 };
 
 export default initJobs;

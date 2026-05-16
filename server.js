@@ -16,7 +16,7 @@ import fs from "fs";
 import { initSocket } from "./src/sockets/index.js";
 import logger from "./src/config/logger.js";
 import config from "./src/config/index.js";
-import { scheduleAutoAttendance } from "./src/services/autoAttendance.service.js";
+import { initJobs } from "./src/jobs/index.js";
 
 const sslOptions = config.isProduction
   ? {
@@ -47,8 +47,9 @@ const startServer = async () => {
     // Fix stale FK: users.school_id was pointing to schools, now must point to institutes
     await fixForeignKeys();
 
-    scheduleAutoAttendance();
-    logger.info("✅ Auto-mark absent cron job scheduled");
+    // Initialize background jobs
+    initJobs();
+    logger.info("✅ Centralized background jobs scheduled");
 
     const PORT = process.env.PORT || config.port;
     const HOST = process.env.HOST || "0.0.0.0";

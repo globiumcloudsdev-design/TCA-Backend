@@ -44,7 +44,7 @@ import {
   getMasterAdminReports,
   restoreInstitute
 } from '../../controllers/institute.controller.js';
-import { addPlatformUser, getAllUsers, updatePlatformUser, togglePlatformUserStatus } from '../../controllers/user.controller.js';
+import { addPlatformUser, getAllUsers, updatePlatformUser, togglePlatformUserStatus, changePlatformUserPassword } from '../../controllers/user.controller.js';
 
 const router = Router();
 
@@ -296,5 +296,8 @@ router.put('/users/:id', hasPermission('platform_user.update'), catchAsync(updat
 
 // PATCH /master-admin/users/:id/status – toggle user status
 router.patch('/users/:id/status', hasPermission('platform_user.update'), catchAsync(togglePlatformUserStatus));
+
+// POST /master-admin/users/:id/change-password – change user password
+router.post('/users/:id/change-password', hasPermission('platform_user.update'), catchAsync(changePlatformUserPassword));
 
 export default router;

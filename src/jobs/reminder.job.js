@@ -3,12 +3,12 @@
  * Sends SMS/email reminders for pending/overdue fee vouchers
  */
 
-import FeeVoucher from '../models/postgres/FeeVoucher.model.js';
-import Student from '../models/postgres/Student.model.js';
-import Parent from '../models/postgres/Parent.model.js';
+import models from '../models/postgres/index.js';
 import { sendFeeReminderSMS } from '../services/sms.service.js';
 import logger from '../config/logger.js';
 import { Op } from 'sequelize';
+
+const { FeeVoucher, User } = models;
 
 export const runReminderJob = async () => {
   try {
@@ -21,8 +21,8 @@ export const runReminderJob = async () => {
       },
       include: [
         {
-          model: Student,
-          include: [Parent],
+          model: User,
+          as: 'Student',
         },
       ],
       limit: 500,
@@ -31,7 +31,24 @@ export const runReminderJob = async () => {
     let sent = 0;
 
     for (const voucher of overdueVouchers) {
-      const parent = voucher.Student?.Parents?.[0];
+      if (!voucher.Student) continue;
+
+      // Find parents for this student
+      // Logic: Parents have student's ID in their details.parentDetails.student_ids
+      const parents = await User.findAll({
+        where: {
+          school_id: voucher.institute_id,
+          user_type: 'PARENT',
+          is_active: true
+        }
+      });
+
+      const linkedParents = parents.filter(p => {
+        const studentIds = p.details?.parentDetails?.student_ids || [];
+        return studentIds.includes(voucher.student_id);
+      });
+
+      const parent = linkedParents[0]; // Take the first linked parent
       if (parent?.phone) {
         try {
           await sendFeeReminderSMS(parent.phone, {

@@ -45,7 +45,7 @@ const BASE_INCLUDE = [
 // ─── Helper: Generate random password ─────────────────────────────────────────
 const generateRandomPassword = () => {
   const length = 10;
-  const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%';
+  const charset = '1234567890';
   let password = '';
   for (let i = 0; i < length; i++) {
     password += charset.charAt(Math.floor(Math.random() * charset.length));
@@ -219,17 +219,6 @@ export const getInstituteById = async (id) => {
 
   if (!inst) throw new AppError('Institute not found.', 404);
 
-  // AUTO-GENERATE INVOICE IF NEEDED
-  await checkAndGenerateInvoice(inst);
-
-  // Fetch again with updated invoices
-  const updatedInst = await Institute.findByPk(id, {
-    include: [
-      ...BASE_INCLUDE,
-      { model: User, as: 'principal', attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'branch_id'] },
-    ],
-  });
-
   const activeBranches = await Branch.count({
     where: {
       institute_id: id,
@@ -237,12 +226,12 @@ export const getInstituteById = async (id) => {
     }
   });
 
-  const fallbackBranches = updatedInst?.settings?.has_branches ? 2 : 1;
+  const fallbackBranches = inst?.settings?.has_branches ? 2 : 1;
   const branchCount = activeBranches > 0 ? activeBranches : fallbackBranches;
-  updatedInst.setDataValue('branches', branchCount);
-  updatedInst.setDataValue('branch_count', branchCount);
+  inst.setDataValue('branches', branchCount);
+  inst.setDataValue('branch_count', branchCount);
 
-  return updatedInst;
+  return inst;
 };
 
 // ─── List with Auto-Invoice Generation ────────────────────────────────────────
@@ -275,12 +264,6 @@ export const getAllInstitutes = async (query = {}) => {
     offset,
   });
 
-  // AUTO-GENERATE INVOICES FOR ALL INSTITUTES IN BACKGROUND
-  rows.forEach(institute => {
-    checkAndGenerateInvoice(institute).catch(err => {
-      console.error(`❌ Failed to generate invoice for institute ${institute.id}:`, err);
-    });
-  });
 
   return {
     rows,
@@ -292,7 +275,7 @@ export const getAllInstitutes = async (query = {}) => {
 };
 
 // ─── Core function to check and generate invoice ──────────────────────────────
-const checkAndGenerateInvoice = async (institute) => {
+export const checkAndGenerateInvoice = async (institute) => {
   if (!institute.is_active || !institute.subscription_plan_id) {
     return false;
   }

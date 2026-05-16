@@ -241,6 +241,8 @@ export const getAllStudents = async (req, res) => {
       section_id: req.query.section_id,
       academic_year_id: req.query.academic_year_id,
       is_active: req.query.is_active,
+      sortBy: req.query.sortBy,
+      sortOrder: req.query.sortOrder,
     };
     
     const pagination = {
@@ -455,7 +457,7 @@ export const deleteStudent = async (req, res) => {
  */
 export const bulkDeleteStudents = async (req, res) => {
   try {
-    const { ids } = req.body;
+    const { ids, type = 'inactive' } = req.body;
     const instituteId = getInstituteId(req);
     
     if (!instituteId) {
@@ -466,9 +468,13 @@ export const bulkDeleteStudents = async (req, res) => {
       return sendError(res, 'Student IDs are required', 400);
     }
     
-    const result = await studentService.bulkDeleteStudents(ids, instituteId);
+    const result = await studentService.bulkDeleteStudents(ids, instituteId, type);
     
-    return sendSuccess(res, result, `${result.deletedCount} students deleted successfully`);
+    let message = `${result.deletedCount} students deactivated successfully`;
+    if (type === 'delete') message = `${result.deletedCount} students permanently deleted successfully`;
+    if (type === 'active') message = `${result.deletedCount} students activated successfully`;
+
+    return sendSuccess(res, result, message);
     
   } catch (error) {
     console.error('❌ Bulk delete error:', error);
@@ -612,7 +618,8 @@ export const getStudentStats = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    const stats = await studentService.getStudentStats(instituteId);
+    const { academicYearId, classId, sectionId } = req.query;
+    const stats = await studentService.getStudentStats(instituteId, { academicYearId, classId, sectionId });
     
     return sendSuccess(res, stats, 'Student statistics fetched successfully');
     

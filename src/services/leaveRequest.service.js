@@ -152,6 +152,12 @@ const notifyLeaveRequest = async (leaveRequest, eventType = 'created') => {
 export const createLeaveRequest = async (data, options = {}) => {
   const { transaction } = options;
 
+  // Check for overlapping leave
+  const isOverlapping = await checkOverlappingLeave(data.user_id, data.from_date, data.to_date, { transaction });
+  if (isOverlapping) {
+    throw new Error('User already has a leave request for these dates');
+  }
+
   const leaveRequest = await LeaveRequest.create(data, { transaction });
 
   // Send notification
@@ -166,9 +172,88 @@ export const createLeaveRequest = async (data, options = {}) => {
       { model: models.LeaveType, as: 'leaveType' },
       { model: models.User, as: 'user', attributes: ['id', 'first_name', 'last_name', 'email'] },
       { model: models.User, as: 'approver', attributes: ['id', 'first_name', 'last_name'] },
+      { model: models.User, as: 'markedBy', attributes: ['id', 'first_name', 'last_name'] },
     ],
     transaction,
   });
+};
+
+/**
+ * Check if a leave request overlaps with existing ones
+ */
+export const checkOverlappingLeave = async (userId, fromDate, toDate, options = {}) => {
+  const { transaction } = options;
+  const overlapping = await LeaveRequest.findOne({
+    where: {
+      user_id: userId,
+      status: { [Op.notIn]: ['CANCELLED', 'REJECTED'] },
+      [Op.or]: [
+        {
+          from_date: { [Op.between]: [fromDate, toDate] }
+        },
+        {
+          to_date: { [Op.between]: [fromDate, toDate] }
+        },
+        {
+          [Op.and]: [
+            { from_date: { [Op.lte]: fromDate } },
+            { to_date: { [Op.gte]: toDate } }
+          ]
+        }
+      ]
+    },
+    transaction
+  });
+
+  return !!overlapping;
+};
+
+/**
+ * Mark attendance for leave
+ */
+export const markAttendance = async (leaveRequest, userType, fromDate, toDate, options = {}) => {
+  const { transaction } = options;
+  const dates = generateDateRange(new Date(fromDate), new Date(toDate));
+  const approverId = leaveRequest.approved_by || leaveRequest.marked_by_id;
+
+  if (userType === 'STAFF' || userType === 'TEACHER') {
+    for (const date of dates) {
+      await StaffAttendance.findOrCreate({
+        where: {
+          staff_id: leaveRequest.user_id,
+          date: date.toISOString().split('T')[0],
+        },
+        defaults: {
+          institute_id: leaveRequest.institute_id,
+          branch_id: leaveRequest.branch_id,
+          status: 'LEAVE',
+          leave_type_id: leaveRequest.leave_type_id,
+          leave_request_id: leaveRequest.id,
+          marked_by: approverId,
+          marked_at: new Date(),
+        },
+        transaction,
+      });
+    }
+  } else if (userType === 'STUDENT') {
+    for (const date of dates) {
+      await StudentAttendance.findOrCreate({
+        where: {
+          student_id: leaveRequest.user_id,
+          date: date.toISOString().split('T')[0],
+        },
+        defaults: {
+          school_id: leaveRequest.institute_id,
+          branch_id: leaveRequest.branch_id,
+          status: 'leave',
+          leave_type_id: leaveRequest.leave_type_id,
+          leave_request_id: leaveRequest.id,
+          marked_by: approverId,
+        },
+        transaction,
+      });
+    }
+  }
 };
 
 /**
@@ -400,6 +485,18 @@ export const approveRejectLeaveRequest = async (id, approvalData, approverId, op
         });
       }
     } else if (user_type === 'STUDENT') {
+      // Fetch student details to get class, section, and academic year
+      const student = await models.User.findByPk(user_id, { transaction });
+      const studentDetails = student?.details || {};
+      
+      const class_id = studentDetails.class_id || studentDetails.studentDetails?.class_id;
+      const section_id = studentDetails.section_id || studentDetails.studentDetails?.section_id;
+      const academic_year_id = studentDetails.academic_year_id || studentDetails.studentDetails?.academic_year_id;
+
+      if (!class_id) {
+        logger.warn(`Could not find class_id for student ${user_id} while marking leave attendance. Attendance may be incomplete.`);
+      }
+
       // Mark student attendance
       for (const date of dates) {
         await StudentAttendance.findOrCreate({
@@ -410,6 +507,9 @@ export const approveRejectLeaveRequest = async (id, approvalData, approverId, op
           defaults: {
             school_id: leaveRequest.institute_id,
             branch_id: leaveRequest.branch_id,
+            class_id,
+            section_id,
+            academic_year_id,
             status: 'leave',
             leave_type_id,
             leave_request_id: id,

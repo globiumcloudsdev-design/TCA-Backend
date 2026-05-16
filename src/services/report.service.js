@@ -46,7 +46,10 @@ const formatStudentInfo = (student) => {
     class_name: details.class_name || 'N/A',
     section_name: details.section_name || 'N/A',
     father_name: details.father_name || 'N/A',
-    father_phone: details.father_phone || 'N/A'
+    father_phone: details.father_phone || 'N/A',
+    dob: details.date_of_birth || details.dob || 'N/A',
+    gender: details.gender || 'N/A',
+    guardian_name: details.guardian_name || 'N/A',
   };
 };
 
@@ -102,12 +105,34 @@ export const generateStudentReport = async (filters) => {
       ];
     }
 
-    if (filters.status) {
-      query.where.status = filters.status;
+    // Apply JSONB filters
+    if (filters.class_id) {
+      query.where[Op.and] = query.where[Op.and] || [];
+      query.where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'class_id' = '${filters.class_id}'`));
     }
 
-    // Get total count before pagination
-    const totalCount = await User.count({ where: query.where });
+    if (filters.section_id) {
+      query.where[Op.and] = query.where[Op.and] || [];
+      query.where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'section_id' = '${filters.section_id}'`));
+    }
+
+    if (filters.academic_year_id) {
+      query.where[Op.and] = query.where[Op.and] || [];
+      query.where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'academic_year_id' = '${filters.academic_year_id}'`));
+    }
+
+    if (filters.status) {
+      if (filters.status === 'active') query.where.is_active = true;
+      else if (filters.status === 'inactive') query.where.is_active = false;
+    }
+
+    // Get stats for summary - should reflect filters (Class/Section) but show overall breakdown
+    const summaryWhere = { ...query.where };
+    delete summaryWhere.is_active; // Don't filter summary by active/inactive status
+
+    const totalCount = await User.count({ where: summaryWhere });
+    const activeCount = await User.count({ where: { ...summaryWhere, is_active: true } });
+    const inactiveCount = totalCount - activeCount;
 
     // Apply pagination
     if (filters.skip) query.offset = filters.skip;
@@ -117,18 +142,24 @@ export const generateStudentReport = async (filters) => {
 
     const formattedStudents = students.map(student => ({
       ...formatStudentInfo(student),
-      status: student.status,
+      is_active: student.is_active,
       joined_on: formatDate(student.created_at)
     }));
 
     return {
       type: 'student_report',
+      summary: {
+        total_records: totalCount,
+        active_students: activeCount,
+        inactive_students: inactiveCount
+      },
       total_records: totalCount,
       records: formattedStudents,
       timestamp: new Date(),
       filters: {
         class_id: filters.class_id,
         section_id: filters.section_id,
+        academic_year_id: filters.academic_year_id,
         search: filters.search
       }
     };

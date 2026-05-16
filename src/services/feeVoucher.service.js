@@ -254,7 +254,7 @@ export const generateSingleVoucher = async (
         if (previousVouchers.length > 0) {
             const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             const previousFeesDetails = previousVouchers
-                .map(v => `${months[v.month]} (PKR ${v.net_amount.toFixed(2)}, ${v.status})`)
+                .map(v => `${months[v.month]} (PKR ${Number(v.net_amount || 0).toFixed(2)}, ${v.status})`)
                 .join(', ');
             previousFeesInfo = `\nPending from previous months: ${previousFeesDetails}`;
         }
@@ -537,14 +537,28 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
       archived: false  // Exclude archived vouchers
     };
 
-    if (filters.month) where.month = filters.month;
-    if (filters.year) where.year = filters.year;
-    if (filters.status) where.status = filters.status;
-    if (filters.student_id) where.student_id = filters.student_id;
-    if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
+    // If search is provided, we perform a global search within the institute (ignoring other filters)
+    if (filters.search) {
+        const searchVal = `%${filters.search}%`;
+        where[Op.or] = [
+            { voucher_number: { [Op.iLike]: searchVal } },
+            { '$Student.first_name$': { [Op.iLike]: searchVal } },
+            { '$Student.last_name$': { [Op.iLike]: searchVal } },
+            { '$Student.registration_no$': { [Op.iLike]: searchVal } },
+            { '$Student.email$': { [Op.iLike]: searchVal } }
+        ];
+    } else {
+        // Only apply other filters if search is NOT present
+        if (filters.month) where.month = filters.month;
+        if (filters.year) where.year = filters.year;
+        if (filters.status) where.status = filters.status;
+        if (filters.student_id) where.student_id = filters.student_id;
+        if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
+    }
 
     const { count, rows } = await FeeVoucher.findAndCountAll({
         where,
+        subQuery: false, // Required when using limit/offset with $Alias.field$ where clauses
         attributes: [
             'id',
             'institute_id',
@@ -573,7 +587,7 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
             {
                 model: User,
                 as: 'Student',
-                attributes: ['id', 'first_name', 'last_name', 'registration_no', 'details']
+                attributes: ['id', 'first_name', 'last_name', 'registration_no', 'email', 'details']
             },
             {
                 model: FeePayment,
@@ -643,7 +657,7 @@ export const deleteVoucher = async (voucherId, instituteId, options = {}) => {
  * Handles partial payments by tracking remaining balance
  */
 export const updateVoucherStatus = async (voucherId, instituteId, newStatus, partialAmount = null, options = {}) => {
-    const { transaction } = options;
+    const { transaction, updatedBy } = options;
 
     const validStatuses = ['pending', 'paid', 'overdue', 'partial', 'cancelled'];
     if (!validStatuses.includes(newStatus)) {
@@ -663,18 +677,40 @@ export const updateVoucherStatus = async (voucherId, instituteId, newStatus, par
         throw new AppError('Cannot update archived voucher', 400);
     }
 
-    // For partial payments, calculate remaining balance
-    let updateData = { status: newStatus, updated_at: new Date() };
+    // If marking as PAID, ensure a payment record exists for the full amount
+    if (newStatus === 'paid' && !options.isInternal) {
+        // Calculate current paid amount
+        const payments = await FeePayment.findAll({
+            where: { voucher_id: voucherId },
+            transaction
+        });
+        const totalPaidSoFar = payments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+        const netAmount = Number(voucher.net_amount || 0);
+        const outstanding = Number((netAmount - totalPaidSoFar).toFixed(2));
 
-    if (newStatus === 'partial' && partialAmount) {
-        // Just record updated_at, the status is already set above
+        if (outstanding > 0) {
+            // Create a payment record for the remaining balance
+            await FeePayment.create(
+                {
+                    school_id: instituteId,
+                    voucher_id: voucherId,
+                    amount_paid: outstanding,
+                    payment_method: 'cash', // Default to cash for quick "Mark as Paid"
+                    transaction_id: `AUTO-${Date.now()}`,
+                    payment_date: new Date(),
+                    collected_by: updatedBy || voucher.created_by,
+                    receipt_number: `RCP-${Date.now()}`
+                },
+                { transaction }
+            );
+        }
     }
 
+    let updateData = { status: newStatus, updated_at: new Date() };
     await voucher.update(updateData, { transaction });
 
     // Send notification about payment status change
     try {
-        const { createNotification } = await import('./notification.service.js');
         const statusMessages = {
             'paid': `✅ Fee voucher #${voucher.voucher_number} has been marked as PAID`,
             'partial': `⚠️ Fee voucher #${voucher.voucher_number} has been partially paid`,
@@ -766,7 +802,7 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
         newStatus = 'paid';
     }
 
-    await updateVoucherStatus(voucherId, instituteId, newStatus, amount, { transaction });
+    await updateVoucherStatus(voucherId, instituteId, newStatus, amount, { transaction, isInternal: true });
 
     // Send payment confirmation notification
     try {

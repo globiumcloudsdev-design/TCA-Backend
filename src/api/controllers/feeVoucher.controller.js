@@ -98,8 +98,9 @@ export const generateVouchersForInstitute = catchAsync(async (req, res) => {
  * GET /api/fee-vouchers
  */
 export const getFeeVouchers = catchAsync(async (req, res) => {
-  const { month, year, status, student_id, academic_year_id, page = 1, limit = 20 } = req.query;
+  const { month, year, status, student_id, academic_year_id, search, page = 1, limit = 20 } = req.query;
   const instituteId = req.user.school_id;
+  const branchId = req.user.branch_id;
 
   const filters = {};
   if (month) filters.month = parseInt(month);
@@ -107,6 +108,7 @@ export const getFeeVouchers = catchAsync(async (req, res) => {
   if (status) filters.status = status;
   if (student_id) filters.student_id = student_id;
   if (academic_year_id) filters.academic_year_id = academic_year_id;
+  if (search) filters.search = search;
 
   const result = await feeVoucherService.getFeeVouchers(
     instituteId,
@@ -155,7 +157,8 @@ export const updateVoucherStatus = catchAsync(async (req, res) => {
     voucherId,
     instituteId,
     status,
-    partialAmount
+    partialAmount,
+    { updatedBy: req.user.id }
   );
 
   res.status(200).json({

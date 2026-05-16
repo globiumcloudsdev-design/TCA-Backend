@@ -49,7 +49,8 @@ export const generateRegistrationNo = async (instituteId, instituteType, options
       }
     },
     order: [['registration_no', 'DESC']],
-    paranoid: false // Include soft-deleted
+    paranoid: false, // Include soft-deleted
+    transaction: options.transaction
   });
 
   let nextSequence = 1;

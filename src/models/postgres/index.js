@@ -20,7 +20,6 @@ import ExamResult from "./ExamResult.model.js";
 import FeeVoucher from "./FeeVoucher.model.js";
 import FeePayment from "./FeePayment.model.js";
 import SubscriptionPlan from "./SubscriptionPlan.model.js";
-import SchoolSubscription from "./SchoolSubscription.model.js";
 import Invoice from "./Invoice.model.js";
 import Notification from "./Notification.model.js";
 import AuditLog from "./AuditLog.model.js";
@@ -29,8 +28,8 @@ import FeeTemplate from "./FeeTemplate.model.js";
 import Branch from "./Branch.model.js";
 import Assignment from "./Assignment.model.js";
 import AssignmentSubmission from "./AssignmentSubmission.model.js";
-import Expense from './Expense.modal.js';
-import Vendor from './Vendor.modal.js';
+import Expense from './Expense.model.js';
+import Vendor from './Vendor.model.js';
 import ExpenseCategory from './ExpenseCategory.model.js';
 import Policy from './Policy.model.js';
 import LeaveType from './LeaveType.model.js';
@@ -59,7 +58,6 @@ const models = {
   FeeVoucher,
   FeePayment,
   SubscriptionPlan,
-  SchoolSubscription,
   Invoice,
   Notification,
   AuditLog,

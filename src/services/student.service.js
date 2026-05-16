@@ -14,10 +14,42 @@ import { generateRegistrationNo } from "../utils/generators/registrationNo.gener
 import { generateRollNoFromClassInfo } from "../utils/generators/rollNo.generator.js";
 import { generateAndUploadQRCode } from "../utils/qrCodeGenerator.js";
 import { sendWelcomeEmailWithCredentials } from "./email.service.js";
+import { parse } from 'date-fns';
 import { deleteFromCloudinary } from "../config/cloudinary.js";
 
 const { User, Role, Institute, Class, Section, AcademicYear } = models;
 const { ExamResult, StudentAttendance, FeeVoucher, LeaveRequest, Exam } = models;
+
+/**
+ * Robust date parser for imports
+ */
+const parseImportDate = (dateVal) => {
+  if (!dateVal) return null;
+  if (dateVal instanceof Date) return dateVal;
+  
+  const dateStr = String(dateVal).trim();
+  if (!dateStr) return null;
+
+  // Try common formats
+  const formats = [
+    'MM/dd/yyyy', 'M/d/yyyy', 'yyyy-MM-dd', 'dd-MM-yyyy', 'dd/MM/yyyy', 
+    'MM/dd/yy', 'M/d/yy', 'dd/MM/yy', 'd/M/yy', 'MMM dd, yyyy', 'MMMM dd, yyyy'
+  ];
+  
+  for (const fmt of formats) {
+    try {
+      const parsed = parse(dateStr, fmt, new Date());
+      if (!isNaN(parsed.getTime())) return parsed;
+    } catch (e) {
+      // continue
+    }
+  }
+
+  // Fallback to native Date.parse
+  const fallback = new Date(dateStr);
+  return !isNaN(fallback.getTime()) ? fallback : null;
+};
+
 
 const getLatestSessionForStudent = (studentDetails = {}) => {
   const sessions = Array.isArray(studentDetails?.academicSessions)
@@ -61,7 +93,7 @@ const getLatestSessionForStudent = (studentDetails = {}) => {
 /**
  * Get student role for institute
  */
-const getStudentRole = async (instituteId) => {
+const getStudentRole = async (instituteId, transaction = null) => {
   // Institute-specific roles
   const instituteRoles = await Role.findAll({
     where: {
@@ -76,6 +108,7 @@ const getStudentRole = async (instituteId) => {
       "is_template",
       "is_active",
     ],
+    transaction,
   });
 
   const studentInstituteRole = instituteRoles.find(
@@ -104,6 +137,7 @@ const getStudentRole = async (instituteId) => {
       "is_template",
       "is_active",
     ],
+    transaction,
   });
 
   const studentTemplateRole = templateRoles.find(
@@ -192,7 +226,7 @@ export const createStudent = async (data, options = {}) => {
         : data.admission_charges;
 
     // 1. Get student role
-    const studentRole = await getStudentRole(data.institute_id);
+    const studentRole = await getStudentRole(data.institute_id, transaction);
 
     // 2. Generate password
     const password = data.password || generateRandomPassword(8);
@@ -204,6 +238,7 @@ export const createStudent = async (data, options = {}) => {
       registrationNo = await generateRegistrationNo(
         data.institute_id,
         data.institute_type || "school",
+        { transaction }
       );
     } else {
       // 🛑 CRITICAL CHECK: Manual registration number must be unique within the institute
@@ -568,16 +603,32 @@ export const getAllStudents = async (filters = {}, pagination = {}) => {
       }
       : whereWith;
 
-  const { count, rows } = await User.findAndCountAll({
-    where: sequelizeWhere,
-    include: [
-      {
-        model: Role,
-        as: "Role",
-        attributes: ["id", "name", "permissions"],
-      },
-    ],
-    order: [["created_at", "DESC"]],
+    const sortBy = filters.sortBy || "created_at";
+    const sortOrder = filters.sortOrder || "DESC";
+    
+    // Validate sort fields to prevent SQL injection
+    const allowedSortFields = ["created_at", "registration_no", "first_name", "last_name", "email", "roll_no"];
+    const finalSortOrder = ["ASC", "DESC"].includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : "DESC";
+
+    let order = [];
+    if (sortBy === "roll_no") {
+      // Sort by JSONB field roll_no
+      order = [[Sequelize.literal(`details->'studentDetails'->>'roll_no'`), finalSortOrder]];
+    } else {
+      const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : "created_at";
+      order = [[finalSortBy, finalSortOrder]];
+    }
+
+    const { count, rows } = await User.findAndCountAll({
+      where: sequelizeWhere,
+      include: [
+        {
+          model: Role,
+          as: "Role",
+          attributes: ["id", "name", "permissions"],
+        },
+      ],
+      order: order,
     limit,
     offset,
     subQuery: false,
@@ -1167,9 +1218,59 @@ export const deleteStudent = async (id, instituteId, type = 'inactive') => {
 /**
  * Bulk delete students
  */
-export const bulkDeleteStudents = async (ids, instituteId) => {
+export const bulkDeleteStudents = async (ids, instituteId, type = 'inactive') => {
+  if (type === 'delete') {
+    // Fetch students to delete their Cloudinary assets first
+    const usersToDelete = await User.findAll({
+      where: {
+        id: { [Op.in]: ids },
+        school_id: instituteId,
+        user_type: "STUDENT",
+      },
+      attributes: ['id', 'qr_code_public_id', 'avatar_public_id', 'documents']
+    });
+
+    for (const user of usersToDelete) {
+      // Delete QR Code
+      if (user.qr_code_public_id) {
+        await deleteFromCloudinary(user.qr_code_public_id).catch(err =>
+          console.error(`QR Code deletion error for user ${user.id}:`, err)
+        );
+      }
+
+      // Delete Avatar
+      if (user.avatar_public_id) {
+        await deleteFromCloudinary(user.avatar_public_id).catch(err =>
+          console.error(`Avatar deletion error for user ${user.id}:`, err)
+        );
+      }
+
+      // Delete Documents
+      if (user.documents && Array.isArray(user.documents)) {
+        for (const doc of user.documents) {
+          if (doc.public_id) {
+            await deleteFromCloudinary(doc.public_id).catch(err =>
+              console.error(`Document deletion error for user ${user.id}:`, err)
+            );
+          }
+        }
+      }
+    }
+
+    // Now permanently delete from database
+    const result = await User.destroy({
+      where: {
+        id: { [Op.in]: ids },
+        school_id: instituteId,
+        user_type: "STUDENT",
+      },
+    });
+    return { deletedCount: result };
+  }
+
+  // Soft delete / Activation
   const result = await User.update(
-    { is_active: false },
+    { is_active: type === 'active' },
     {
       where: {
         id: { [Op.in]: ids },
@@ -1237,13 +1338,28 @@ export const getStudentsBySection = async (sectionId, instituteId) => {
 /**
  * Get student statistics
  */
-export const getStudentStats = async (instituteId) => {
-  const total = await User.count({
-    where: { school_id: instituteId, user_type: "STUDENT" },
-  });
+export const getStudentStats = async (instituteId, filters = {}) => {
+  const where = { school_id: instituteId, user_type: "STUDENT" };
+  
+  if (filters.academicYearId) {
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'academic_year_id' = '${filters.academicYearId}'`));
+  }
+  
+  if (filters.classId) {
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'class_id' = '${filters.classId}'`));
+  }
+
+  if (filters.sectionId) {
+    where[Op.and] = where[Op.and] || [];
+    where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'section_id' = '${filters.sectionId}'`));
+  }
+
+  const total = await User.count({ where });
 
   const active = await User.count({
-    where: { school_id: instituteId, user_type: "STUDENT", is_active: true },
+    where: { ...where, is_active: true },
   });
 
   const inactive = total - active;
@@ -1324,7 +1440,7 @@ export const bulkImportStudents = async (
     const existingRegNos = new Set(existingUsers.map(u => u.registration_no).filter(Boolean));
 
     // Get student role
-    const studentRole = await getStudentRole(instituteId);
+    const studentRole = await getStudentRole(instituteId, transaction);
 
     // Prepare data for bulk creation
     const usersToCreate = [];
@@ -1351,7 +1467,7 @@ export const bulkImportStudents = async (
     const yearMap = new Map();
     for (const name of uniqueYearNames) {
       const [yearObj] = await AcademicYear.findOrCreate({
-        where: { institute_id: instituteId, name: String(name) },
+        where: { institute_id: instituteId, name: String(name).trim() },
         defaults: {
           institute_id: instituteId,
           name: String(name),
@@ -1377,7 +1493,7 @@ export const bulkImportStudents = async (
         where: {
           school_id: instituteId,
           academic_year_id: yearId,
-          name: String(className),
+          name: String(className).trim(),
         },
         defaults: {
           school_id: instituteId,
@@ -1410,7 +1526,6 @@ export const bulkImportStudents = async (
 
         // Validate required fields
         if (!firstName) errors.push("First name is required");
-        if (!lastName) errors.push("Last name is required");
         if (!className) errors.push("Class name is required");
         if (!academicYearName) errors.push("Academic year name is required");
 
@@ -1469,7 +1584,7 @@ export const bulkImportStudents = async (
           where: {
             school_id: instituteId,
             class_id: targetClass.id,
-            name: sectionName,
+            name: String(sectionName).trim(),
           },
           defaults: {
             school_id: instituteId,
@@ -1494,12 +1609,12 @@ export const bulkImportStudents = async (
         // Generate unique registration number
         let registrationNo = registrationNoProvided;
         if (!registrationNo) {
-          registrationNo = await generateRegistrationNo(instituteId, instituteType);
+          registrationNo = await generateRegistrationNo(instituteId, instituteType, { transaction });
           // Ensure uniqueness within batch and existing
           let counter = 0;
           while (existingRegNos.has(registrationNo) ||
             usersToCreate.some(u => u.registration_no === registrationNo)) {
-            registrationNo = await generateRegistrationNo(instituteId, instituteType);
+            registrationNo = await generateRegistrationNo(instituteId, instituteType, { transaction });
             counter++;
             if (counter > 5) {
               registrationNo = `TEMP-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
@@ -1550,8 +1665,8 @@ export const bulkImportStudents = async (
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Safely parse date fields
-        const dob = s.dob || s.date_of_birth;
-        const admissionDate = s.admission_date || s.admissionDate || new Date();
+        const dob = parseImportDate(s.dob || s.date_of_birth);
+        const admissionDate = parseImportDate(s.admission_date || s.admissionDate) || new Date();
 
         // Prepare student details with safe values
         const studentDetails = {
@@ -1569,20 +1684,77 @@ export const bulkImportStudents = async (
           academic_year_name: academicYearName,
           date_of_birth: dob || null,
           admission_date: admissionDate,
-          gender: safeString(s.gender) || null,
-          blood_group: safeString(s.blood_group) || null,
-          religion: safeString(s.religion) || null,
+          gender: safeString(s.gender)?.toLowerCase() || null,
+          blood_group: safeString(s.blood_group)?.toUpperCase() || null,
+          religion: safeString(s.religion)?.toLowerCase() || null,
           nationality: safeString(s.nationality) || "Pakistani",
           cnic: safeString(s.cnic) || null,
           father_name: safeString(s.father_name) || null,
           father_cnic: safeString(s.father_cnic) || null,
           father_phone: safeString(s.father_phone) || null,
           father_occupation: safeString(s.father_occupation) || null,
+          father_education: safeString(s.father_education) || null,
           mother_name: safeString(s.mother_name) || null,
           mother_phone: safeString(s.mother_phone) || null,
+          mother_cnic: safeString(s.mother_cnic) || null,
+          mother_occupation: safeString(s.mother_occupation) || null,
+          
+          // Handle Guardians Array (Sync with createStudent logic)
+          guardians: [
+            ...(safeString(s.father_name) ? [{
+              name: safeString(s.father_name),
+              relation: 'father',
+              phone: safeString(s.father_phone) || null,
+              cnic: safeString(s.father_cnic) || null,
+              email: null
+            }] : []),
+            ...(safeString(s.mother_name) ? [{
+              name: safeString(s.mother_name),
+              relation: 'mother',
+              phone: safeString(s.mother_phone) || null,
+              cnic: safeString(s.mother_cnic) || null,
+              email: null
+            }] : []),
+            ...(safeString(s.guardian_name) ? [{
+              name: safeString(s.guardian_name),
+              relation: safeString(s.guardian_relation) || safeString(s.guardian_type) || 'guardian',
+              phone: safeString(s.guardian_phone) || null,
+              cnic: safeString(s.guardian_cnic) || null,
+              email: safeString(s.guardian_email) || null
+            }] : [])
+          ],
+
+          // Keep individual fields for backward compatibility
+          guardian_name: safeString(s.guardian_name) || null,
+          guardian_phone: safeString(s.guardian_phone) || null,
+          guardian_cnic: safeString(s.guardian_cnic) || null,
+          guardian_email: safeString(s.guardian_email) || null,
+          guardian_relation: safeString(s.guardian_relation) || null,
+          guardian_type: safeString(s.guardian_type)?.toLowerCase() || "guardian",
+
+          // Contact Info
           present_address: safeString(s.present_address) || null,
           permanent_address: safeString(s.permanent_address) || null,
           city: safeString(s.city) || null,
+
+          // Fee Info
+          monthly_fee: s.monthly_fee || null,
+          admission_fee: s.admission_fee || null,
+          concession_type: safeString(s.concession_type) || "none",
+          concession_percentage: s.concession_percentage || 0,
+
+          // Build Guardians Array
+          guardians: s.guardian_name ? [
+            {
+              name: safeString(s.guardian_name),
+              relation: safeString(s.guardian_relation),
+              phone: safeString(s.guardian_phone),
+              cnic: safeString(s.guardian_cnic),
+              email: safeString(s.guardian_email) || null,
+              type: safeString(s.guardian_type)?.toLowerCase() || "guardian",
+            }
+          ] : [],
+
           academicSessions: [
             {
               academic_year_id: yearId,
@@ -1614,7 +1786,7 @@ export const bulkImportStudents = async (
           details: {
             studentDetails: studentDetails,
           },
-          is_active: true,
+          is_active: (s.is_active === false || s.is_active === 'false' || s.is_active === '0' || s.is_active === 0 || String(s.is_active).toLowerCase() === 'inactive') ? false : true,
           created_by: options.created_by || null,
           // Store plain password temporarily for QR/Email
           _temp_password: password,
@@ -1653,8 +1825,8 @@ export const bulkImportStudents = async (
 
       const created = await User.bulkCreate(usersForCreate, {
         transaction,
-        validate: true,
-        individualHooks: true, // Enable individual hooks for better validation
+        validate: false,
+        individualHooks: false,
       });
 
       // ========== STEP 6: GENERATE QR CODES & SEND EMAILS ==========
@@ -1683,18 +1855,18 @@ export const bulkImportStudents = async (
             qr_url: qrCodeResult.url
           });
 
-          // Send welcome email (if email exists)
-          if (user.email && tempData._temp_email_sent === false) {
-            const institute = await Institute.findByPk(instituteId);
-            await sendWelcomeEmailWithCredentials(
-              user,
-              password,
-              institute?.name || "The Clouds Academy",
-              qrCodeResult.url,
-              "Student",
-            ).catch((err) => console.error(`⚠️ Email failed for ${user.email}:`, err.message));
-            tempData._temp_email_sent = true;
-          }
+          // // Send welcome email (if email exists)
+          // if (user.email && tempData._temp_email_sent === false) {
+          //   const institute = await Institute.findByPk(instituteId);
+          //   await sendWelcomeEmailWithCredentials(
+          //     user,
+          //     password,
+          //     institute?.name || "The Clouds Academy",
+          //     qrCodeResult.url,
+          //     "Student",
+          //   ).catch((err) => console.error(`⚠️ Email failed for ${user.email}:`, err.message));
+          //   tempData._temp_email_sent = true;
+          // }
 
           // Small delay to avoid rate limiting on QR generation
           if (i % 10 === 0 && i > 0) {

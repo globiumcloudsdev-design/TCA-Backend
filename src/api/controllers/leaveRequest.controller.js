@@ -333,11 +333,13 @@ export const adminMarkLeave = async (req, res) => {
       from_date: req.body.from_date,
       to_date: req.body.to_date,
       number_of_days: req.body.number_of_days,
-      reason: req.body.reason || `Admin marked leave (${req.user.first_name} ${req.user.last_name})`,
+      reason: req.body.reason || '',
       institute_id: instituteId,
       branch_id: branchId,
-      status: req.body.approve_immediately ? 'APPROVED' : 'PENDING',
-      approver_id: req.body.approve_immediately ? req.user.id : null,
+      marked_by_id: req.user.id,
+      status: req.body.approve_immediately !== false ? 'APPROVED' : 'PENDING',
+      approved_by: req.body.approve_immediately !== false ? req.user.id : null,
+      approved_at: req.body.approve_immediately !== false ? new Date() : null,
     };
 
     let leaveRequest = await leaveRequestService.createLeaveRequest(leaveRequestData, {
@@ -345,7 +347,7 @@ export const adminMarkLeave = async (req, res) => {
     });
 
     // If approved immediately, mark attendance
-    if (req.body.approve_immediately) {
+    if (req.body.approve_immediately !== false) {
       await leaveRequestService.markAttendance(
         leaveRequest,
         targetUserType,

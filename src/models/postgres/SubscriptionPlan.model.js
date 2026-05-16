@@ -273,10 +273,6 @@ SubscriptionPlan.getPopularPlans = function() {
 
 // Associations
 SubscriptionPlan.associate = (models) => {
-  SubscriptionPlan.hasMany(models.SchoolSubscription, { 
-    foreignKey: 'plan_id',
-    as: 'subscriptions' 
-  });
   SubscriptionPlan.hasMany(models.Institute, {
     foreignKey: 'subscription_plan_id',
     as: 'institutes'

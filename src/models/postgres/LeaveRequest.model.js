@@ -93,6 +93,12 @@ const LeaveRequest = sequelize.define(
       allowNull: true,
       comment: 'Timestamp of approval/rejection',
     },
+    marked_by_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'users', key: 'id' },
+      comment: 'Admin/Staff who manually marked this leave',
+    },
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
@@ -145,6 +151,10 @@ LeaveRequest.associate = (models) => {
   LeaveRequest.belongsTo(models.User, {
     foreignKey: 'approved_by',
     as: 'approver',
+  });
+  LeaveRequest.belongsTo(models.User, {
+    foreignKey: 'marked_by_id',
+    as: 'markedBy',
   });
 };
 
