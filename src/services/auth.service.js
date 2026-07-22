@@ -18,6 +18,7 @@
 
 import crypto from 'crypto';
 import { Op } from 'sequelize';
+import sequelize from '../config/database.js';
 import User from '../models/postgres/User.model.js';
 import Role from '../models/postgres/Role.model.js';
 import Institute from '../models/postgres/Institute.model.js';
@@ -71,16 +72,27 @@ const getCompleteInstituteData = async (instituteId) => {
   if (!instituteId) return null;
   
   try {
+    const { SubscriptionPlan, Invoice } = sequelize.models;
+    
     const institute = await Institute.findByPk(instituteId, {
       include: [
         { model: InstituteType, as: 'type', attributes: ['id', 'name', 'slug', 'icon'] },
-        { model: InstituteSettings, as: 'settings_detail' }
+        { model: InstituteSettings, as: 'settings_detail' },
+        { model: SubscriptionPlan, as: 'plan' },
+        { 
+          model: Invoice, 
+          as: 'invoices',
+          where: { status: 'PAID' },
+          required: false,
+          limit: 1,
+          order: [['period_end', 'DESC']]
+        }
       ],
       attributes: [
         'id', 'institute_name', 'institute_code', 'institute_email', 
         'institute_contact', 'institute_address', 'institute_city',
         'institute_country', 'institute_logo_url', 'subscription_status',
-        'trial_end_date', 'joining_date', 'settings'
+        'trial_end_date', 'joining_date', 'settings', 'subscription_plan_id'
       ]
     });
     
@@ -138,6 +150,28 @@ const getCompleteInstituteData = async (instituteId) => {
       subscription_status: institute.subscription_status,
       trial_end_date: institute.trial_end_date,
       joining_date: institute.joining_date,
+      // 🔥 NEW: Subscription & Billing
+      subscription_plan: institute.plan ? {
+        id: institute.plan.id,
+        name: institute.plan.name,
+        code: institute.plan.code,
+        description: institute.plan.description,
+        price: institute.plan.price,
+        currency: institute.plan.currency,
+        cycle: institute.plan.cycle,
+        trial_days: institute.plan.trial_days,
+        limits: institute.plan.limits,
+        features: institute.plan.features,
+        is_popular: institute.plan.is_popular
+      } : null,
+      active_invoice: institute.invoices?.[0] ? {
+        id: institute.invoices[0].id,
+        invoice_number: institute.invoices[0].invoice_number,
+        status: institute.invoices[0].status,
+        period_start: institute.invoices[0].period_start,
+        period_end: institute.invoices[0].period_end,
+        expiry_date: institute.invoices[0].period_end, // Expiry date is period_end
+      } : null,
       // 🔥 FIXED: String, not object
       institute_type: instituteTypeSlug,
       // Keep type object separately if needed
@@ -305,6 +339,9 @@ export const loginService = async (loginId, password) => {
         inactiveAccountMatch = true;
         continue;
       }
+      if (user.school_id && user.institute && !user.institute.is_active) {
+        throw new AppError('Your institute account is currently inactive. Please contact support.', 403);
+      }
       let permissions = [];
       if (user.permissions && user.permissions.length > 0) {
         permissions = user.permissions;
@@ -341,7 +378,9 @@ export const loginService = async (loginId, password) => {
           logo_url: instituteData.logo_url,
           institute_type: instituteData.institute_type, // 🔥 STRING
           settings: instituteData.settings,
-          has_branches: instituteData.has_branches
+          has_branches: instituteData.has_branches,
+          subscription_plan: instituteData.subscription_plan,
+          active_invoice: instituteData.active_invoice
         } : null,
         role: user.Role ? {
           id: user.Role.id,
@@ -407,6 +446,9 @@ export const selectAccountService = async (accountId, email, registrationNo) => 
   
   if (!user) throw new AppError('Account not found.', 404);
   if (!user.is_active) throw new AppError('Account is deactivated.', 403);
+  if (user.school_id && user.institute && !user.institute.is_active) {
+    throw new AppError('Your institute account is currently inactive. Please contact support.', 403);
+  }
   
   await user.update({ last_login_at: new Date() });
   
@@ -433,9 +475,13 @@ export const refreshTokenService = async (refreshToken) => {
     throw new AppError('Invalid or expired refresh token.', 401);
   }
   const user = await User.findByPk(decoded.userId, {
-    attributes: ['id', 'school_id', 'user_type', 'branch_id', 'is_active']
+    attributes: ['id', 'school_id', 'user_type', 'branch_id', 'is_active'],
+    include: [{ model: Institute, as: 'institute', attributes: ['is_active'] }]
   });
   if (!user || !user.is_active) throw new AppError('User not found.', 401);
+  if (user.school_id && user.institute && !user.institute.is_active) {
+    throw new AppError('Your institute account is currently inactive.', 401);
+  }
   const accessToken = signAccessToken({
     userId: user.id,
     schoolId: user.school_id,
@@ -517,6 +563,9 @@ export const loginWithAccountService = async (accountId, password) => {
   });
   if (!user) throw new AppError('Account not found.', 404);
   if (!user.is_active) throw new AppError('Account is deactivated.', 403);
+  if (user.school_id && user.institute && !user.institute.is_active) {
+    throw new AppError('Your institute account is currently inactive. Please contact support.', 403);
+  }
   const isMatch = await comparePassword(password, user.password_hash);
   if (!isMatch) throw new AppError('Invalid password.', 401);
   await user.update({ last_login_at: new Date() });
@@ -543,6 +592,37 @@ export const refreshInstituteDataService = async (userId) => {
     return await getUserProfile(userId);
 };
 
+/**
+ * Impersonate User Service (Ghost Mode)
+ * Generates tokens for any user without password check.
+ * ONLY for Master Admin use.
+ */
+export const impersonateUserService = async (userId) => {
+  const user = await User.unscoped().findByPk(userId, {
+    attributes: ['id', 'school_id', 'user_type', 'branch_id', 'is_active']
+  });
+
+  if (!user) throw new AppError('User not found.', 404);
+  if (!user.is_active) throw new AppError('Cannot impersonate an inactive user.', 403);
+
+  // Update last login
+  await user.update({ last_login_at: new Date() });
+
+  const tokenPayload = {
+    userId: user.id,
+    schoolId: user.school_id,
+    userType: user.user_type,
+    branchId: user.branch_id,
+    isImpersonated: true, // Flag for security/auditing
+  };
+
+  const accessToken = signAccessToken(tokenPayload);
+  const refreshToken = signRefreshToken({ userId: user.id });
+  const userProfile = await getUserProfile(user.id);
+
+  return { accessToken, refreshToken, user: userProfile };
+};
+
 export default { 
   loginService, 
   refreshTokenService, 
@@ -552,5 +632,6 @@ export default {
   getAccountsByEmailService, 
   loginWithAccountService,
   getInstituteDataService,
-  refreshInstituteDataService
+  refreshInstituteDataService,
+  impersonateUserService
 };

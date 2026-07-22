@@ -171,7 +171,18 @@ const SubscriptionPlan = sequelize.define(
       type: DataTypes.INTEGER,
       defaultValue: 0,
       comment: 'Order to display plans in UI'
-    }
+    },
+
+    created_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'UUID of the admin who created this plan',
+    },
+    updated_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'UUID of the admin who last updated this plan',
+    },
   },
   {
     tableName: 'subscription_plans',

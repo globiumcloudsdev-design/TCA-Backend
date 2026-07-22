@@ -232,6 +232,34 @@ export const getAnalyticsReport = async (req, res) => {
   }
 };
 
+/**
+ * GET /reports/profit-loss
+ * Comprehensive Profit & Loss report (Income, Expenses, Payroll)
+ */
+export const getProfitLossReport = async (req, res) => {
+  try {
+    const instituteId = getInstituteId(req);
+    if (!instituteId) {
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    const filters = {
+      institute_id: instituteId,
+      academic_year_id: req.query.academic_year_id,
+      month: req.query.month ? parseInt(req.query.month) : null,
+      year: req.query.year ? parseInt(req.query.year) : null,
+      from_date: req.query.from_date,
+      to_date: req.query.to_date
+    };
+
+    const report = await reportService.generateProfitLossReport(filters);
+    return sendSuccess(res, report, 'Profit and Loss report generated successfully');
+  } catch (error) {
+    console.error('Profit & Loss report error:', error);
+    return sendError(res, error.message || 'Failed to generate profit and loss report', 400);
+  }
+};
+
 // ==================== EXPORT REPORTS ====================
 
 /**

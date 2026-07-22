@@ -81,6 +81,17 @@ const Institute = sequelize.define(
             comment: 'Whether this institute has ever used a trial (prevents multiple trials)'
         },
 
+        created_by: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            comment: 'UUID of the admin who created this institute',
+        },
+        updated_by: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            comment: 'UUID of the admin who last updated this institute',
+        },
+
         // ✅ FIXED: Settings with getter/setter to handle string JSON
         settings: {
             type: DataTypes.JSONB,
@@ -130,6 +141,8 @@ const Institute = sequelize.define(
     },
     {
         tableName: 'institutes',
+        paranoid: true, // Enables soft deletes
+        deletedAt: 'deleted_at',
         indexes: [
             { fields: ['institute_code'], unique: true },
             { fields: ['institute_email'], unique: true },

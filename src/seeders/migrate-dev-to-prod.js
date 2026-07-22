@@ -30,8 +30,8 @@ const parseDbUrl = (rawUrl) => {
 };
 
 // Explicit database URLs from environment
-const DEV_DB_URL = process.env.DATABASE_URL || 'postgresql://Globium%20Clouds:npg_iDZ4CvJM1Nay@ep-calm-bird-a1284utj-pooler.ap-southeast-1.aws.neon.tech/The%20Clouds%20Academy?sslmode=require&channel_binding=require';
-const PROD_DB_URL = process.env.DATABASE_PROD_URL || process.env.DATABASE_URL || 'postgresql://Globium%20Clouds:npg_iDZ4CvJM1Nay@ep-calm-bird-a1284utj-pooler.ap-southeast-1.aws.neon.tech/The-Clouds-Academy-Production?sslmode=require&channel_binding=require';
+const DEV_DB_URL = process.env.DATABASE_URL
+const PROD_DB_URL = process.env.DATABASE_PROD_URL || process.env.DATABASE_URL
 
 console.log(`\n🚀 Running in MODE: ${process.env.NODE_ENV || 'development'}`);
 console.log(`📊 Dev DB: ${DEV_DB_URL.substring(0, 80)}...`);
@@ -76,7 +76,7 @@ const DevUser = devSequelize.define('User', {
   school_id: { type: Sequelize.UUID },
   branch_id: { type: Sequelize.UUID },
   role_id: { type: Sequelize.UUID },
-  user_type: Sequelize.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF'),
+  user_type: Sequelize.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF', 'SUPPORT_STAFF', 'SYSTEM_ADMIN'),
   staff_type: Sequelize.ENUM('Accountant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper', 'Branch Head'),
   first_name: Sequelize.STRING,
   last_name: Sequelize.STRING,
@@ -147,7 +147,7 @@ const ProdUser = prodSequelize.define('User', {
   school_id: { type: Sequelize.UUID },
   branch_id: { type: Sequelize.UUID },
   role_id: { type: Sequelize.UUID },
-  user_type: Sequelize.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF'),
+  user_type: Sequelize.ENUM('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'STAFF', 'SUPPORT_STAFF', 'SYSTEM_ADMIN'),
   staff_type: Sequelize.ENUM('Accountant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper', 'Branch Head'),
   first_name: Sequelize.STRING,
   last_name: Sequelize.STRING,
@@ -260,32 +260,8 @@ async function runMigration() {
     }
     console.log();
 
-    // ============ 2. MIGRATE MASTER_ADMIN USERS ============
-    console.log('👤 [2/4] Migrating MASTER_ADMIN users...');
-    const devAdmins = await DevUser.findAll({
-      where: { user_type: 'MASTER_ADMIN' },
-      raw: true,
-    });
-
-    for (const adminData of devAdmins) {
-      try {
-        const exists = await ProdUser.findByPk(adminData.id);
-        if (exists) {
-          console.log(`  ⏭️  Already exists: ${adminData.email}`);
-          stats.skipped++;
-          continue;
-        }
-        await ProdUser.create(adminData);
-        console.log(`  ✅ Created: ${adminData.first_name} ${adminData.last_name} (${adminData.email})`);
-        stats.users++;
-      } catch (err) {
-        console.log(`  ❌ Error: ${adminData.email} - ${err.message}`);
-      }
-    }
-    console.log();
-
-    // ============ 3. MIGRATE TEMPLATE ROLES ============
-    console.log('🔐 [3/4] Migrating Template Roles...');
+    // ============ 2. MIGRATE TEMPLATE ROLES ============
+    console.log('🔐 [2/4] Migrating Template Roles...');
     const devRoles = await DevRole.findAll({
       where: { is_template: true },
       raw: true,
@@ -304,6 +280,34 @@ async function runMigration() {
         stats.roles++;
       } catch (err) {
         console.log(`  ❌ Error: ${roleData.code} - ${err.message}`);
+      }
+    }
+    console.log();
+
+    // ============ 3. MIGRATE MASTER_ADMIN USERS ============
+    console.log('👤 [3/4] Migrating MASTER_ADMIN users...');
+    const devAdmins = await DevUser.findAll({
+      where: { 
+        user_type: {
+          [Sequelize.Op.in]: ['MASTER_ADMIN', 'SUPPORT_STAFF', 'SYSTEM_ADMIN']
+        }
+      },
+      raw: true,
+    });
+
+    for (const adminData of devAdmins) {
+      try {
+        const exists = await ProdUser.findByPk(adminData.id);
+        if (exists) {
+          console.log(`  ⏭️  Already exists: ${adminData.email}`);
+          stats.skipped++;
+          continue;
+        }
+        await ProdUser.create(adminData);
+        console.log(`  ✅ Created: ${adminData.first_name} ${adminData.last_name} (${adminData.email})`);
+        stats.users++;
+      } catch (err) {
+        console.log(`  ❌ Error: ${adminData.email} - ${err.message}`);
       }
     }
     console.log();

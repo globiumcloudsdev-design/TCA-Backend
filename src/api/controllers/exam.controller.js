@@ -52,6 +52,10 @@ export const createExam = async (req, res) => {
   } catch (error) {
     await transaction.rollback();
     console.error('Create exam error:', error);
+    if (error.name === 'SequelizeValidationError' || error.name === 'SequelizeUniqueConstraintError') {
+      const details = error.errors.map(e => e.message).join(', ');
+      return sendError(res, `Validation failed: ${details}`, 400);
+    }
     return sendError(res, error.message || 'Failed to create exam', 400);
   }
 };

@@ -25,6 +25,8 @@ const {
   AcademicYear,
   Institute,
   Payslip,
+  FeePayment,
+  Expense,
   sequelize
 } = models;
 
@@ -89,7 +91,7 @@ export const generateStudentReport = async (filters) => {
       },
       attributes: [
         'id', 'first_name', 'last_name', 'email', 'phone',
-        'registration_no', 'details', 'created_at', 'status'
+        'registration_no', 'details', 'created_at', 'is_active'
       ],
       order: [[filters.orderBy || 'first_name', filters.orderDirection || 'ASC']],
       raw: false
@@ -108,17 +110,17 @@ export const generateStudentReport = async (filters) => {
     // Apply JSONB filters
     if (filters.class_id) {
       query.where[Op.and] = query.where[Op.and] || [];
-      query.where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'class_id' = '${filters.class_id}'`));
+      query.where[Op.and].push(sequelize.literal(`(details->'studentDetails'->>'class_id' = '${filters.class_id}' OR details->'studentDetails'->>'class_id' = '${filters.class_id}'::text)`));
     }
 
     if (filters.section_id) {
       query.where[Op.and] = query.where[Op.and] || [];
-      query.where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'section_id' = '${filters.section_id}'`));
+      query.where[Op.and].push(sequelize.literal(`(details->'studentDetails'->>'section_id' = '${filters.section_id}' OR details->'studentDetails'->>'section_id' = '${filters.section_id}'::text)`));
     }
 
     if (filters.academic_year_id) {
       query.where[Op.and] = query.where[Op.and] || [];
-      query.where[Op.and].push(sequelize.literal(`"User"."details"->'studentDetails'->>'academic_year_id' = '${filters.academic_year_id}'`));
+      query.where[Op.and].push(sequelize.literal(`(details->'studentDetails'->>'academic_year_id' = '${filters.academic_year_id}' OR details->'studentDetails'->>'academic_year_id' = '${filters.academic_year_id}'::text)`));
     }
 
     if (filters.status) {
@@ -126,15 +128,55 @@ export const generateStudentReport = async (filters) => {
       else if (filters.status === 'inactive') query.where.is_active = false;
     }
 
-    // Get stats for summary - should reflect filters (Class/Section) but show overall breakdown
-    const summaryWhere = { ...query.where };
-    delete summaryWhere.is_active; // Don't filter summary by active/inactive status
+    // Get stats for summary - reflect filters (Class/Section/Year) but ignore search & status
+    const statsWhere = {
+      user_type: 'STUDENT',
+      school_id: filters.institute_id
+    };
 
-    const totalCount = await User.count({ where: summaryWhere });
-    const activeCount = await User.count({ where: { ...summaryWhere, is_active: true } });
+    const andConditions = [];
+    if (filters.class_id) {
+      andConditions.push(sequelize.literal(`(details->'studentDetails'->>'class_id' = '${filters.class_id}' OR details->'studentDetails'->>'class_id' = '${filters.class_id}'::text)`));
+    }
+    if (filters.section_id) {
+      andConditions.push(sequelize.literal(`(details->'studentDetails'->>'section_id' = '${filters.section_id}' OR details->'studentDetails'->>'section_id' = '${filters.section_id}'::text)`));
+    }
+    if (filters.academic_year_id) {
+      andConditions.push(sequelize.literal(`(details->'studentDetails'->>'academic_year_id' = '${filters.academic_year_id}' OR details->'studentDetails'->>'academic_year_id' = '${filters.academic_year_id}'::text)`));
+    }
+    if (andConditions.length > 0) statsWhere[Op.and] = andConditions;
+
+    // Fetch matching students for stats
+    const allMatchingStudents = await User.findAll({
+      where: statsWhere,
+      attributes: ['id', 'is_active', 'details']
+    });
+
+    // Get current date in Pakistan Time (UTC+5) for accurate Birthday check
+    const pkTime = new Date().toLocaleString("en-US", { timeZone: "Asia/Karachi" });
+    const today = new Date(pkTime);
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mmdd = `${mm}-${dd}`; // "MM-DD" e.g. "05-17"
+
+    let activeCount = 0;
+    let birthdayCount = 0;
+    const totalCount = allMatchingStudents.length;
+
+    allMatchingStudents.forEach(s => {
+      if (s.is_active !== false && s.is_active !== 'false' && s.is_active !== 0 && s.is_active !== null) {
+        activeCount++;
+      }
+      const studentDetails = s.details?.studentDetails || {};
+      const dob = studentDetails.dob || studentDetails.date_of_birth;
+      if (dob && String(dob).includes(mmdd)) {
+        birthdayCount++;
+      }
+    });
+
     const inactiveCount = totalCount - activeCount;
 
-    // Apply pagination
+    // Apply pagination to the main query
     if (filters.skip) query.offset = filters.skip;
     if (filters.limit) query.limit = filters.limit;
 
@@ -151,7 +193,8 @@ export const generateStudentReport = async (filters) => {
       summary: {
         total_records: totalCount,
         active_students: activeCount,
-        inactive_students: inactiveCount
+        inactive_students: inactiveCount,
+        birthdays_today: birthdayCount
       },
       total_records: totalCount,
       records: formattedStudents,
@@ -329,7 +372,7 @@ export const generateFeeReport = async (filters) => {
     }
 
     // Get total count before pagination
-    const totalCount = await FeeVoucher.count({ 
+    const totalCount = await FeeVoucher.count({
       where: query.where,
       include: query.include.map(inc => ({ ...inc, attributes: undefined }))
     });
@@ -601,6 +644,107 @@ export const generatePayrollReport = async (filters) => {
     };
   } catch (error) {
     throw new Error(`Failed to generate payroll report: ${error.message}`);
+  }
+};
+
+// ==================== PROFIT LOSS REPORT ====================
+
+/**
+ * Generate Profit & Loss report (Income, Expenses, Payroll)
+ */
+export const generateProfitLossReport = async (filters) => {
+  try {
+    const instituteId = filters.institute_id;
+    const dateQuery = {};
+
+    if (filters.from_date && filters.to_date) {
+      dateQuery[Op.between] = [new Date(filters.from_date), new Date(filters.to_date)];
+    } else if (filters.from_date) {
+      dateQuery[Op.gte] = new Date(filters.from_date);
+    } else if (filters.to_date) {
+      dateQuery[Op.lte] = new Date(filters.to_date);
+    }
+
+    // 1. Income (Fee Payments)
+    const paymentWhere = { school_id: instituteId };
+    if (Object.keys(dateQuery).length > 0) paymentWhere.payment_date = dateQuery;
+
+    const payments = await FeePayment.findAll({
+      where: paymentWhere,
+      attributes: ['payment_date', 'amount_paid'],
+      raw: true
+    });
+
+    // 2. Expenses
+    const expenseWhere = { institute_id: instituteId, status: 'approved' };
+    if (Object.keys(dateQuery).length > 0) expenseWhere.date = dateQuery;
+
+    const expenses = await Expense.findAll({
+      where: expenseWhere,
+      attributes: ['date', 'amount'],
+      raw: true
+    });
+
+    // 3. Payroll (Payslips where status = paid)
+    const payrollWhere = { institute_id: instituteId, status: 'paid' };
+    if (Object.keys(dateQuery).length > 0) payrollWhere.paid_on = dateQuery;
+
+    const payslips = await Payslip.findAll({
+      where: payrollWhere,
+      attributes: ['paid_on', 'net_salary'],
+      raw: true
+    });
+
+    // Calculate Totals
+    const totalIncome = payments.reduce((sum, p) => sum + parseFloat(p.amount_paid || 0), 0);
+    const totalExpense = expenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
+    const totalPayroll = payslips.reduce((sum, p) => sum + parseFloat(p.net_salary || 0), 0);
+    
+    const grossProfit = totalIncome - totalExpense;
+    const netProfit = grossProfit - totalPayroll;
+
+    // Group by Month-Year (e.g. "2026-05") for trend charts
+    const monthlyData = {};
+
+    const addToMonth = (dateObj, type, amount) => {
+      if (!dateObj) return;
+      const d = new Date(dateObj);
+      if (isNaN(d.getTime())) return;
+      
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (!monthlyData[key]) {
+        monthlyData[key] = { month: key, income: 0, expense: 0, payroll: 0 };
+      }
+      monthlyData[key][type] += parseFloat(amount || 0);
+    };
+
+    payments.forEach(p => addToMonth(p.payment_date, 'income', p.amount_paid));
+    expenses.forEach(e => addToMonth(e.date, 'expense', e.amount));
+    payslips.forEach(p => addToMonth(p.paid_on, 'payroll', p.net_salary));
+
+    // Convert to sorted array
+    const monthlyTrends = Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month));
+
+    return {
+      type: 'profit_loss_report',
+      summary: {
+        total_income: formatCurrency(totalIncome),
+        total_income_raw: totalIncome,
+        total_expense: formatCurrency(totalExpense),
+        total_expense_raw: totalExpense,
+        total_payroll: formatCurrency(totalPayroll),
+        total_payroll_raw: totalPayroll,
+        gross_profit: formatCurrency(grossProfit),
+        gross_profit_raw: grossProfit,
+        net_profit: formatCurrency(netProfit),
+        net_profit_raw: netProfit,
+        is_profitable: netProfit >= 0
+      },
+      monthly_trends: monthlyTrends,
+      timestamp: new Date()
+    };
+  } catch (error) {
+    throw new Error(`Failed to generate profit/loss report: ${error.message}`);
   }
 };
 

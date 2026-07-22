@@ -107,6 +107,15 @@ const Invoice = sequelize.define(
     metadata: {
       type: DataTypes.JSONB,
       defaultValue: {}
+    },
+    
+    created_by: {
+      type: DataTypes.UUID,
+      allowNull: true
+    },
+    updated_by: {
+      type: DataTypes.UUID,
+      allowNull: true
     }
   },
   {

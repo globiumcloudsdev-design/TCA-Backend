@@ -6,69 +6,9 @@
     "auditLog": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\.439098c30cdb2442ec4d6912027d9836468c19db-audit.json",
     "files": [
         {
-            "date": 1777716238526,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-02.log",
-            "hash": "ea85ddff60e4dffb2b319e8be94ab72c71b812a537f20f6efffd1a14388fff6c"
-        },
-        {
-            "date": 1777791172343,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-03.log",
-            "hash": "8839e21f07949b25f6603ec6b4f41eea8ce5c3b0e6bafca76990f8f151c27e01"
-        },
-        {
-            "date": 1777885465157,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-04.log",
-            "hash": "c4dfe57e8b9da6f7cb344273a1e95eb40800eb4679782e4ad4d7fe2a7390f121"
-        },
-        {
-            "date": 1777921223406,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-05.log",
-            "hash": "1bfe55d38fb483c9c97f97755d55804ba4d0cc325015f4b5c1fb99a426067738"
-        },
-        {
-            "date": 1778061011427,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-06.log",
-            "hash": "2cf4538a95fe01b435ad527736b167cc55a9305d249dec6c88199551b6f47d44"
-        },
-        {
-            "date": 1778322359067,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-09.log",
-            "hash": "94d1f7b90b69712c7c7302939b011a805415a43ff36bb3aad75f61a326164329"
-        },
-        {
-            "date": 1778407827093,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-10.log",
-            "hash": "fb57e770c89e05950d7933dced18129ab97c986b7d726495d407fb9844091802"
-        },
-        {
-            "date": 1778439600890,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-11.log",
-            "hash": "ca133ca4f44464a514a8a7df2791412e063d62579e8e1609ac4f22e98ca3eaad"
-        },
-        {
-            "date": 1778526000354,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-12.log",
-            "hash": "d3a867cfa7585490d202b1768cc4098c5298dc1bc32fb7265c67824e8b3985e2"
-        },
-        {
-            "date": 1778612400684,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-13.log",
-            "hash": "c218bc9669695a5537ac365fa47ff827a2bc65855dfae8948a967e28fc21ce18"
-        },
-        {
-            "date": 1778764394933,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-14.log",
-            "hash": "84d31b1d49e72741dd6adb1264852de04c7ec872ecbe652152a66da29eb4a40d"
-        },
-        {
-            "date": 1778785200536,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-15.log",
-            "hash": "a71162520f8dcf2d02b5f863d3686ea9bcf934880687c455f5f4b5568b999270"
-        },
-        {
-            "date": 1778924277698,
-            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-05-16.log",
-            "hash": "9e2903807d15207dde64db86329727973e23b51d9f7c49f486a234c42c527297"
+            "date": 1784618356498,
+            "name": "G:\\E transfer\\Globium Clouds\\The Clouds Academy\\backend\\src\\logs\\combined-2026-07-21.log",
+            "hash": "a0acb6b43617650e1344cafae2f36487ea43f84fa3064f07799b889522b66875"
         }
     ],
     "hashType": "sha256"

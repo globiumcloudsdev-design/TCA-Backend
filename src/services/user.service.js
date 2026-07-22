@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { sendWelcomeEmailWithCredentials } from './email.service.js';
 
 export const createPlatformUser = async (userData, createdBy) => {
-  const { first_name, last_name, email, password, user_type, permissions } = userData;
+  const { first_name, last_name, email, password, user_type, permissions, phone, view_own_data } = userData;
 
   if (!email || !password || !first_name || !last_name) {
     throw new AppError('First name, last name, email, and password are required', 400);
@@ -23,6 +23,7 @@ export const createPlatformUser = async (userData, createdBy) => {
     first_name,
     last_name,
     email,
+    phone,
     password_hash,
     user_type: user_type || 'SUPPORT_STAFF',
     school_id: null, // Platform level user
@@ -30,6 +31,9 @@ export const createPlatformUser = async (userData, createdBy) => {
     permissions: permissions || [],
     created_by: createdBy,
     is_active: true,
+    details: {
+      view_own_data: !!view_own_data
+    }
   });
 
   // Send email asynchronously without awaiting to block response

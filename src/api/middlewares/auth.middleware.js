@@ -81,7 +81,7 @@ export const protect = catchAsync(async (req, res, next) => {
 
   // 4. Check if user is active
   if (!user.is_active) {
-    throw new AppError('Your account has been deactivated. Please contact admin.', 403);
+    throw new AppError('Your account has been deactivated. Please contact admin.', 401);
   }
 
   // 5. Load branch if user has branch_id
@@ -100,11 +100,11 @@ export const protect = catchAsync(async (req, res, next) => {
     const institute = user.institute || await Institute.findByPk(user.school_id);
     
     if (!institute) {
-      throw new AppError('Associated institute not found.', 403);
+      throw new AppError('Associated institute not found.', 401);
     }
     
     if (!institute.is_active) {
-      throw new AppError('Institute is inactive. Please contact support.', 403);
+      throw new AppError('Institute is inactive. Please contact support.', 401);
     }
     
     if (institute.subscription_status === 'expired') {
@@ -358,23 +358,36 @@ export const isResourceOwner = (resourceParam = 'id') => {
   });
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OPTIONAL AUTH (FOR PUBLIC ROUTES)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Optional authentication - doesn't fail if no token
  * User will be attached if token valid, otherwise req.user = null
  */
-export const optionalAuth = catchAsync(async (req, res, next) => {
+export const optionalAuth = async (req, res, next) => {
   try {
-    await protect(req, res, next);
+    let token;
+    if (req.headers.authorization?.startsWith('Bearer ')) {
+      token = req.headers.authorization.split(' ')[1];
+    } else if (req.cookies?.accessToken) {
+      token = req.cookies.accessToken;
+    }
+
+    if (!token) {
+      req.user = null;
+      return next();
+    }
+
+    const decoded = verifyAccessToken(token);
+    const user = await User.findByPk(decoded.userId, {
+      attributes: { exclude: ['password_hash'] }
+    });
+
+    req.user = user || null;
+    next();
   } catch (error) {
-    // Continue without user
     req.user = null;
     next();
   }
-});
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // JWT REFRESH TOKEN VERIFICATION

@@ -9,7 +9,7 @@ import AppError from '../utils/lib/AppError.js';
 
 // ── List / Filter ─────────────────────────────────────────────────────────────
 
-export const getAllPlans = async (query = {}) => {
+export const getAllPlans = async (query = {}, user = null) => {
   const {
     page = 1,
     limit = 20,
@@ -34,6 +34,21 @@ export const getAllPlans = async (query = {}) => {
   if (is_active !== undefined) where.is_active = is_active === 'true' || is_active === true;
   if (is_published !== undefined) where.is_published = is_published === 'true' || is_published === true;
   if (is_popular !== undefined) where.is_popular = is_popular === 'true' || is_popular === true;
+
+  if (user?.details?.view_own_data) {
+    const ownerCondition = {
+      [Op.or]: [
+        { created_by: user.id },
+        { updated_by: user.id }
+      ]
+    };
+    if (where[Op.or]) {
+      where[Op.and] = [{ [Op.or]: where[Op.or] }, ownerCondition];
+      delete where[Op.or];
+    } else {
+      where[Op.and] = [ownerCondition];
+    }
+  }
 
   const offset = (Number(page) - 1) * Number(limit);
 
@@ -79,7 +94,7 @@ export const getPlanById = async (id) => {
 
 // ── Create ────────────────────────────────────────────────────────────────────
 
-export const createPlan = async (data) => {
+export const createPlan = async (data, createdBy = null) => {
   const {
     name, code, description, cycle, price, currency,
     trial_days, limits, is_popular, is_published, is_active,
@@ -106,6 +121,7 @@ export const createPlan = async (data) => {
     default_role_code,
     metadata,
     display_order,
+    created_by: createdBy,
   });
 
   return plan;
@@ -113,7 +129,7 @@ export const createPlan = async (data) => {
 
 // ── Update ────────────────────────────────────────────────────────────────────
 
-export const updatePlan = async (id, data) => {
+export const updatePlan = async (id, data, updatedBy = null) => {
   const plan = await getPlanById(id);
 
   // If code is being changed, check for duplicate
@@ -125,7 +141,10 @@ export const updatePlan = async (id, data) => {
     data.code = data.code.toUpperCase();
   }
 
-  await plan.update(data);
+  const updates = { ...data };
+  if (updatedBy) updates.updated_by = updatedBy;
+
+  await plan.update(updates);
   await plan.reload();
   return plan;
 };
@@ -139,23 +158,29 @@ export const deletePlan = async (id) => {
 
 // ── Toggle helpers ────────────────────────────────────────────────────────────
 
-export const togglePublished = async (id) => {
+export const togglePublished = async (id, updatedBy = null) => {
   const plan = await getPlanById(id);
-  await plan.update({ is_published: !plan.is_published });
+  const updates = { is_published: !plan.is_published };
+  if (updatedBy) updates.updated_by = updatedBy;
+  await plan.update(updates);
   await plan.reload();
   return plan;
 };
 
-export const togglePopular = async (id) => {
+export const togglePopular = async (id, updatedBy = null) => {
   const plan = await getPlanById(id);
-  await plan.update({ is_popular: !plan.is_popular });
+  const updates = { is_popular: !plan.is_popular };
+  if (updatedBy) updates.updated_by = updatedBy;
+  await plan.update(updates);
   await plan.reload();
   return plan;
 };
 
-export const toggleActive = async (id) => {
+export const toggleActive = async (id, updatedBy = null) => {
   const plan = await getPlanById(id);
-  await plan.update({ is_active: !plan.is_active });
+  const updates = { is_active: !plan.is_active };
+  if (updatedBy) updates.updated_by = updatedBy;
+  await plan.update(updates);
   await plan.reload();
   return plan;
 };

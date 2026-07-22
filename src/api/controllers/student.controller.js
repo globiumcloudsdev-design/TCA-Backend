@@ -6,6 +6,7 @@
 import * as studentService from '../../services/student.service.js';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 import { unlink } from 'fs/promises';
+import { v4 as uuidv4 } from 'uuid';
 import models from '../../models/postgres/index.js';
 import { 
   sendSuccess, 
@@ -833,6 +834,106 @@ export const getSingleStudentEligibility = async (req, res) => {
     return sendError(res, error.message || 'Failed to check eligibility', 500);
   }
 };
+
+// ==================== ALUMNI & BEHAVIOR CONTROLLERS ====================
+
+/**
+ * Mark a student as Alumni
+ * PATCH /api/v1/students/:id/alumni
+ */
+export const markAsAlumni = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const instituteId = getInstituteId(req);
+
+    if (!instituteId) {
+      await transaction.rollback();
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    const result = await studentService.markAsAlumni(id, instituteId, { transaction });
+    await transaction.commit();
+    
+    return sendSuccess(res, result, 'Student marked as Alumni successfully');
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Mark as alumni error:', error);
+    if (error.message === 'Student not found') return sendNotFound(res, error.message);
+    return sendError(res, error.message || 'Failed to mark as alumni', 500);
+  }
+};
+
+/**
+ * Restore a student from Alumni
+ * PATCH /api/v1/students/:id/restore-alumni
+ */
+export const restoreAlumni = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const instituteId = getInstituteId(req);
+
+    if (!instituteId) {
+      await transaction.rollback();
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    const result = await studentService.restoreAlumni(id, instituteId, { transaction });
+    await transaction.commit();
+    
+    return sendSuccess(res, result, 'Student restored from Alumni successfully');
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Restore alumni error:', error);
+    if (error.message === 'Student not found') return sendNotFound(res, error.message);
+    return sendError(res, error.message || 'Failed to restore alumni', 500);
+  }
+};
+
+/**
+ * Add a behavioral/discipline record
+ * POST /api/v1/students/:id/behavior
+ */
+export const addBehaviorRecord = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const instituteId = getInstituteId(req);
+    const { type, title, description, points } = req.body;
+
+    if (!instituteId) {
+      await transaction.rollback();
+      return sendError(res, 'Institute ID not found', 400);
+    }
+
+    if (!type || !title) {
+      await transaction.rollback();
+      return sendError(res, 'Type and title are required', 400);
+    }
+
+    const record = {
+      id: uuidv4(),
+      type, // 'merit', 'demerit', 'incident'
+      title,
+      description,
+      points: points || 0,
+      reported_by: req.user.id,
+      date: new Date().toISOString()
+    };
+
+    const result = await studentService.addBehaviorRecord(id, instituteId, record, { transaction });
+    await transaction.commit();
+
+    return sendSuccess(res, result, 'Behavioral record added successfully');
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Add behavior record error:', error);
+    if (error.message === 'Student not found') return sendNotFound(res, error.message);
+    return sendError(res, error.message || 'Failed to add behavior record', 500);
+  }
+};
+
 
 /**
  * Search students by name/email/phone/roll number

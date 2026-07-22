@@ -37,11 +37,21 @@ import userRoutes from './user.routes.js'; // ✅ Import user routes
 import payrollRoutes from './payroll.routes.js'; // ✅ Import payroll routes
 import eventRoutes from './event.routes.js'; // ✅ Import event routes
 import publicRoutes from './public.routes.js'; // ✅ Import public routes
+import supportRoutes from './support.routes.js'; // ✅ Import support routes
+
+import { optionalAuth } from '../../middlewares/auth.middleware.js';
+import { maintenanceGuard } from '../../middlewares/maintenance.middleware.js';
 
 const router = Router();
 
 // ── Public Routes (Landing Page, etc.) ───────────────────────────────────
 router.use('/public', publicRoutes);
+
+// ── Authentication & Maintenance Guard ──────────────────────────────────
+// optionalAuth extracts user from token but doesn't block if missing.
+// This allows maintenanceGuard to bypass Master Admins correctly.
+router.use(optionalAuth);
+router.use(maintenanceGuard);
 
 // ── Core Auth ──────────────────────────────────────────────────────────────
 router.use('/auth', authRoutes);
@@ -135,6 +145,9 @@ router.use('/notifications', notificationRoutes); // ✅ Mount notification rout
 
 // ── User Routes (for admin management of users) ─────────────────────────────────────────────────────────
 router.use('/users', userRoutes); // ✅ Mount user routes
+
+// ── Support Tickets (Institute) ─────────────────────────────────────────────────────────
+router.use('/support', supportRoutes); // ✅ Mount support routes
 
 // ── Payroll Routes ─────────────────────────────────────────────────────────
 router.use('/payroll', payrollRoutes); // ✅ Mount payroll routes

@@ -39,17 +39,38 @@ import {
   getInstituteTeachers,
   getInstituteParents,
   getInstituteStaff,
+  getInstituteAllUsers,
   deleteInvoice,
   bulkDeleteInvoices,
   getMasterAdminReports,
-  restoreInstitute
+  restoreInstitute,
+  createManualInvoice
 } from '../../controllers/institute.controller.js';
-import { addPlatformUser, getAllUsers, updatePlatformUser, togglePlatformUserStatus, changePlatformUserPassword } from '../../controllers/user.controller.js';
+import {
+  getAnnouncements,
+  createAnnouncement,
+  updateAnnouncement,
+  deleteAnnouncement
+} from '../../controllers/announcement.controller.js';
+import { impersonateUser } from '../../controllers/auth.controller.js';
+import { addPlatformUser, getAllUsers, updatePlatformUser, togglePlatformUserStatus, changePlatformUserPassword, deletePlatformUser } from '../../controllers/user.controller.js';
+import { getGlobalSettings, updateGlobalSetting } from '../../controllers/platform.controller.js';
+import { websiteCmsController } from '../../controllers/websiteCms.controller.js';
+import { getAuditLogs } from '../../controllers/auditLog.controller.js';
+import { getHealthStats } from '../../controllers/systemHealth.controller.js';
+import { masterAdminSupportController } from '../../controllers/masterAdminSupport.controller.js';
 
 const router = Router();
 
 // ── All routes require Master Admin ─────────────────────────────────────────
 router.use(protect, isMasterAdmin);
+
+// =============================================================================
+// GLOBAL AUDIT LOGS
+// =============================================================================
+
+// GET /master-admin/audit-logs
+router.get('/audit-logs', hasPermission('global.view_audit_logs'), getAuditLogs);
 
 // =============================================================================
 // LOOKUP TABLES (for dropdowns)
@@ -137,6 +158,9 @@ router.get('/institutes/:id/parents', hasPermission('institute.read'), getInstit
 // GET /master-admin/institutes/:id/staff
 router.get('/institutes/:id/staff', hasPermission('institute.read'), getInstituteStaff);
 
+// GET /master-admin/institutes/:id/all-users (Ghost Mode)
+router.get('/institutes/:id/all-users', hasPermission('institute.read'), getInstituteAllUsers);
+
 // =============================================================================
 // INVOICE ROUTES
 // =============================================================================
@@ -149,6 +173,9 @@ router.get('/invoices', hasPermission('subscription.read'), getAllInvoices);
 
 // GET /master-admin/institutes/:id/invoices
 router.get('/institutes/:id/invoices', hasPermission('subscription.read'), getInstituteInvoices);
+
+// POST /master-admin/institutes/:id/invoices/manual
+router.post('/institutes/:id/invoices/manual', hasPermission('subscription.create'), createManualInvoice);
 
 // POST /master-admin/invoices/:id/mark-paid
 router.post('/invoices/:id/mark-paid', hasPermission('subscription.update'), markInvoicePaid);
@@ -206,6 +233,28 @@ router.get('/roles', hasPermission('platform_role.read'), catchAsync(async (req,
   const where = { school_id: null };
   if (search) where.name = { [Op.iLike]: `%${search}%` };
 
+  // Filter if view_own_data is enabled
+  if (req.user?.details?.view_own_data) {
+    where[Op.or] = [
+      ...(where[Op.or] ? [where[Op.or]] : []),
+      { created_by: req.user.id },
+      { updated_by: req.user.id }
+    ];
+    // Convert to proper Op.and if search is present to avoid overriding
+    const ownerCondition = {
+      [Op.or]: [
+        { created_by: req.user.id },
+        { updated_by: req.user.id }
+      ]
+    };
+    if (where.name) {
+      where[Op.and] = [{ name: where.name }, ownerCondition];
+      delete where.name;
+    } else {
+      where[Op.and] = [ownerCondition];
+    }
+  }
+
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const { count, rows } = await Role.findAndCountAll({
     where,
@@ -247,6 +296,7 @@ router.post('/roles', hasPermission('platform_role.create'), catchAsync(async (r
     is_template: true,
     is_active: true,
     created_by: req.user?.id ?? null,
+    updated_by: req.user?.id ?? null,
   });
 
   sendCreated(res, role, 'Role created successfully');
@@ -267,6 +317,7 @@ router.put('/roles/:id', hasPermission('platform_role.update'), catchAsync(async
       ? { instituteAdmin: permissions }
       : permissions;
   }
+  updates.updated_by = req.user?.id ?? null;
 
   await role.update(updates);
   sendSuccess(res, await role.reload(), 'Role updated');
@@ -299,5 +350,39 @@ router.patch('/users/:id/status', hasPermission('platform_user.update'), catchAs
 
 // POST /master-admin/users/:id/change-password – change user password
 router.post('/users/:id/change-password', hasPermission('platform_user.update'), catchAsync(changePlatformUserPassword));
+
+// DELETE /master-admin/users/:id – delete platform user
+router.delete('/users/:id', hasPermission('platform_user.delete'), catchAsync(deletePlatformUser));
+
+// GET /master-admin/ghost-mode/login
+router.post('/ghost-mode/login', hasPermission('global.impersonation'), impersonateUser);
+
+// =============================================================================
+// GLOBAL ANNOUNCEMENTS
+// =============================================================================
+router.get('/announcements', hasPermission('notification.broadcast'), getAnnouncements);
+router.post('/announcements', hasPermission('notification.broadcast'), createAnnouncement);
+router.put('/announcements/:id', hasPermission('notification.broadcast'), updateAnnouncement);
+router.delete('/announcements/:id', hasPermission('notification.broadcast'), deleteAnnouncement);
+
+// ── Platform Global Settings ───────────────────────────────────────────────
+router.get('/settings', hasPermission('platform.settings'), getGlobalSettings);
+router.post('/settings', hasPermission('platform.settings'), updateGlobalSetting);
+router.get('/system-health', hasPermission('platform.settings'), getHealthStats);
+
+// ── Support Tickets (Master Admin) ───────────────────────────────────────────────
+router.get('/support/tickets', hasPermission('platform.settings'), masterAdminSupportController.getAllTickets);
+router.get('/support/tickets/:id', hasPermission('platform.settings'), masterAdminSupportController.getTicketDetails);
+router.patch('/support/tickets/:id/status', hasPermission('platform.settings'), masterAdminSupportController.updateTicketStatus);
+router.post('/support/tickets/:id/reply', hasPermission('platform.settings'), masterAdminSupportController.addReply);
+
+// ── Database Backup ───────────────────────────────────────────────
+import { triggerBackup } from '../../controllers/backup.controller.js';
+router.post('/backup/trigger', hasPermission('platform.settings'), triggerBackup);
+
+// ── Website CMS Configuration ───────────────────────────────────────────────
+router.get('/website-cms', websiteCmsController.getSettings);
+router.post('/website-cms', websiteCmsController.updateSettings);
+router.post('/website-cms/upload', upload.single('image'), websiteCmsController.uploadImage);
 
 export default router;

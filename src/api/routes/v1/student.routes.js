@@ -121,4 +121,33 @@ router.post(
   studentController.bulkPromoteStudents
 );
 
+// ==================== ALUMNI & BEHAVIOR ====================
+
+/**
+ * PATCH - Mark a student as Alumni
+ */
+router.patch(
+  '/:id/alumni',
+  hasPermission('students.update'),
+  studentController.markAsAlumni
+);
+
+/**
+ * POST - Add a behavioral/discipline record
+ */
+router.post(
+  '/:id/behavior',
+  hasPermission('students.update'),
+  studentController.addBehaviorRecord
+);
+
+/**
+ * PATCH - Restore a student from Alumni
+ */
+router.patch(
+  '/:id/restore-alumni',
+  hasPermission('students.update'),
+  studentController.restoreAlumni
+);
+
 export default router;

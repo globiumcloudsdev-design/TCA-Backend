@@ -61,6 +61,11 @@ const Role = sequelize.define(
       allowNull: true,
       comment: 'User UUID who created this role (NULL for seeded platform roles)',
     },
+    updated_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'User UUID who last updated this role',
+    },
   },
   {
     tableName: 'roles',

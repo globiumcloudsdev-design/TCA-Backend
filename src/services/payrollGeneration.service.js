@@ -245,13 +245,11 @@ export async function generatePayroll(instituteId, userId, options) {
   }
 
   const result = { total: staffList.length, generated: 0, skipped: 0, failed: 0, errors: [] };
-  const transaction = await sequelize.transaction();
 
   try {
     for (const staff of staffList) {
       const existing = await Payslip.findOne({
         where: { staff_id: staff.id, month, year },
-        transaction,
       });
       if (existing) {
         result.skipped++;
@@ -283,7 +281,7 @@ export async function generatePayroll(instituteId, userId, options) {
         
         logger.info(`📝 Creating payslip for ${staff.first_name} ${staff.last_name}: net_salary=${payslipData.net_salary}`);
         
-        await Payslip.create(payslipData, { transaction });
+        await Payslip.create(payslipData);
         result.generated++;
         
         // Send notification to staff (outside transaction to avoid rollback)
@@ -294,9 +292,7 @@ export async function generatePayroll(instituteId, userId, options) {
         logger.error(`Payroll generation failed for ${staff.id}: ${err.message}`);
       }
     }
-    await transaction.commit();
   } catch (err) {
-    await transaction.rollback();
     throw err;
   }
   return result;

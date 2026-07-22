@@ -38,6 +38,10 @@ import StaffAttendance from './StaffAttendance.model.js';
 import InstituteSettings from "./InstituteSettings.model.js";
 import Payslip from "./Payslip.model.js";
 import Event from "./Event.model.js";
+import GlobalAnnouncement from "./GlobalAnnouncement.model.js";
+import GlobalSetting from "./GlobalSetting.model.js";
+import WebsiteCms from "./WebsiteCms.model.js";
+import SupportTicket from "./SupportTicket.model.js";
 
 const models = {
   sequelize,
@@ -76,6 +80,10 @@ const models = {
   InstituteSettings,
   Payslip,
   Event,
+  GlobalAnnouncement,
+  GlobalSetting,
+  WebsiteCms,
+  SupportTicket,
 };
 
 // Run associations — deduplicate so alias School: Institute doesn't call associate twice

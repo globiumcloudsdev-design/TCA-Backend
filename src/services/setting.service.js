@@ -49,7 +49,8 @@ export const getSettings = async (instituteId) => {
             email: institute.institute_email,
             phone: institute.institute_contact,
             logo_url: institute.institute_logo_url,
-            logo_public_id: institute.institute_logo_public_id
+            logo_public_id: institute.institute_logo_public_id,
+            settings: institute.settings
         }
     };
 

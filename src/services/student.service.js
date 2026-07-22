@@ -18,7 +18,7 @@ import { parse } from 'date-fns';
 import { deleteFromCloudinary } from "../config/cloudinary.js";
 
 const { User, Role, Institute, Class, Section, AcademicYear } = models;
-const { ExamResult, StudentAttendance, FeeVoucher, LeaveRequest, Exam } = models;
+const { ExamResult, StudentAttendance, FeeVoucher, LeaveRequest, Exam, Assignment, AssignmentSubmission } = models;
 
 /**
  * Robust date parser for imports
@@ -464,6 +464,117 @@ export const createStudent = async (data, options = {}) => {
     throw error;
   }
 };
+
+// ==================== ALUMNI & BEHAVIOR ====================
+
+/**
+ * Mark a student as Alumni
+ */
+export const markAsAlumni = async (studentId, instituteId, options = {}) => {
+  const { transaction } = options;
+
+  const user = await User.findOne({
+    where: { id: studentId, school_id: instituteId, user_type: "STUDENT" },
+    transaction
+  });
+
+  if (!user) {
+    throw new Error("Student not found");
+  }
+
+  // Set active to false
+  user.is_active = false;
+
+  // Update details JSON
+  const details = user.details || {};
+  if (!details.studentDetails) details.studentDetails = {};
+
+  details.studentDetails.is_alumni = true;
+  details.studentDetails.leaving_date = new Date().toISOString();
+  
+  // Also close active academic session
+  if (Array.isArray(details.studentDetails.academicSessions)) {
+    details.studentDetails.academicSessions.forEach(session => {
+      if (session.status === 'active') {
+        session.status = 'completed';
+        session.end_date = new Date().toISOString();
+      }
+    });
+  }
+
+  user.details = details;
+  // Trigger Sequelize JSON update
+  user.changed('details', true);
+
+  await user.save({ transaction });
+
+  return { id: user.id, is_active: false, is_alumni: true };
+};
+
+/**
+ * Restore a student from Alumni
+ */
+export const restoreAlumni = async (studentId, instituteId, options = {}) => {
+  const { transaction } = options;
+
+  const user = await User.findOne({
+    where: { id: studentId, school_id: instituteId, user_type: "STUDENT" },
+    transaction
+  });
+
+  if (!user) {
+    throw new Error("Student not found");
+  }
+
+  // Set active to true
+  user.is_active = true;
+
+  // Update details JSON
+  const details = user.details || {};
+  if (!details.studentDetails) details.studentDetails = {};
+
+  details.studentDetails.is_alumni = false;
+  details.studentDetails.leaving_date = null;
+  
+  user.details = details;
+  user.changed('details', true);
+
+  await user.save({ transaction });
+
+  return { id: user.id, is_active: true, is_alumni: false };
+};
+
+/**
+ * Add a behavioral/discipline record
+ */
+export const addBehaviorRecord = async (studentId, instituteId, record, options = {}) => {
+  const { transaction } = options;
+
+  const user = await User.findOne({
+    where: { id: studentId, school_id: instituteId, user_type: "STUDENT" },
+    transaction
+  });
+
+  if (!user) {
+    throw new Error("Student not found");
+  }
+
+  const details = user.details || {};
+  if (!details.studentDetails) details.studentDetails = {};
+  if (!Array.isArray(details.studentDetails.behaviorLog)) {
+    details.studentDetails.behaviorLog = [];
+  }
+
+  details.studentDetails.behaviorLog.unshift(record);
+
+  user.details = details;
+  user.changed('details', true);
+
+  await user.save({ transaction });
+
+  return record;
+};
+
 /**
  * Resolve Class and Section names for a list of students
  */
@@ -683,6 +794,25 @@ export const getStudentById = async (id, instituteId) => {
         ...session,
         academic_year_name: yearMap.get(session.academic_year_id) || session.academic_year_id
       }));
+    }
+  }
+
+  // Fetch Assignment Submissions separately and append to student data
+  if (AssignmentSubmission && Assignment) {
+    try {
+      const submissions = await AssignmentSubmission.findAll({
+        where: { student_id: id },
+        include: [{
+          model: Assignment,
+          as: 'assignment',
+          attributes: ['id', 'title', 'subject', 'due_date', 'total_marks', 'academic_year_id']
+        }],
+        order: [['created_at', 'DESC']]
+      });
+      student.dataValues.assignmentSubmissions = submissions;
+    } catch (err) {
+      console.warn('Failed to fetch assignment submissions for student', err.message);
+      student.dataValues.assignmentSubmissions = [];
     }
   }
 

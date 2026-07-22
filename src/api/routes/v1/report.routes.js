@@ -119,6 +119,16 @@ router.get(
   reportController.getAnalyticsReport
 );
 
+/**
+ * GET /api/v1/reports/profit-loss
+ * Generate profit and loss report (Income, Expenses, Payroll)
+ */
+router.get(
+  '/profit-loss',
+  // hasPermission('reports.profit_loss'),
+  reportController.getProfitLossReport
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EXPORT FUNCTIONALITY
 // ─────────────────────────────────────────────────────────────────────────────

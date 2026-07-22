@@ -71,7 +71,7 @@ export const autoMarkAbsent = async (schoolId = null, date = null) => {
   const schools = await models.Institute.findAll({ where: schoolWhere });
 
   for (const school of schools) {
-    console.log(`Processing school: ${school.name} (${school.id})`);
+    console.log(`Processing school: ${school.institute_name} (${school.id})`);
 
     // 2. Get all active students with their active academic session details
     const students = await User.findAll({
@@ -84,7 +84,7 @@ export const autoMarkAbsent = async (schoolId = null, date = null) => {
     });
 
     if (students.length === 0) {
-      console.log(`No active students for ${school.name}`);
+      console.log(`No active students for ${school.institute_name}`);
       continue;
     }
 
@@ -152,7 +152,7 @@ export const autoMarkAbsent = async (schoolId = null, date = null) => {
 
     if (studentsToMark.length === 0) {
       console.log(
-        `✅ No students to mark absent for ${school.name} on ${targetDate}`,
+        `✅ No students to mark absent for ${school.institute_name} on ${targetDate}`,
       );
       continue;
     }
@@ -178,11 +178,11 @@ export const autoMarkAbsent = async (schoolId = null, date = null) => {
         ignoreDuplicates: true,
       });
       console.log(
-        `✅ Marked ${absentRecords.length} students absent for school ${school.name} on ${targetDate}`,
+        `✅ Marked ${absentRecords.length} students absent for school ${school.institute_name} on ${targetDate}`,
       );
     } catch (error) {
       console.error(
-        `❌ Error marking absent for school ${school.name}:`,
+        `❌ Error marking absent for school ${school.institute_name}:`,
         error,
       );
     }

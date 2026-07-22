@@ -59,7 +59,6 @@ const Exam = sequelize.define(
     },
     code: {
       type: DataTypes.STRING(50),
-      unique: true,
       allowNull: true
     },
     description: {
@@ -234,7 +233,9 @@ const Exam = sequelize.define(
       // Composite indexes for common queries
       { fields: ['school_id', 'class_id'] },
       { fields: ['school_id', 'status'] },
-      { fields: ['class_id', 'status'] }
+      { fields: ['class_id', 'status'] },
+      // Scoped unique constraint for exam code
+      { fields: ['school_id', 'code'], unique: true, name: 'exams_school_code_unique' }
     ],
     
     hooks: {

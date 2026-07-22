@@ -9,7 +9,7 @@ const AuditLog = sequelize.define(
   'AuditLog',
   {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    school_id: { type: DataTypes.UUID },
+    institute_id: { type: DataTypes.UUID },
     branch_id: {
       type: DataTypes.UUID,
       allowNull: true,
@@ -18,7 +18,7 @@ const AuditLog = sequelize.define(
     user_id: { type: DataTypes.UUID },
     action: { type: DataTypes.STRING(100), allowNull: false },
     entity: { type: DataTypes.STRING(100) },
-    entity_id: { type: DataTypes.UUID },
+    entity_id: { type: DataTypes.STRING(255) },
     old_values: { type: DataTypes.JSONB },
     new_values: { type: DataTypes.JSONB },
     ip_address: { type: DataTypes.STRING(50) },

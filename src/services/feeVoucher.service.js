@@ -218,12 +218,51 @@ export const generateSingleVoucher = async (
         studentDetails.concession_amount
     );
 
-    // Get previous balance from unpaid/partial fees (pass current year)
-    const previousBalance = await getPreviousBalance(studentId, instituteId, resolvedFeeType, year);
+    // Calculate and soft-delete/archive previous unpaid vouchers to transfer outstanding balance
+    let previousBalance = 0;
+    let previousVouchersInfo = [];
+    
+    // Find all active unpaid or partially paid vouchers for this student and fee type
+    const previousVouchers = await FeeVoucher.findAll({
+      where: {
+        student_id: studentId,
+        institute_id: instituteId,
+        fee_type: resolvedFeeType,
+        year,
+        status: { [Op.in]: ['pending', 'partial', 'overdue'] },
+        archived: false,
+      },
+      order: [['issued_date', 'ASC']],
+      transaction
+    });
 
-    // Get institute code
-    const institute = await Institute.findByPk(instituteId, { transaction });
-    const instituteCode = institute?.code || 'TCA';
+    for (const prevVoucher of previousVouchers) {
+      // Get sum of payments for this prevVoucher
+      const payments = await sequelize.models.FeePayment.findAll({
+        where: { voucher_id: prevVoucher.id },
+        transaction
+      });
+      const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount_paid), 0);
+      const remaining = Math.max(parseFloat(prevVoucher.net_amount) - totalPaid, 0);
+      
+      if (remaining > 0) {
+        previousBalance += remaining;
+        previousVouchersInfo.push({
+          id: prevVoucher.id,
+          voucher_number: prevVoucher.voucher_number,
+          remaining: remaining
+        });
+
+        // Archive/soft-delete previous voucher to avoid duplicate active billing
+        await prevVoucher.update({
+          archived: true,
+          notes: (prevVoucher.notes || '') + `\n⚠️ [ARCHIVED] Carried forward into new voucher. Outstanding balance of PKR ${remaining.toFixed(2)} transferred.`
+        }, { transaction });
+      }
+    }
+
+    // Get institute code (optimized to avoid N+1 query)
+    const instituteCode = options.instituteCode || (await Institute.findByPk(instituteId, { transaction }))?.code || 'TCA';
 
     // Generate voucher number
     const voucherNumber = await generateVoucherNumber(
@@ -237,27 +276,11 @@ export const generateSingleVoucher = async (
 
     // Get details about previous unpaid fees if any
     let previousFeesInfo = '';
-    if (previousBalance > 0) {
-        const previousVouchers = await FeeVoucher.findAll({
-            where: {
-                student_id: studentId,
-                institute_id: instituteId,
-                fee_type: resolvedFeeType,
-                year,
-                status: { [Op.in]: ['pending', 'partial', 'overdue'] },
-                archived: false,
-            },
-            order: [['month', 'ASC']],
-            attributes: ['month', 'net_amount', 'status'],
-        });
-        
-        if (previousVouchers.length > 0) {
-            const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const previousFeesDetails = previousVouchers
-                .map(v => `${months[v.month]} (PKR ${Number(v.net_amount || 0).toFixed(2)}, ${v.status})`)
-                .join(', ');
-            previousFeesInfo = `\nPending from previous months: ${previousFeesDetails}`;
-        }
+    if (previousVouchersInfo.length > 0) {
+        const details = previousVouchersInfo
+            .map(v => `#[${v.voucher_number}] (PKR ${v.remaining.toFixed(2)})`)
+            .join(', ');
+        previousFeesInfo = `\n⚠️ CARRIED FORWARD FROM ARCHIVED UNPAID VOUCHER(S): ${details}`;
     }
 
     const notes = `
@@ -305,80 +328,146 @@ Total Amount Due: PKR ${netAmount.toFixed(2)}
     );
 
     // Send notifications
-    try {
-        
-        const notificationTitle = `💵 ${resolvedFeeType.toUpperCase()} Fee Voucher Generated`;
-        const notificationBody = `Voucher #${voucher.voucher_number} for ${resolvedFeeType} fee has been generated. Amount: PKR ${netAmount.toFixed(2)}`;
+    if (options.isBulk) {
+        setImmediate(async () => {
+            try {
+                const notificationTitle = `💵 ${resolvedFeeType.toUpperCase()} Fee Voucher Generated`;
+                const notificationBody = `Voucher #${voucher.voucher_number} for ${resolvedFeeType} fee has been generated. Amount: PKR ${netAmount.toFixed(2)}`;
 
-        // Notify student
-        await createNotification({
-            institute_id: instituteId,
-            user_id: studentId,
-            title: notificationTitle,
-            body: notificationBody,
-            type: 'fee',
-            channel: 'in_app',
-            data: {
-                voucherId: voucher.id,
-                voucherNumber: voucher.voucher_number,
-                feeType: resolvedFeeType,
-                amount: netAmount
+                // Notify student
+                await createNotification({
+                    institute_id: instituteId,
+                    user_id: studentId,
+                    title: notificationTitle,
+                    body: notificationBody,
+                    type: 'fee',
+                    channel: 'in_app',
+                    data: {
+                        voucherId: voucher.id,
+                        voucherNumber: voucher.voucher_number,
+                        feeType: resolvedFeeType,
+                        amount: netAmount
+                    }
+                }, true);
+
+                // Notify linked parents
+                const parents = options.allParents || [];
+                const linkedParents = parents.filter((parent) => {
+                    const studentIds = parent.details?.parentDetails?.student_ids || [];
+                    return Array.isArray(studentIds) && studentIds.includes(studentId);
+                });
+
+                for (const parent of linkedParents) {
+                    await createNotification({
+                        institute_id: instituteId,
+                        user_id: parent.id,
+                        title: notificationTitle,
+                        body: `${student.first_name}'s ${notificationBody}`,
+                        type: 'fee',
+                        channel: 'in_app',
+                        data: {
+                            voucherId: voucher.id,
+                            studentId,
+                            studentName: `${student.first_name} ${student.last_name}`
+                        }
+                    }, true);
+                }
+
+                // Notify institute admins
+                await broadcastNotification({
+                    institute_id: instituteId,
+                    recipient_type: 'ALL_ADMINS',
+                    title: `💵 Fee Voucher Generated: ${student.first_name} ${student.last_name}`,
+                    body: `${resolvedFeeType.toUpperCase()} voucher #${voucher.voucher_number} generated. Amount: PKR ${netAmount.toFixed(2)}`,
+                    type: 'fee',
+                    channel: 'in_app',
+                    data: {
+                        voucherId: voucher.id,
+                        studentId,
+                        studentName: `${student.first_name} ${student.last_name}`,
+                        feeType: resolvedFeeType,
+                        amount: netAmount,
+                        voucherNumber: voucher.voucher_number
+                    }
+                }, true);
+            } catch (error) {
+                logger.error(`Failed to send bulk voucher background notification: ${error.message}`);
             }
-        }, true);
-
-        // Notify linked parents
-        const { User: UserModel } = sequelize.models;
-        const parents = await UserModel.findAll({
-            where: {
-                school_id: instituteId,
-                user_type: 'PARENT',
-                is_active: true
-            },
-            transaction
         });
+    } else {
+        try {
+            const notificationTitle = `💵 ${resolvedFeeType.toUpperCase()} Fee Voucher Generated`;
+            const notificationBody = `Voucher #${voucher.voucher_number} for ${resolvedFeeType} fee has been generated. Amount: PKR ${netAmount.toFixed(2)}`;
 
-        const linkedParents = parents.filter((parent) => {
-            const studentIds = parent.details?.parentDetails?.student_ids || [];
-            return Array.isArray(studentIds) && studentIds.includes(studentId);
-        });
-
-        for (const parent of linkedParents) {
+            // Notify student
             await createNotification({
                 institute_id: instituteId,
-                user_id: parent.id,
+                user_id: studentId,
                 title: notificationTitle,
-                body: `${student.first_name}'s ${notificationBody}`,
+                body: notificationBody,
+                type: 'fee',
+                channel: 'in_app',
+                data: {
+                    voucherId: voucher.id,
+                    voucherNumber: voucher.voucher_number,
+                    feeType: resolvedFeeType,
+                    amount: netAmount
+                }
+            }, true);
+
+            // Notify linked parents (preloaded option used if present to optimize DB)
+            const { User: UserModel } = sequelize.models;
+            const parents = options.allParents || await UserModel.findAll({
+                where: {
+                    school_id: instituteId,
+                    user_type: 'PARENT',
+                    is_active: true
+                },
+                transaction
+            });
+
+            const linkedParents = parents.filter((parent) => {
+                const studentIds = parent.details?.parentDetails?.student_ids || [];
+                return Array.isArray(studentIds) && studentIds.includes(studentId);
+            });
+
+            for (const parent of linkedParents) {
+                await createNotification({
+                    institute_id: instituteId,
+                    user_id: parent.id,
+                    title: notificationTitle,
+                    body: `${student.first_name}'s ${notificationBody}`,
+                    type: 'fee',
+                    channel: 'in_app',
+                    data: {
+                        voucherId: voucher.id,
+                        studentId,
+                        studentName: `${student.first_name} ${student.last_name}`
+                    }
+                }, true);
+            }
+
+            // Notify institute admins (matching attendance notification pattern)
+            await broadcastNotification({
+                institute_id: instituteId,
+                recipient_type: 'ALL_ADMINS',
+                title: `💵 Fee Voucher Generated: ${student.first_name} ${student.last_name}`,
+                body: `${resolvedFeeType.toUpperCase()} voucher #${voucher.voucher_number} generated. Amount: PKR ${netAmount.toFixed(2)}`,
                 type: 'fee',
                 channel: 'in_app',
                 data: {
                     voucherId: voucher.id,
                     studentId,
-                    studentName: `${student.first_name} ${student.last_name}`
+                    studentName: `${student.first_name} ${student.last_name}`,
+                    feeType: resolvedFeeType,
+                    amount: netAmount,
+                    voucherNumber: voucher.voucher_number
                 }
             }, true);
+
+        } catch (error) {
+            logger.error(`Failed to send voucher notification: ${error.message}`);
         }
-
-        // Notify institute admins (matching attendance notification pattern)
-        await broadcastNotification({
-            institute_id: instituteId,
-            recipient_type: 'ALL_ADMINS',
-            title: `💵 Fee Voucher Generated: ${student.first_name} ${student.last_name}`,
-            body: `${resolvedFeeType.toUpperCase()} voucher #${voucher.voucher_number} generated. Amount: PKR ${netAmount.toFixed(2)}`,
-            type: 'fee',
-            channel: 'in_app',
-        data: {
-                voucherId: voucher.id,
-                studentId,
-                studentName: `${student.first_name} ${student.last_name}`,
-                feeType: resolvedFeeType,
-                amount: netAmount,
-                voucherNumber: voucher.voucher_number
-            }
-        }, true);
-
-    } catch (error) {
-        logger.error(`Failed to send voucher notification: ${error.message}`);
-        // Don't throw - voucher creation succeeded
     }
 
     return voucher;
@@ -399,6 +488,20 @@ export const generateVouchersForClass = async (
     
     // Use feeType (singular) or feeTypes (plural/array) - support both for backward compatibility
     const feesToGenerate = Array.isArray(feeTypes) ? feeTypes : [feeType];
+
+    // Preload institute code & all parents once to completely optimize N+1 queries
+    const institute = await Institute.findByPk(instituteId, { transaction });
+    const instituteCode = institute?.code || 'TCA';
+
+    const { User: UserModel } = sequelize.models;
+    const allParents = await UserModel.findAll({
+        where: {
+            school_id: instituteId,
+            user_type: 'PARENT',
+            is_active: true
+        },
+        transaction
+    });
 
     // Get all active students in this class
     const students = await User.findAll({
@@ -432,7 +535,16 @@ export const generateVouchersForClass = async (
                     month,
                     year,
                     createdBy,
-                    { transaction, dueDate, academicYearId, feeType: feeTypeItem, feeTemplateId }
+                    { 
+                        transaction, 
+                        dueDate, 
+                        academicYearId, 
+                        feeType: feeTypeItem, 
+                        feeTemplateId,
+                        instituteCode,
+                        allParents,
+                        isBulk: true
+                    }
                 );
                 vouchers.push(voucher);
             } catch (error) {
@@ -473,6 +585,20 @@ export const generateVouchersForInstitute = async (
     // Use feeType (singular) or feeTypes (plural/array) - support both for backward compatibility
     const feesToGenerate = Array.isArray(feeTypes) ? feeTypes : [feeType];
 
+    // Preload institute code & all parents once to completely optimize N+1 queries
+    const institute = await Institute.findByPk(instituteId, { transaction });
+    const instituteCode = institute?.code || 'TCA';
+
+    const { User: UserModel } = sequelize.models;
+    const allParents = await UserModel.findAll({
+        where: {
+            school_id: instituteId,
+            user_type: 'PARENT',
+            is_active: true
+        },
+        transaction
+    });
+
     // Get all active students in institute
     const students = await User.findAll({
         where: {
@@ -499,7 +625,16 @@ export const generateVouchersForInstitute = async (
                     month,
                     year,
                     createdBy,
-                    { transaction, dueDate, academicYearId, feeType: feeTypeItem, feeTemplateId }
+                    { 
+                        transaction, 
+                        dueDate, 
+                        academicYearId, 
+                        feeType: feeTypeItem, 
+                        feeTemplateId,
+                        instituteCode,
+                        allParents,
+                        isBulk: true
+                    }
                 );
                 vouchers.push(voucher);
             } catch (error) {
@@ -1026,6 +1161,275 @@ export const getPaymentSummary = async (feeTypeId, instituteId, filters = {}, op
     return summary;
 };
 
+/**
+ * Bulk delete vouchers (soft delete via archived flag)
+ */
+export const bulkDeleteVouchers = async (voucherIds, instituteId, options = {}) => {
+    const { transaction } = options;
+
+    if (!Array.isArray(voucherIds) || voucherIds.length === 0) {
+        throw new AppError('No voucher IDs provided', 400);
+    }
+
+    const vouchers = await FeeVoucher.findAll({
+        where: {
+            id: { [Op.in]: voucherIds },
+            institute_id: instituteId
+        },
+        transaction
+    });
+
+    const undeletable = vouchers.filter(v => v.status === 'paid');
+    if (undeletable.length > 0) {
+        throw new AppError(`Cannot delete paid vouchers: ${undeletable.map(v => v.voucher_number).join(', ')}`, 400);
+    }
+
+    await FeeVoucher.update(
+        { archived: true },
+        {
+            where: {
+                id: { [Op.in]: voucherIds },
+                institute_id: instituteId,
+                status: { [Op.ne]: 'paid' }
+            },
+            transaction
+        }
+    );
+
+    return { deletedCount: vouchers.length };
+};
+
+export const getFeeVouchersStats = async (instituteId, filters = {}) => {
+    const where = { 
+        institute_id: instituteId,
+        archived: false
+    };
+    if (filters.month) where.month = parseInt(filters.month);
+    if (filters.year) where.year = parseInt(filters.year);
+    if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
+
+    const vouchers = await FeeVoucher.findAll({
+        where,
+        attributes: ['id', 'net_amount', 'status'],
+        include: [
+            {
+                model: User,
+                as: 'Student',
+                attributes: ['id', 'details']
+            },
+            {
+                model: FeePayment,
+                as: 'payments',
+                attributes: ['amount_paid']
+            }
+        ]
+    });
+
+    let totalVouchers = vouchers.length;
+    let paidVouchersCount = 0;
+    let pendingVouchersCount = 0;
+    let totalInvoiced = 0;
+    let totalCollected = 0;
+
+    const classwiseMap = {};
+
+    vouchers.forEach(v => {
+        const net = Number(v.net_amount || v.amount || 0);
+        totalInvoiced += net;
+        
+        const payments = Array.isArray(v.payments) ? v.payments : [];
+        const paidForThis = payments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+        totalCollected += paidForThis;
+
+        if (v.status === 'paid') {
+            paidVouchersCount++;
+        } else {
+            pendingVouchersCount++;
+        }
+
+        // Classwise collection map
+        const className = v.Student?.details?.studentDetails?.class_name || v.Student?.details?.class_name || 'Unassigned';
+        if (!classwiseMap[className]) {
+            classwiseMap[className] = {
+                className,
+                invoiced: 0,
+                collected: 0
+            };
+        }
+        classwiseMap[className].invoiced += net;
+        classwiseMap[className].collected += paidForThis;
+    });
+
+    const classwiseRecovery = Object.values(classwiseMap).map(c => {
+        const rate = c.invoiced > 0 ? Math.round((c.collected / c.invoiced) * 100) : 0;
+        return {
+            className: c.className,
+            invoiced: c.invoiced,
+            collected: c.collected,
+            recoveryRate: rate
+        };
+    }).sort((a, b) => b.recoveryRate - a.recoveryRate);
+
+    const pendingAmount = Math.max(totalInvoiced - totalCollected, 0);
+
+    return {
+        total: totalVouchers,
+        pending: pendingVouchersCount,
+        paid: paidVouchersCount,
+        totalAmount: totalInvoiced,
+        collectedAmount: totalCollected,
+        pendingAmount: pendingAmount,
+        classwiseRecovery
+    };
+};
+
+/**
+ * Get list of fee defaulters with >= 2 unpaid months
+ */
+export const getFeeDefaulters = async (instituteId) => {
+    const vouchers = await FeeVoucher.findAll({
+        where: {
+            institute_id: instituteId,
+            archived: false,
+            status: { [Op.in]: ['pending', 'overdue', 'partial'] }
+        },
+        include: [
+            {
+                model: User,
+                as: 'Student',
+                attributes: ['id', 'first_name', 'last_name', 'registration_no', 'email', 'details']
+            },
+            {
+                model: FeePayment,
+                as: 'payments',
+                attributes: ['amount_paid']
+            }
+        ]
+    });
+
+    const studentMap = {};
+    vouchers.forEach(v => {
+        const student = v.Student;
+        if (!student) return;
+
+        const studentId = student.id;
+        const net = Number(v.net_amount || v.amount || 0);
+        const payments = Array.isArray(v.payments) ? v.payments : [];
+        const paidForThis = payments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+        const outstanding = Math.max(net - paidForThis, 0);
+
+        const monthNames = [
+            'January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December'
+        ];
+        const monthStr = v.month && monthNames[v.month - 1] ? `${monthNames[v.month - 1]} ${v.year}` : `Month ${v.month} ${v.year}`;
+
+        if (!studentMap[studentId]) {
+            studentMap[studentId] = {
+                id: studentId,
+                first_name: student.first_name,
+                last_name: student.last_name,
+                registration_no: student.registration_no || student.details?.registration_no || student.details?.studentDetails?.registration_no || 'N/A',
+                class_name: student.details?.studentDetails?.class_name || student.details?.class_name || 'N/A',
+                email: student.email,
+                outstandingAmount: 0,
+                months: new Set(),
+                vouchersList: []
+            };
+        }
+
+        studentMap[studentId].outstandingAmount += outstanding;
+        studentMap[studentId].months.add(monthStr);
+        studentMap[studentId].vouchersList.push({
+            id: v.id,
+            voucher_number: v.voucher_number,
+            month: v.month,
+            year: v.year,
+            outstanding
+        });
+    });
+
+    const defaulters = Object.values(studentMap)
+        .filter(s => s.months.size >= 2)
+        .map(s => ({
+            id: s.id,
+            first_name: s.first_name,
+            last_name: s.last_name,
+            registration_no: s.registration_no,
+            class_name: s.class_name,
+            email: s.email,
+            outstandingAmount: s.outstandingAmount,
+            overdueMonthsCount: s.months.size,
+            overdueMonthsList: Array.from(s.months),
+            vouchers: s.vouchersList
+        }));
+
+    return defaulters;
+};
+
+/**
+ * Send real-time alert/warning notifications to defaulters and their parents
+ */
+export const warnFeeDefaulter = async (instituteId, studentId) => {
+    const student = await User.findByPk(studentId, {
+        attributes: ['id', 'first_name', 'last_name', 'details']
+    });
+    if (!student) {
+        throw new AppError('Student not found', 404);
+    }
+    const studentName = `${student.first_name} ${student.last_name}`.trim();
+
+    const parents = await User.findAll({
+        where: {
+            school_id: instituteId,
+            user_type: 'PARENT',
+        },
+        attributes: ['id', 'first_name', 'last_name', 'details'],
+    });
+
+    const linkedParents = parents.filter((parent) => {
+        const studentIds = parent.details?.parentDetails?.student_ids || parent.student_ids || parent.details?.student_ids || [];
+        return Array.isArray(studentIds) && studentIds.includes(studentId);
+    });
+
+    for (const parent of linkedParents) {
+        await createNotification({
+            institute_id: instituteId,
+            user_id: parent.id,
+            title: '🚨 FEE DEFAULTER WARNING ALERT',
+            body: `Dear Parent, your child ${studentName}'s monthly tuition fee remains overdue for 2+ months. Please clear all outstanding dues immediately to avoid suspension of portal access.`,
+            type: 'alert',
+            channel: 'in_app',
+            data: {
+                studentId,
+                studentName,
+                action: 'PAY_FEE',
+                warningType: 'defaulter'
+            }
+        });
+    }
+
+    await createNotification({
+        institute_id: instituteId,
+        user_id: studentId,
+        title: '🚨 OVERDUE FEE WARNING',
+        body: `Your school fee remains outstanding for 2+ months. Please ask your parents to clear the dues immediately.`,
+        type: 'alert',
+        channel: 'in_app',
+        data: {
+            studentId,
+            action: 'VIEW_FEES',
+            warningType: 'defaulter'
+        }
+    });
+
+    return {
+        success: true,
+        notifiedParentsCount: linkedParents.length,
+        message: `Fee warning alert sent successfully to student and ${linkedParents.length} parent(s).`
+    };
+};
+
 export default {
     generateSingleVoucher,
     generateVouchersForClass,
@@ -1035,5 +1439,9 @@ export default {
     updateVoucherStatus,
     recordPayment,
     getPaymentHistory,
-    getPaymentSummary
+    getPaymentSummary,
+    bulkDeleteVouchers,
+    getFeeVouchersStats,
+    getFeeDefaulters,
+    warnFeeDefaulter
 };

@@ -6,6 +6,7 @@ import { Op } from 'sequelize';
 import User from '../../models/postgres/User.model.js';
 import { createPlatformUser } from '../../services/user.service.js';
 import { hashPassword } from '../../utils/helpers/password.helper.js';
+import { logAuditAction } from '../../utils/helpers/auditLogger.js';
 
 /**
  * Get current user's profile (same as /auth/me)
@@ -82,6 +83,14 @@ export const addPlatformUser = async (req, res) => {
     attributes: { exclude: ['password_hash'] }
   });
   
+  await logAuditAction({
+    req,
+    action: 'CREATE_PLATFORM_USER',
+    entity: 'User',
+    entity_id: createdUser.id,
+    new_values: createdUser.toJSON()
+  });
+
   sendSuccess(res, createdUser, 'Platform user created successfully');
 };
 
@@ -111,6 +120,26 @@ export const getAllUsers = async (req, res) => {
     [Op.in]: ['MASTER_ADMIN', 'SUPPORT_STAFF', 'SYSTEM_ADMIN']
   };
 
+  // Filter if view_own_data is enabled
+  if (req.user?.details?.view_own_data) {
+    const ownerCondition = {
+      [Op.or]: [
+        { created_by: req.user.id },
+        { updated_by: req.user.id }
+      ]
+    };
+    
+    if (where[Op.or]) {
+      where[Op.and] = [
+        { [Op.or]: where[Op.or] },
+        ownerCondition
+      ];
+      delete where[Op.or];
+    } else {
+      where[Op.and] = [ownerCondition];
+    }
+  }
+
   const { count, rows } = await User.findAndCountAll({
     where,
     limit: parseInt(limit),
@@ -139,7 +168,9 @@ export const updatePlatformUser = async (req, res) => {
   
   if (!user) throw new AppError('Platform user not found', 404);
 
-  const { first_name, last_name, email, phone, user_type, is_active, permissions } = req.body;
+  const old_values = user.toJSON();
+
+  const { first_name, last_name, email, phone, user_type, is_active, permissions, view_own_data } = req.body;
   
   if (first_name) user.first_name = first_name;
   if (last_name) user.last_name = last_name;
@@ -148,11 +179,20 @@ export const updatePlatformUser = async (req, res) => {
   if (user_type) user.user_type = user_type;
   if (is_active !== undefined) user.is_active = is_active;
   if (permissions) user.permissions = permissions;
+  
+  if (view_own_data !== undefined) {
+    user.details = { ...user.details, view_own_data: !!view_own_data };
+    user.changed('details', true);
+  }
 
   // if password provided
   if (req.body.password) {
     const bcrypt = await import('bcryptjs');
     user.password_hash = await bcrypt.default.hash(req.body.password, 12);
+  }
+
+  if (req.user && req.user.id) {
+    user.updated_by = req.user.id;
   }
 
   await user.save();
@@ -161,6 +201,15 @@ export const updatePlatformUser = async (req, res) => {
     attributes: { exclude: ['password_hash'] }
   });
   
+  await logAuditAction({
+    req,
+    action: 'UPDATE_PLATFORM_USER',
+    entity: 'User',
+    entity_id: id,
+    old_values,
+    new_values: updatedUser.toJSON()
+  });
+
   sendSuccess(res, updatedUser, 'Platform user updated successfully');
 };
 
@@ -175,7 +224,19 @@ export const togglePlatformUserStatus = async (req, res) => {
   if (!user) throw new AppError('Platform user not found', 404);
 
   user.is_active = is_active;
+  if (req.user && req.user.id) {
+    user.updated_by = req.user.id;
+  }
   await user.save();
+
+  await logAuditAction({
+    req,
+    action: 'UPDATE_PLATFORM_USER_STATUS',
+    entity: 'User',
+    entity_id: id,
+    old_values: { is_active: !is_active },
+    new_values: { is_active }
+  });
 
   sendSuccess(res, null, `User ${is_active ? 'activated' : 'deactivated'} successfully`);
 };
@@ -193,10 +254,46 @@ export const changePlatformUserPassword = async (req, res) => {
   if (!user) throw new AppError('Platform user not found', 404);
 
   user.password_hash = await hashPassword(password);
+  if (req.user && req.user.id) {
+    user.updated_by = req.user.id;
+  }
   await user.save();
+
+  await logAuditAction({
+    req,
+    action: 'UPDATE_PLATFORM_USER_PASSWORD',
+    entity: 'User',
+    entity_id: id
+  });
 
   sendSuccess(res, {
     id: user.id,
     name: `${user.first_name} ${user.last_name}`,
   }, 'Password updated successfully');
 };
+
+/**
+ * Delete a Platform User
+ */
+export const deletePlatformUser = async (req, res) => {
+  const { id } = req.params;
+  const user = await User.findOne({ where: { id, school_id: null } });
+  
+  if (!user) throw new AppError('Platform user not found', 404);
+  if (user.user_type === 'MASTER_ADMIN') {
+    throw new AppError('Cannot delete a Master Admin', 403);
+  }
+
+  await user.destroy();
+
+  await logAuditAction({
+    req,
+    action: 'DELETE_PLATFORM_USER',
+    entity: 'User',
+    entity_id: id,
+    old_values: user.toJSON()
+  });
+
+  sendSuccess(res, null, 'Platform user deleted successfully');
+};
+

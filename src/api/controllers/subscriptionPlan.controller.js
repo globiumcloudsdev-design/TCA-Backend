@@ -32,7 +32,7 @@ import {
 
 // ── GET /subscription-plans  (protected: sub_template.read) ──────────────────
 export const getAllPlansController = catchAsync(async (req, res) => {
-  const { plans, pagination } = await getAllPlans(req.query);
+  const { plans, pagination } = await getAllPlans(req.query, req.user);
   sendPaginated(res, plans, pagination, 'Subscription plans retrieved successfully');
 });
 
@@ -50,13 +50,13 @@ export const getPlanByIdController = catchAsync(async (req, res) => {
 
 // ── POST /subscription-plans  (protected: sub_template.create) ───────────────
 export const createPlanController = catchAsync(async (req, res) => {
-  const plan = await createPlan(req.body);
+  const plan = await createPlan(req.body, req.user?.id);
   sendCreated(res, plan, 'Subscription plan created successfully');
 });
 
 // ── PUT /subscription-plans/:id  (protected: sub_template.update) ────────────
 export const updatePlanController = catchAsync(async (req, res) => {
-  const plan = await updatePlan(req.params.id, req.body);
+  const plan = await updatePlan(req.params.id, req.body, req.user?.id);
   sendSuccess(res, plan, 'Subscription plan updated successfully');
 });
 
@@ -68,7 +68,7 @@ export const deletePlanController = catchAsync(async (req, res) => {
 
 // ── PATCH /subscription-plans/:id/toggle-publish  (sub_template.update) ──────
 export const togglePublishedController = catchAsync(async (req, res) => {
-  const plan = await togglePublished(req.params.id);
+  const plan = await togglePublished(req.params.id, req.user?.id);
   sendSuccess(
     res,
     plan,
@@ -78,7 +78,7 @@ export const togglePublishedController = catchAsync(async (req, res) => {
 
 // ── PATCH /subscription-plans/:id/toggle-popular  (sub_template.update) ──────
 export const togglePopularController = catchAsync(async (req, res) => {
-  const plan = await togglePopular(req.params.id);
+  const plan = await togglePopular(req.params.id, req.user?.id);
   sendSuccess(
     res,
     plan,
@@ -88,7 +88,7 @@ export const togglePopularController = catchAsync(async (req, res) => {
 
 // ── PATCH /subscription-plans/:id/toggle-active  (sub_template.update) ───────
 export const toggleActiveController = catchAsync(async (req, res) => {
-  const plan = await toggleActive(req.params.id);
+  const plan = await toggleActive(req.params.id, req.user?.id);
   sendSuccess(
     res,
     plan,

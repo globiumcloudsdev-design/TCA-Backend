@@ -248,6 +248,68 @@ export const getPaymentSummary = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * Bulk delete vouchers (soft delete via archived flag)
+ * POST /api/fee-vouchers/bulk-delete
+ */
+export const bulkDeleteVouchers = catchAsync(async (req, res) => {
+  const { voucherIds } = req.body;
+  const instituteId = req.user.school_id;
+
+  if (!voucherIds || !Array.isArray(voucherIds) || voucherIds.length === 0) {
+    throw new AppError('Voucher IDs array is required', 400);
+  }
+
+  const result = await feeVoucherService.bulkDeleteVouchers(voucherIds, instituteId);
+
+  res.status(200).json({
+    success: true,
+    message: `${result.deletedCount} vouchers deleted successfully`,
+    data: result
+  });
+});
+
+export const getFeeVouchersStats = catchAsync(async (req, res) => {
+  const { month, year, academic_year_id } = req.query;
+  const instituteId = req.user.school_id;
+
+  const stats = await feeVoucherService.getFeeVouchersStats(instituteId, {
+    month,
+    year,
+    academic_year_id
+  });
+
+  res.status(200).json({
+    success: true,
+    message: 'Fee voucher stats retrieved',
+    data: stats
+  });
+});
+
+export const getFeeDefaulters = catchAsync(async (req, res) => {
+  const instituteId = req.user.school_id;
+  const defaulters = await feeVoucherService.getFeeDefaulters(instituteId);
+
+  res.status(200).json({
+    success: true,
+    message: 'Fee defaulters retrieved',
+    data: defaulters
+  });
+});
+
+export const warnFeeDefaulter = catchAsync(async (req, res) => {
+  const { studentId } = req.params;
+  const instituteId = req.user.school_id;
+
+  const result = await feeVoucherService.warnFeeDefaulter(instituteId, studentId);
+
+  res.status(200).json({
+    success: true,
+    message: result.message,
+    data: result
+  });
+});
+
 export default {
   generateSingleVoucher,
   generateVouchersForClass,
@@ -257,5 +319,9 @@ export default {
   updateVoucherStatus,
   recordPayment,
   getPaymentHistory,
-  getPaymentSummary
+  getPaymentSummary,
+  bulkDeleteVouchers,
+  getFeeVouchersStats,
+  getFeeDefaulters,
+  warnFeeDefaulter
 };

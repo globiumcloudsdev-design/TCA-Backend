@@ -9,5 +9,7 @@ const router = Router();
  * @access  Public
  */
 router.get('/pricing-plans', publicController.getPricingPlans);
+router.get('/platform-status', publicController.getPlatformStatus);
+router.get('/cms', publicController.getCmsConfig);
 
 export default router;

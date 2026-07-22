@@ -40,6 +40,27 @@ router.post(
  * Get and manage vouchers
  */
 
+// Get monthly/academic statistics for vouchers
+router.get(
+  '/stats',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STAFF'),
+  feeVoucherController.getFeeVouchersStats
+);
+
+// Get list of fee defaulters with >= 2 unpaid months
+router.get(
+  '/defaulters',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),
+  feeVoucherController.getFeeDefaulters
+);
+
+// Warn fee defaulter and send real-time alerts
+router.post(
+  '/defaulters/:studentId/warn',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),
+  feeVoucherController.warnFeeDefaulter
+);
+
 // Get all vouchers
 router.get(
   '/',
@@ -52,6 +73,13 @@ router.delete(
   '/:voucherId',
   restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),
   feeVoucherController.deleteVoucher
+);
+
+// Bulk delete/archive vouchers
+router.post(
+  '/bulk-delete',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),
+  feeVoucherController.bulkDeleteVouchers
 );
 
 // Update voucher status (mark as paid, etc.)

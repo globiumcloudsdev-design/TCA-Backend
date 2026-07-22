@@ -324,7 +324,7 @@ export const updateExam = async (id, instituteId, updateData, options = {}) => {
     // Update fields
     const allowedFields = [
       'name', 'code', 'description', 'type', 'category', 'entity_type', 'entity_ids',
-      'academic_year_id', 'subject_schedules', 'start_date', 'end_date', 'total_marks',
+      'academic_year_id', 'class_id', 'section_id', 'subject_schedules', 'start_date', 'end_date', 'total_marks',
       'pass_marks', 'pass_percentage', 'grading_system', 'status', 'is_published',
       'publish_results_date', 'settings', 'attachments', 'venue', 'room_no'
     ];
@@ -565,19 +565,27 @@ export const getExamResults = async (examId, instituteId, filters = {}, paginati
 
   if (!exam) throw new Error('Exam not found');
 
-  // 2. Fetch all students from exam's class/section
+  // 2. Fetch all students matching the exam's academic session (Class, Section, Year)
+  let sessionFilterObj = {
+    class_id: exam.class_id,
+    academic_year_id: exam.academic_year_id
+  };
+
+  const sectionId = filters.section_id || exam.section_id;
+  if (sectionId) {
+    sessionFilterObj.section_id = sectionId;
+  }
+
+  const sessionFilterString = JSON.stringify([sessionFilterObj]);
+
   let studentWhere = {
     school_id: instituteId,
     user_type: 'STUDENT',
     is_active: true,
-    'details.studentDetails.class_id': exam.class_id
+    [Op.and]: [
+      sequelize.literal(`details->'studentDetails'->'academicSessions' @> '${sessionFilterString}'::jsonb`)
+    ]
   };
-
-  // Include section filter if specific section selected
-  if (exam.section_id || filters.section_id) {
-    const sectionId = filters.section_id || exam.section_id;
-    studentWhere['details.studentDetails.section_id'] = sectionId;
-  }
 
   const allStudents = await User.findAll({
     where: studentWhere,
@@ -585,35 +593,11 @@ export const getExamResults = async (examId, instituteId, filters = {}, paginati
     order: [['first_name', 'ASC']]
   });
 
-  console.log(`[getExamResults] Found ${allStudents.length} students for class ${exam.class_id}`);
+  console.log(`[getExamResults] Found ${allStudents.length} students matching academic session for exam`);
 
-  // 3. Filter students - prioritize by academic session status
-  const filteredStudents = allStudents.filter(student => {
-    const studentDetails = student.details?.studentDetails || {};
-    const academicSessions = Array.isArray(studentDetails.academicSessions) 
-      ? studentDetails.academicSessions 
-      : [];
-    
-    // Priority 1: Has active session matching exam's academic_year_id
-    const hasMatchingActiveSession = academicSessions.some(session => 
-      session.academic_year_id === exam.academic_year_id && 
-      String(session.status || '').toLowerCase() === 'active'
-    );
-    if (hasMatchingActiveSession) return true;
-    
-    // Priority 2: Has ANY active session (might be different year but still active)
-    const hasAnyActiveSession = academicSessions.some(session =>
-      String(session.status || '').toLowerCase() === 'active'
-    );
-    if (hasAnyActiveSession) return true;
-    
-    // Priority 3: No academic sessions setup yet - include for exam entry
-    if (academicSessions.length === 0) return true;
-    
-    return false;
-  });
-
-  console.log(`[getExamResults] After filtering: ${filteredStudents.length} students eligible for exam`);
+  // 3. No need to filter in memory anymore since the database query already 
+  // correctly fetched only students with the matching academic session.
+  const filteredStudents = allStudents;
 
   // 4. Get existing exam results for these students
   const studentIds = filteredStudents.map(s => s.id);

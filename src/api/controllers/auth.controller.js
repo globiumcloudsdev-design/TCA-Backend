@@ -220,6 +220,23 @@ export const refreshUserData = catchAsync(async (req, res) => {
     sendSuccess(res, userData, 'User data refreshed');
 });
 
+/**
+ * Impersonate user (Ghost Mode)
+ * Access: Master Admin ONLY (checked in routes)
+ */
+export const impersonateUser = catchAsync(async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) throw new AppError('User ID is required', 400);
+
+  const result = await authService.impersonateUserService(userId);
+
+  sendSuccess(res, {
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+    user: result.user
+  }, `Successfully impersonated ${result.user.first_name}`);
+});
+
 
 export default { 
   login, 
@@ -234,5 +251,6 @@ export default {
   getMyInstitute,
   getMyInstitutePolicies,
   getInstitutePolicyByType,
-  refreshUserData
+  refreshUserData,
+  impersonateUser
 };

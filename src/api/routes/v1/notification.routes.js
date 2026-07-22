@@ -28,6 +28,7 @@ import {
 import { protect } from '../../middlewares/auth.middleware.js';
 import { hasPermission } from '../../middlewares/permission.middleware.js';
 import { schoolContext } from '../../middlewares/schoolContext.middleware.js';
+import { getActiveAnnouncements } from '../../controllers/announcement.controller.js';
 
 const router = Router();
 
@@ -56,6 +57,12 @@ router.get('/unread-count', getUnreadCountController);
  * Get notification statistics
  */
 router.get('/stats', getStatsController);
+
+/**
+ * GET /api/v1/notifications/global
+ * Get active global announcements for the current institute
+ */
+router.get('/global', getActiveAnnouncements);
 
 // ─────────────────────────────────────────────────────────────────
 // ✅ PATCH Endpoints (User actions)

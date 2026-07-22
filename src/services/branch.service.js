@@ -15,7 +15,7 @@ export const getAllBranches = async (filters = {}, pagination = {}) => {
   const offset = (page - 1) * limit;
 
   const where = { institute_id: filters.institute_id };
-  
+
   // Search filter
   if (filters.search) {
     where[Op.or] = [
@@ -49,9 +49,9 @@ export const getAllBranches = async (filters = {}, pagination = {}) => {
       {
         model: User,
         as: 'users',
-        where: { 
+        where: {
           user_type: 'BRANCH_ADMIN',
-          staff_type: 'BRANCH_HEAD' 
+          staff_type: 'Branch Head'
         },
         required: false,
         attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'permissions']
@@ -66,7 +66,7 @@ export const getAllBranches = async (filters = {}, pagination = {}) => {
   const formattedRows = rows.map(branch => {
     const branchData = branch.toJSON();
     const head = branchData.users?.[0] || null;
-    
+
     return {
       ...branchData,
       head: head ? {
@@ -126,9 +126,9 @@ export const getBranchById = async (id, institute_id) => {
       {
         model: User,
         as: 'users',
-        where: { 
+        where: {
           user_type: 'BRANCH_ADMIN',
-          staff_type: 'BRANCH_HEAD' 
+          staff_type: 'Branch Head'
         },
         required: false,
         attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'permissions']
@@ -187,10 +187,10 @@ export const createBranch = async (data) => {
     if (data.is_main) {
       await Branch.update(
         { is_main: false },
-        { 
-          where: { 
+        {
+          where: {
             institute_id: data.institute_id,
-            is_main: true 
+            is_main: true
           },
           transaction
         }
@@ -207,7 +207,7 @@ export const createBranch = async (data) => {
       email: data.email || null,
       address: data.address || null,
       city: data.city || null,
-      
+
       // Location with lat/lng
       location: data.location || {
         latitude: null,
@@ -215,12 +215,12 @@ export const createBranch = async (data) => {
         place_id: null,
         formatted_address: data.address || null
       },
-      
+
       // Statistics (initially 0)
       student_count: 0,
       teacher_count: 0,
       class_count: 0,
-      
+
       // Settings
       settings: data.settings || {
         has_hostel: false,
@@ -241,13 +241,13 @@ export const createBranch = async (data) => {
           sunday: { open: null, close: null }
         }
       },
-      
+
       is_active: data.is_active !== undefined ? data.is_active : true,
       is_main: data.is_main || false,
-      
+
       created_by: data.created_by,
       updated_by: data.updated_by,
-      
+
       created_at: new Date(),
       updated_at: new Date()
     };
@@ -256,7 +256,7 @@ export const createBranch = async (data) => {
 
     // 2. CREATE HEAD USER (if provided)
     if (data.head && data.head.first_name && data.head.last_name && data.head.email) {
-      
+
       // Check if user with this email already exists
       const existingUser = await User.findOne({
         where: { email: data.head.email },
@@ -277,7 +277,7 @@ export const createBranch = async (data) => {
         branch_id: branch.id, // ✅ Branch ID set here
         role_id: null, // 👈 NULL because we're using custom permissions
         user_type: 'BRANCH_ADMIN',
-        staff_type: 'BRANCH_HEAD',
+        staff_type: 'Branch Head',
         first_name: data.head.first_name,
         last_name: data.head.last_name,
         email: data.head.email,
@@ -348,12 +348,12 @@ export const updateBranch = async (id, institute_id, updateData) => {
   if (updateData.is_main && !branch.is_main) {
     await Branch.update(
       { is_main: false },
-      { 
-        where: { 
+      {
+        where: {
           institute_id,
           is_main: true,
           id: { [Op.ne]: id }
-        } 
+        }
       }
     );
   }
@@ -361,7 +361,7 @@ export const updateBranch = async (id, institute_id, updateData) => {
   // Update fields
   const updatableFields = [
     'name', 'code', 'phone', 'email', 'address', 'city',
-    'location', 'settings', 'is_active', 'is_main', 
+    'location', 'settings', 'is_active', 'is_main',
     'updated_by', 'updated_at'
   ];
 
@@ -376,10 +376,10 @@ export const updateBranch = async (id, institute_id, updateData) => {
   // Update head user if provided (optional)
   if (updateData.head && updateData.head.email) {
     const [headUser, created] = await User.findOrCreate({
-      where: { 
+      where: {
         branch_id: id,
         user_type: 'BRANCH_ADMIN',
-          staff_type: 'BRANCH_HEAD'
+        staff_type: 'Branch Head'
       },
       defaults: {
         id: uuidv4(),
@@ -387,7 +387,7 @@ export const updateBranch = async (id, institute_id, updateData) => {
         branch_id: id,
         role_id: null,
         user_type: 'BRANCH_ADMIN',
-          staff_type: 'BRANCH_HEAD',
+        staff_type: 'Branch Head',
         first_name: updateData.head.first_name,
         last_name: updateData.head.last_name,
         email: updateData.head.email,
@@ -482,8 +482,8 @@ export const updateBranchSettings = async (id, institute_id, settings) => {
 export const getBranchStats = async (institute_id) => {
   const total = await Branch.count({ where: { institute_id } });
   const active = await Branch.count({ where: { institute_id, is_active: true } });
-  const mainBranch = await Branch.findOne({ 
-    where: { institute_id, is_main: true } 
+  const mainBranch = await Branch.findOne({
+    where: { institute_id, is_main: true }
   });
 
   const totalStudents = await Branch.sum('student_count', { where: { institute_id } });

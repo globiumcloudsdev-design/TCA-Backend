@@ -164,13 +164,20 @@ const createOrUpdateInstituteAdmin = async (institute, data, createdBy, transact
     // Update existing admin user
     adminUser = await User.findByPk(institute.principal_user_id, { transaction });
     if (adminUser) {
-      await adminUser.update({
+      const adminUpdateData = {
         first_name: firstName,
         last_name: lastName,
         email: adminEmail.toLowerCase(),
         phone: data.principal_phone || institute.principal_phone,
         updated_by: createdBy
-      }, { transaction });
+      };
+      
+      // If a new admin password is provided during edit, hash and update it
+      if (data.admin_password) {
+        adminUpdateData.password_hash = await bcrypt.hash(data.admin_password, 12);
+      }
+      
+      await adminUser.update(adminUpdateData, { transaction });
       console.log(`✅ Updated institute admin user for ${institute.institute_code}`);
     }
   } else {
@@ -235,7 +242,7 @@ export const getInstituteById = async (id) => {
 };
 
 // ─── List with Auto-Invoice Generation ────────────────────────────────────────
-export const getAllInstitutes = async (query = {}) => {
+export const getAllInstitutes = async (query = {}, user = null) => {
   const page = Math.max(1, parseInt(query.page) || 1);
   const limit = Math.min(100, parseInt(query.limit) || 15);
   const offset = (page - 1) * limit;
@@ -256,9 +263,38 @@ export const getAllInstitutes = async (query = {}) => {
     ];
   }
 
+  // Filter if view_own_data is enabled
+  if (user?.details?.view_own_data) {
+    const ownerCondition = {
+      [Op.or]: [
+        { created_by: user.id },
+        { updated_by: user.id }
+      ]
+    };
+
+    if (where[Op.or]) {
+      where[Op.and] = [
+        { [Op.or]: where[Op.or] },
+        ownerCondition
+      ];
+      delete where[Op.or];
+    } else {
+      where[Op.and] = [ownerCondition];
+    }
+  }
+
+  const paranoid = query.is_deleted === 'true' ? false : true;
+  if (query.is_deleted === 'true') {
+    where.deleted_at = { [Op.not]: null };
+  }
+
   const { count, rows } = await Institute.findAndCountAll({
     where,
-    include: BASE_INCLUDE,
+    paranoid,
+    include: [
+      ...BASE_INCLUDE,
+      { model: User, as: 'principal', attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'branch_id'] }
+    ],
     order: [['created_at', 'DESC']],
     limit,
     offset,
@@ -484,13 +520,41 @@ export const createInstitute = async (data, createdBy, file = null) => {
       is_active: data.is_active !== false,
       subscription_status: subscriptionStatus,
       has_used_trial: hasTrial,
-      settings: {
-        has_branches: hasBranches,
-        enable_parent_portal: data.enable_parent_portal !== false,
-        enable_teacher_portal: data.enable_teacher_portal !== false,
-        enable_student_portal: data.enable_student_portal !== false,
-        enable_sms_notifications: !!data.enable_sms_notifications,
-      },
+      settings: (() => {
+        let parsedSettings = {};
+        if (data.settings) {
+          try {
+            parsedSettings = typeof data.settings === 'string' ? JSON.parse(data.settings) : data.settings;
+          } catch (e) {
+            console.error('Error parsing settings in createInstitute:', e);
+          }
+        }
+        return {
+          has_branches: hasBranches,
+          enable_parent_portal: data.enable_parent_portal !== false,
+          enable_teacher_portal: data.enable_teacher_portal !== false,
+          enable_student_portal: data.enable_student_portal !== false,
+          enable_sms_notifications: !!data.enable_sms_notifications,
+          document_settings: parsedSettings.document_settings || data.document_settings || {
+            enable_header_logo: true,
+            enable_footer_sign: true,
+            watermark_text: '',
+            document_stamp: true,
+            student_docs_allowed: true,
+            teacher_docs_allowed: true,
+            staff_docs_allowed: true
+          },
+          print_settings: parsedSettings.print_settings || data.print_settings || {
+            printer_type: 'regular',
+            page_size: 'A4',
+            orientation: 'portrait',
+            color_mode: 'color',
+            show_border: true
+          }
+        };
+      })(),
+      created_by: createdBy,
+      updated_by: createdBy
     }, { transaction: t });
 
     // Upload logo after institute exists
@@ -584,6 +648,7 @@ const generateFirstInvoice = async (institute, plan, startDate, transaction) => 
     period_start: periodStart,
     period_end: periodEnd,
     billing_cycle: plan.cycle,
+    created_by: institute.created_by,
     metadata: {
       is_first_invoice: true,
       is_prorated: startDate > firstMonthStart,
@@ -595,13 +660,15 @@ const generateFirstInvoice = async (institute, plan, startDate, transaction) => 
 };
 
 // ─── Update Institute with Auto-Branch Handling ───────────────────────────────
-export const updateInstitute = async (id, data, file = null) => {
+export const updateInstitute = async (id, data, file = null, updatedBy = null) => {
   const inst = await Institute.findByPk(id, {
     include: [{ model: Role, as: 'assignedRole' }]
   });
   if (!inst) throw new AppError('Institute not found.', 404);
 
   const updates = { ...data };
+  if (updatedBy) updates.updated_by = updatedBy;
+  
   const oldRoleId = inst.institute_role_id;
   
   // 🔥 Check if has_branches setting is changing
@@ -641,7 +708,15 @@ export const updateInstitute = async (id, data, file = null) => {
 
   // Merge JSONB settings
   if (data.settings) {
-    updates.settings = { ...inst.settings, ...data.settings };
+    let parsedSettings = data.settings;
+    if (typeof data.settings === 'string') {
+      try {
+        parsedSettings = JSON.parse(data.settings);
+      } catch (e) {
+        console.error('Error parsing settings string in updateInstitute:', e);
+      }
+    }
+    updates.settings = { ...inst.settings, ...parsedSettings };
     delete updates.has_branches;
   } else if (data.has_branches !== undefined) {
     updates.settings = { ...inst.settings, has_branches: !!data.has_branches };
@@ -766,7 +841,7 @@ export const restoreInstitute = async (id) => {
     throw new AppError('Institute not found.', 404);
   }
   
-  if (!inst.deletedAt) {
+  if (!inst.deletedAt && !inst.deleted_at) {
     throw new AppError('Institute is not deleted (already active).', 400);
   }
   
@@ -781,18 +856,26 @@ export const restoreInstitute = async (id) => {
 };
 
 // ─── Toggle active ────────────────────────────────────────────────────────────
-export const toggleInstituteStatus = async (id, is_active) => {
+export const toggleInstituteStatus = async (id, is_active, updatedBy = null) => {
   const inst = await Institute.findByPk(id);
   if (!inst) throw new AppError('Institute not found.', 404);
-  await inst.update({ is_active: !!is_active });
+  
+  const updates = { is_active: !!is_active };
+  if (updatedBy) updates.updated_by = updatedBy;
+  
+  await inst.update(updates);
   return await getInstituteById(id);
 };
 
 // ─── Update subscription status ───────────────────────────────────────────────
-export const updateSubscriptionStatus = async (id, subscription_status) => {
+export const updateSubscriptionStatus = async (id, subscription_status, updatedBy = null) => {
   const inst = await Institute.findByPk(id);
   if (!inst) throw new AppError('Institute not found.', 404);
-  await inst.update({ subscription_status });
+  
+  const updates = { subscription_status };
+  if (updatedBy) updates.updated_by = updatedBy;
+  
+  await inst.update(updates);
   return await getInstituteById(id);
 };
 
@@ -825,7 +908,7 @@ export const getInstituteInvoices = async (instituteId, query = {}) => {
 };
 
 // ─── Get ALL Invoices across all institutes ───────────────────────────────────
-export const getAllInvoices = async (query = {}) => {
+export const getAllInvoices = async (query = {}, user = null) => {
   const page   = Math.max(1, parseInt(query.page)  || 1);
   const limit  = Math.min(100, parseInt(query.limit) || 20);
   const offset = (page - 1) * limit;
@@ -841,6 +924,21 @@ export const getAllInvoices = async (query = {}) => {
     const start = new Date(parseInt(query.year), parseInt(query.month) - 1, 1);
     const end   = new Date(parseInt(query.year), parseInt(query.month), 0, 23, 59, 59);
     where.period_start = { [Op.between]: [start, end] };
+  }
+
+  if (user?.details?.view_own_data) {
+    const ownerCondition = {
+      [Op.or]: [
+        { created_by: user.id },
+        { updated_by: user.id }
+      ]
+    };
+    if (where[Op.or]) {
+      where[Op.and] = [{ [Op.or]: where[Op.or] }, ownerCondition];
+      delete where[Op.or];
+    } else {
+      where[Op.and] = [ownerCondition];
+    }
   }
 
   const { count, rows } = await Invoice.findAndCountAll({
@@ -904,6 +1002,7 @@ export const markInvoicePaid = async (invoiceId, { payment_method, payment_refer
     payment_method:    payment_method || 'MANUAL',
     payment_reference: payment_reference || null,
     notes:             notes || null,
+    updated_by:        paid_by,
     metadata: {
       ...invoice.metadata,
       paid_by,
@@ -939,6 +1038,38 @@ export const bulkDeleteInvoices = async (ids) => {
     }
   });
   return true;
+};
+
+// ─── Create Manual Invoice ────────────────────────────────────────────────────
+export const createManualInvoice = async (instituteId, data, createdBy) => {
+  const institute = await Institute.findByPk(instituteId);
+  if (!institute) throw new AppError('Institute not found.', 404);
+
+  const amount = parseFloat(data.amount || 0);
+  const taxAmount = parseFloat(data.tax_amount || 0);
+  const totalAmount = amount + taxAmount;
+
+  const invoice = await Invoice.create({
+    institute_id: institute.id,
+    subscription_plan_id: data.subscription_plan_id || institute.subscription_plan_id,
+    invoice_number: await generateInvoiceNumber(institute.institute_code),
+    amount: amount,
+    tax_amount: taxAmount,
+    total_amount: totalAmount,
+    status: 'PENDING',
+    due_date: new Date(data.due_date),
+    period_start: new Date(data.period_start),
+    period_end: new Date(data.period_end),
+    billing_cycle: data.billing_cycle || 'monthly',
+    created_by: createdBy,
+    metadata: {
+      is_manual: true,
+      notes: data.notes || '',
+      generated_at: new Date()
+    }
+  });
+
+  return invoice;
 };
 
 // ─── Subscription History ─────────────────────────────────────────────────────
@@ -1424,107 +1555,246 @@ export const getInstituteStaff = async (instituteId, options = {}) => {
 };
 
 export const getMasterAdminReports = async (query = {}) => {
-  const now = new Date();
-  const currentMonthStart = startOfMonth(now);
-  const currentMonthEnd = endOfMonth(now);
+  const { date_from, date_to, city, plan_id } = query;
   
-  const prevMonthStart = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
-  const prevMonthEnd = endOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  const now = new Date();
+  
+  // Custom Date Range
+  const currentMonthStart = date_from ? new Date(date_from) : startOfMonth(now);
+  const currentMonthEnd = date_to ? new Date(date_to) : endOfMonth(now);
+  
+  const duration = currentMonthEnd.getTime() - currentMonthStart.getTime();
+  const prevMonthStart = date_from ? new Date(currentMonthStart.getTime() - duration) : startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  const prevMonthEnd = date_from ? new Date(currentMonthEnd.getTime() - duration) : endOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+
+  // Filter clauses
+  const instituteBaseWhere = { subscription_status: 'active' };
+  if (city) instituteBaseWhere.institute_city = city;
+  if (plan_id) instituteBaseWhere.subscription_plan_id = plan_id;
+
+  const invoiceBaseWhere = { status: 'PAID' };
+  if (plan_id) invoiceBaseWhere.subscription_plan_id = plan_id;
+
+  const invoiceInclude = [];
+  if (city) {
+    invoiceInclude.push({
+      model: Institute,
+      as: 'institute',
+      where: { institute_city: city },
+      attributes: []
+    });
+  }
 
   // 1. Revenue This Month
   const thisMonthRevenue = await Invoice.sum('total_amount', {
     where: {
-      status: 'PAID',
-      paid_at: {
-        [Op.between]: [currentMonthStart, currentMonthEnd]
-      }
-    }
+      ...invoiceBaseWhere,
+      paid_at: { [Op.between]: [currentMonthStart, currentMonthEnd] }
+    },
+    include: invoiceInclude
   }) || 0;
 
   // 2. Revenue Previous Month
   const prevMonthRevenue = await Invoice.sum('total_amount', {
     where: {
-      status: 'PAID',
-      paid_at: {
-        [Op.between]: [prevMonthStart, prevMonthEnd]
-      }
-    }
+      ...invoiceBaseWhere,
+      paid_at: { [Op.between]: [prevMonthStart, prevMonthEnd] }
+    },
+    include: invoiceInclude
   }) || 0;
 
   // 3. Revenue Breakdown by Plan
   const planBreakdown = await Invoice.findAll({
-    where: { status: 'PAID' },
+    where: invoiceBaseWhere,
     attributes: [
       'subscription_plan_id',
       [Invoice.sequelize.fn('SUM', Invoice.sequelize.cast(Invoice.sequelize.col('total_amount'), 'DECIMAL')), 'total'],
       [Invoice.sequelize.fn('COUNT', Invoice.sequelize.col('Invoice.id')), 'count']
     ],
-    include: [{
-      model: SubscriptionPlan,
-      as: 'plan',
-      attributes: ['name']
-    }],
+    include: [
+      { model: SubscriptionPlan, as: 'plan', attributes: ['name'] },
+      ...invoiceInclude
+    ],
     group: ['subscription_plan_id', 'plan.id'],
     raw: true,
     nest: true
   });
 
   // 4. Revenue Breakdown by Institute
+  const instituteIncludeForBreakdown = [
+    {
+      model: Institute,
+      as: 'institute',
+      attributes: ['institute_name'],
+      where: city ? { institute_city: city } : undefined
+    }
+  ];
+  
   const instituteBreakdown = await Invoice.findAll({
-    where: { status: 'PAID' },
+    where: invoiceBaseWhere,
     attributes: [
       'institute_id',
       [Invoice.sequelize.fn('SUM', Invoice.sequelize.cast(Invoice.sequelize.col('total_amount'), 'DECIMAL')), 'total'],
       [Invoice.sequelize.fn('COUNT', Invoice.sequelize.col('Invoice.id')), 'count']
     ],
-    include: [{
-      model: Institute,
-      as: 'institute',
-      attributes: ['institute_name']
-    }],
+    include: instituteIncludeForBreakdown,
     group: ['institute_id', 'institute.id'],
     raw: true,
     nest: true
   });
 
   // 5. Overall Invoice Status Breakdown (Counts and Totals)
+  const statusWhere = {};
+  if (plan_id) statusWhere.subscription_plan_id = plan_id;
+
   const statusBreakdown = await Invoice.findAll({
+    where: statusWhere,
     attributes: [
       'status',
       [Invoice.sequelize.fn('SUM', Invoice.sequelize.cast(Invoice.sequelize.col('total_amount'), 'DECIMAL')), 'total'],
       [Invoice.sequelize.fn('COUNT', Invoice.sequelize.col('Invoice.id')), 'count']
     ],
+    include: invoiceInclude,
     group: ['status'],
     raw: true
   });
 
   // 6. Summary Counts
-  const activeInstitutes = await Institute.count({ where: { is_active: true } }) || 0;
-  const overduePayments = await Invoice.count({ where: { status: 'OVERDUE' } }) || 0;
+  const activeInstitutesCount = await Institute.count({ where: instituteBaseWhere }) || 0;
+  
+  const overdueWhere = { status: 'OVERDUE' };
+  if (plan_id) overdueWhere.subscription_plan_id = plan_id;
+  const overduePayments = await Invoice.count({ 
+    where: overdueWhere,
+    include: invoiceInclude
+  }) || 0;
   
   const newInstitutesMTD = await Institute.count({
     where: {
-      created_at: {
+      ...instituteBaseWhere,
+      created_at: { [Op.between]: [currentMonthStart, currentMonthEnd] }
+    }
+  }) || 0;
+
+  // 7. Advanced SaaS Metrics
+  // Calculate MRR (Sum of active plan prices for active institutes)
+  const activeInstitutesWithPlans = await Institute.findAll({
+    where: instituteBaseWhere,
+    include: [{ model: SubscriptionPlan, as: 'plan', attributes: ['price'] }]
+  });
+  const mrr = activeInstitutesWithPlans.reduce((sum, inst) => {
+    return sum + (inst.plan ? parseFloat(inst.plan.price) : 0);
+  }, 0);
+
+  // Calculate Churn Rate (Institutes cancelled this month / Active at start of month)
+  const cancelledThisMonth = await Institute.count({
+    where: {
+      subscription_status: { [Op.in]: ['expired', 'suspended'] },
+      updated_at: {
         [Op.between]: [currentMonthStart, currentMonthEnd]
       }
     }
-  }) || 0;
+  });
+  // Active at start of month ~ current active + cancelled this month - new this month
+  const activeStartOfMonth = activeInstitutesCount + cancelledThisMonth - newInstitutesMTD;
+  const churnRate = activeStartOfMonth > 0 ? ((cancelledThisMonth / activeStartOfMonth) * 100).toFixed(2) : 0;
+
+  // 8. 6-Month Revenue Growth Chart
+  const sixMonthsAgo = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 5, 1));
+  const invoicesLast6Months = await Invoice.findAll({
+    where: {
+      status: 'PAID',
+      paid_at: { [Op.gte]: sixMonthsAgo }
+    },
+    attributes: ['paid_at', 'total_amount']
+  });
+
+  const revenueGrowthMap = {};
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const label = d.toLocaleString('default', { month: 'short' });
+    revenueGrowthMap[label] = 0;
+  }
+
+  invoicesLast6Months.forEach(inv => {
+    if (inv.paid_at) {
+      const monthLabel = new Date(inv.paid_at).toLocaleString('default', { month: 'short' });
+      if (revenueGrowthMap[monthLabel] !== undefined) {
+        revenueGrowthMap[monthLabel] += parseFloat(inv.total_amount || 0);
+      }
+    }
+  });
+
+  const revenueGrowth = Object.keys(revenueGrowthMap).map(month => ({
+    name: month,
+    revenue: revenueGrowthMap[month]
+  }));
+
+  // 9. Regional Distribution (by institute_city)
+  const regionalDistributionRaw = await Institute.findAll({
+    where: instituteBaseWhere,
+    attributes: [
+      'institute_city',
+      [Institute.sequelize.fn('COUNT', Institute.sequelize.col('id')), 'count']
+    ],
+    group: ['institute_city'],
+    order: [[Institute.sequelize.fn('COUNT', Institute.sequelize.col('id')), 'DESC']],
+    limit: 10,
+    raw: true
+  });
+
+  const regionalDistribution = regionalDistributionRaw.map(r => ({
+    city: r.institute_city || 'Unknown',
+    count: parseInt(r.count) || 0
+  }));
+
+  // 10. Top Consumers (by User Count)
+  const topConsumersRaw = await User.findAll({
+    attributes: [
+      'school_id',
+      [User.sequelize.fn('COUNT', User.sequelize.col('User.id')), 'total_users']
+    ],
+    where: { school_id: { [Op.not]: null } },
+    include: [{
+      model: Institute,
+      as: 'institute',
+      attributes: ['institute_name', 'institute_city'],
+      where: instituteBaseWhere
+    }],
+    group: ['school_id', 'institute.id'],
+    order: [[User.sequelize.fn('COUNT', User.sequelize.col('User.id')), 'DESC']],
+    limit: 5,
+    raw: true,
+    nest: true
+  });
+
+  const topConsumers = topConsumersRaw.map(t => ({
+    school_id: t.school_id,
+    institute_name: t.institute?.institute_name || t['institute.institute_name'] || 'Unknown',
+    city: t.institute?.institute_city || t['institute.institute_city'] || 'Unknown',
+    total_users: parseInt(t.total_users) || 0
+  }));
 
   return {
     thisMonthRevenue: parseFloat(thisMonthRevenue),
     prevMonthRevenue: parseFloat(prevMonthRevenue),
-    activeInstitutes,
+    activeInstitutes: activeInstitutesCount,
     overduePayments,
     newInstitutesMTD,
+    mrr,
+    churnRate: parseFloat(churnRate),
+    revenueGrowth,
+    regionalDistribution,
+    topConsumers,
     planBreakdown: planBreakdown.map(p => ({
       plan_id: p.subscription_plan_id,
-      plan_name: p.plan?.name || 'Unknown',
+      plan_name: p.plan?.name || p['plan.name'] || 'Unknown',
       total: parseFloat(p.total) || 0,
       count: parseInt(p.count) || 0
     })),
     instituteBreakdown: instituteBreakdown.map(i => ({
       institute_id: i.institute_id,
-      institute_name: i.institute?.institute_name || 'Unknown',
+      institute_name: i.institute?.institute_name || i['institute.institute_name'] || 'Unknown',
       total: parseFloat(i.total) || 0,
       count: parseInt(i.count) || 0
     })),
