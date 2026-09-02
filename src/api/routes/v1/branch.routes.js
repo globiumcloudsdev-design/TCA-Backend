@@ -30,6 +30,7 @@ const createBranchSchema = Joi.object({
   head_user_id: Joi.string().uuid().optional().allow('', null).messages({
     'string.guid': 'Invalid user ID format'
   }),
+  branch_id: Joi.string().uuid().optional().allow('', null),
   is_main: Joi.boolean().optional(),
   is_active: Joi.boolean().optional(),
   location: Joi.object({
@@ -65,7 +66,7 @@ const createBranchSchema = Joi.object({
     password: Joi.string().min(6).optional().allow('', null),
     permissions: Joi.array().items(Joi.string()).optional()
   }).optional()
-});
+}).unknown(true);
 
 const updateBranchSchema = Joi.object({
   name: Joi.string().min(2).max(200).optional(),
@@ -76,6 +77,7 @@ const updateBranchSchema = Joi.object({
   city: Joi.string().optional().allow('', null),
   head_name: Joi.string().optional().allow('', null),
   head_user_id: Joi.string().uuid().optional().allow('', null),
+  branch_id: Joi.string().uuid().optional().allow('', null),
   is_main: Joi.boolean().optional(),
   is_active: Joi.boolean().optional(),
   location: Joi.object({
@@ -84,7 +86,6 @@ const updateBranchSchema = Joi.object({
     address: Joi.string().optional().allow('', null),
     place_id: Joi.string().optional().allow('', null)
   }).optional(),
-    // 🔥 ADD THIS - head field for update
   head: Joi.object({
     first_name: Joi.string().min(2).optional(),
     last_name: Joi.string().min(2).optional(),
@@ -94,25 +95,27 @@ const updateBranchSchema = Joi.object({
     permissions: Joi.array().items(Joi.string()).optional()
   }).optional(),
   settings: Joi.object().optional()
-});
+}).unknown(true);
 
 const toggleStatusSchema = Joi.object({
-  is_active: Joi.boolean().required()
-});
+  is_active: Joi.boolean().required(),
+  branch_id: Joi.string().uuid().optional().allow('', null)
+}).unknown(true);
 
 const branchIdSchema = Joi.object({
   id: Joi.string().uuid().required().messages({
     'string.guid': 'Invalid branch ID format'
   })
-});
+}).unknown(true);
 
 const querySchema = Joi.object({
   page: Joi.number().integer().min(1).optional(),
   limit: Joi.number().integer().min(1).max(100).optional(),
   search: Joi.string().trim().optional().allow(''),
   status: Joi.string().valid('active', 'inactive').optional(),
-  city: Joi.string().trim().optional().allow('')
-});
+  city: Joi.string().trim().optional().allow(''),
+  branch_id: Joi.string().uuid().optional().allow('', null)
+}).unknown(true);
 
 /**
  * GET /api/branches

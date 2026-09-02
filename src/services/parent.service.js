@@ -167,7 +167,7 @@ export const findStudentsByParentInfo = async (instituteId, info = {}) => {
   return matched.map(mapLinkedStudent);
 };
 
-export const createParent = async (instituteId, data, createdBy) => {
+export const createParent = async (instituteId, data, createdBy, branchId = null) => {
   const role = await getParentRole(instituteId);
   const password = data.password || generateNumericPassword(8);
   const password_hash = await bcrypt.hash(password, 10);
@@ -181,6 +181,7 @@ export const createParent = async (instituteId, data, createdBy) => {
 
   const parent = await User.create({
     school_id: instituteId,
+    branch_id: branchId || data.branch_id || null,
     role_id: role.id,
     user_type: 'PARENT',
     first_name: data.first_name,
@@ -228,7 +229,7 @@ export const createParent = async (instituteId, data, createdBy) => {
   };
 };
 
-export const getAllParents = async (instituteId, filters = {}, pagination = {}) => {
+export const getAllParents = async (instituteId, filters = {}, pagination = {}, branchId = null) => {
   const { page = 1, limit = 10 } = pagination;
   const offset = (page - 1) * limit;
 
@@ -236,6 +237,11 @@ export const getAllParents = async (instituteId, filters = {}, pagination = {}) 
     school_id: instituteId,
     user_type: 'PARENT'
   };
+
+  const effectiveBranchId = branchId || filters.branch_id;
+  if (effectiveBranchId) {
+    where.branch_id = effectiveBranchId;
+  }
 
   if (filters.search) {
     where[Op.or] = [
@@ -289,9 +295,12 @@ export const getAllParents = async (instituteId, filters = {}, pagination = {}) 
   };
 };
 
-export const getParentById = async (id, instituteId) => {
+export const getParentById = async (id, instituteId, branchId = null) => {
+  const where = { id, school_id: instituteId, user_type: 'PARENT' };
+  if (branchId) where.branch_id = branchId;
+
   const row = await User.findOne({
-    where: { id, school_id: instituteId, user_type: 'PARENT' },
+    where,
     attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'registration_no', 'is_active', 'details', 'qr_code_url', 'qr_code_public_id', 'created_at']
   });
   if (!row) throw new Error('Parent not found');
@@ -318,9 +327,12 @@ export const getParentById = async (id, instituteId) => {
   };
 };
 
-export const updateParent = async (id, instituteId, updateData) => {
+export const updateParent = async (id, instituteId, updateData, branchId = null) => {
+  const where = { id, school_id: instituteId, user_type: 'PARENT' };
+  if (branchId) where.branch_id = branchId;
+
   const row = await User.findOne({
-    where: { id, school_id: instituteId, user_type: 'PARENT' }
+    where
   });
   if (!row) throw new Error('Parent not found');
 
@@ -366,11 +378,13 @@ export const updateParent = async (id, instituteId, updateData) => {
   row.changed('details', true);
   await row.save();
 
-  return getParentById(id, instituteId);
+  return getParentById(id, instituteId, branchId);
 };
 
-export const deleteParent = async (id, instituteId) => {
-  const row = await User.findOne({ where: { id, school_id: instituteId, user_type: 'PARENT' } });
+export const deleteParent = async (id, instituteId, branchId = null) => {
+  const where = { id, school_id: instituteId, user_type: 'PARENT' };
+  if (branchId) where.branch_id = branchId;
+  const row = await User.findOne({ where });
   if (!row) throw new Error('Parent not found');
   row.is_active = false;
   await row.save();
@@ -380,7 +394,7 @@ export const deleteParent = async (id, instituteId) => {
 /**
  * Global Search for Parents (Space-insensitive)
  */
-export const searchParents = async (instituteId, query = {}) => {
+export const searchParents = async (instituteId, query = {}, branchId = null) => {
   const page = Math.max(1, parseInt(query.page) || 1);
   const limit = Math.min(100, parseInt(query.limit) || 20);
   const offset = (page - 1) * limit;
@@ -391,6 +405,11 @@ export const searchParents = async (instituteId, query = {}) => {
     school_id: instituteId,
     user_type: 'PARENT'
   };
+
+  const effectiveBranchId = branchId || query.branch_id;
+  if (effectiveBranchId) {
+    where.branch_id = effectiveBranchId;
+  }
 
   if (searchTerm) {
     where[Op.or] = [

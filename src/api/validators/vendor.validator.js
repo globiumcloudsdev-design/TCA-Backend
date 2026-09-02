@@ -24,7 +24,8 @@ export const createVendorSchema = Joi.object({
   qr_code_url: Joi.string().optional().allow('', null),
   qr_code_public_id: Joi.string().optional().allow('', null),
   email_verified: Joi.boolean().default(false),
-});
+  branch_id: Joi.string().uuid().optional().allow('', null),
+}).unknown(true);
 
 export const updateVendorSchema = Joi.object({
   name: Joi.string().max(255).optional(),
@@ -49,8 +50,10 @@ export const updateVendorSchema = Joi.object({
   qr_code_url: Joi.string().optional().allow('', null),
   qr_code_public_id: Joi.string().optional().allow('', null),
   email_verified: Joi.boolean().optional(),
-});
+  branch_id: Joi.string().uuid().optional().allow('', null),
+}).unknown(true);
 
 export const assignStudentsSchema = Joi.object({
   student_ids: Joi.array().items(Joi.string()).required(),
-});
+  branch_id: Joi.string().uuid().optional().allow('', null),
+}).unknown(true);

@@ -19,12 +19,9 @@ import {
   sendError,
   sendNotFound
 } from '../../utils/helpers/response.helper.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize } = models;
-
-const getInstituteId = (req) => {
-  return req.user?.school_id || req.user?.institute_id;
-};
 
 // ==================== EXAM CRUD ====================
 
@@ -38,9 +35,12 @@ export const createExam = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const examData = {
       ...req.body,
       school_id: instituteId,
+      branch_id: branchId || req.body.branch_id,
       created_by: req.user.id,
       updated_by: req.user.id
     };
@@ -67,8 +67,11 @@ export const getAllExams = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId,
       academic_year_id: req.query.academic_year_id,
       entity_type: req.query.entity_type,
       class_id: req.query.class_id,
@@ -101,12 +104,13 @@ export const getExamById = async (req, res) => {
   try {
     const { id } = req.params;
     const instituteId = getInstituteId(req);
+    const branchId = getBranchId(req);
 
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
 
-    const exam = await examService.getExamById(id, instituteId);
+    const exam = await examService.getExamById(id, instituteId, branchId);
 
     if (!exam) {
       return sendNotFound(res, 'Exam not found');

@@ -246,7 +246,7 @@ export const generateAttendanceReport = async (filters) => {
     }
 
     if (filters.class_id) {
-      query.include[0].where.class_id = filters.class_id;
+      query.where.class_id = filters.class_id;
     }
 
     // Get records
@@ -499,21 +499,21 @@ export const generateFeeReport = async (filters) => {
 export const generateExamReport = async (filters) => {
   try {
     const query = {
-      where: {
-        school_id: filters.institute_id
-      },
+      where: {},
       include: [
         {
           model: User,
-          as: 'Student',
-          attributes: ['id', 'first_name', 'last_name', 'registration_no', 'details']
+          as: 'student',
+          attributes: ['id', 'first_name', 'last_name', 'registration_no', 'details'],
+          where: { school_id: filters.institute_id }
         },
         {
           model: Exam,
+          as: 'exam',
           attributes: ['id', 'name', 'type', 'total_marks']
         }
       ],
-      order: [['marks_obtained', 'DESC']],
+      order: [['total_marks_obtained', 'DESC']],
       raw: false
     };
 
@@ -528,11 +528,13 @@ export const generateExamReport = async (filters) => {
     const results = await ExamResult.findAll(query);
 
     const formattedResults = results.map(result => ({
-      student: formatStudentInfo(result.Student),
-      exam: result.Exam?.name || 'N/A',
-      total_marks: result.Exam?.total_marks || 0,
-      marks_obtained: result.marks_obtained,
-      percentage: result.Exam?.total_marks ? ((result.marks_obtained / result.Exam.total_marks) * 100).toFixed(2) : 0,
+      student: formatStudentInfo(result.student || result.Student),
+      exam: result.exam?.name || result.Exam?.name || 'N/A',
+      total_marks: result.exam?.total_marks || result.Exam?.total_marks || result.total_marks || 0,
+      marks_obtained: result.total_marks_obtained,
+      percentage: (result.exam?.total_marks || result.Exam?.total_marks || result.total_marks)
+        ? ((result.total_marks_obtained / (result.exam?.total_marks || result.Exam?.total_marks || result.total_marks)) * 100).toFixed(2)
+        : 0,
       grade: result.grade,
       status: result.status,
       result_date: formatDate(result.created_at)
@@ -540,7 +542,7 @@ export const generateExamReport = async (filters) => {
 
     // Calculate statistics
     const avgMarks = results.length > 0
-      ? (results.reduce((sum, r) => sum + parseFloat(r.marks_obtained || 0), 0) / results.length).toFixed(2)
+      ? (results.reduce((sum, r) => sum + parseFloat(r.total_marks_obtained || 0), 0) / results.length).toFixed(2)
       : 0;
 
     const passCount = results.filter(r => r.status === 'pass').length;
@@ -781,14 +783,14 @@ export const generateAnalyticsReport = async (filters) => {
 
     // Get fee summary
     const totalFeeAmount = await sequelize.query(`
-      SELECT SUM(amount) as total FROM "Fees" WHERE school_id = $1
+      SELECT COALESCE(SUM(net_amount), 0) as total FROM "fee_vouchers" WHERE institute_id = $1
     `, {
       bind: [instituteId],
       type: sequelize.QueryTypes.SELECT
     });
 
     const totalFeePaid = await sequelize.query(`
-      SELECT SUM(paid_amount) as total FROM "Fees" WHERE school_id = $1
+      SELECT COALESCE(SUM(net_amount), 0) as total FROM "fee_vouchers" WHERE institute_id = $1 AND status = 'paid'
     `, {
       bind: [instituteId],
       type: sequelize.QueryTypes.SELECT
@@ -924,7 +926,7 @@ export const getReportOptions = async (instituteId) => {
     });
 
     const academicYears = await AcademicYear.findAll({
-      where: { school_id: instituteId },
+      where: { institute_id: instituteId },
       attributes: ['id', 'name'],
       raw: true
     });

@@ -1,0 +1,20 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "D:\\Work2026\\Dev work\\TCA-Backend\\src\\logs\\.2cc52b0709cc6412a966eb6d25b9c38709d8b5a0-audit.json",
+    "files": [
+        {
+            "date": 1788134180839,
+            "name": "D:\\Work2026\\Dev work\\TCA-Backend\\src\\logs\\exceptions-2026-08-31.log",
+            "hash": "b50ecebf5b0da5625210fe366c7c461abc107e94a96de18ae05d295631adf096"
+        },
+        {
+            "date": 1788303904687,
+            "name": "D:\\Work2026\\Dev work\\TCA-Backend\\src\\logs\\exceptions-2026-09-02.log",
+            "hash": "67afdb13c3b9f2d54656041961bac41ef9e682ad788d663112614d45275a9868"
+        }
+    ],
+    "hashType": "sha256"
+}

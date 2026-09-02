@@ -10,7 +10,7 @@ export const createLeaveRequestSchema = Joi.object({
   number_of_days: Joi.number().positive().required(),
   reason: Joi.string().max(1000).optional().allow(''),
   supporting_document: Joi.string().optional().allow(null),
-});
+}).unknown(true);
 
 export const adminMarkLeaveSchema = Joi.object({
   user_id: Joi.string().uuid().required(),
@@ -20,17 +20,20 @@ export const adminMarkLeaveSchema = Joi.object({
   number_of_days: Joi.number().positive().required(),
   reason: Joi.string().max(1000).optional().allow(''),
   approve_immediately: Joi.boolean().optional().default(false),
-});
+  branch_id: Joi.string().uuid().optional().allow(null),
+}).unknown(true);
 
 export const updateLeaveRequestSchema = Joi.object({
   reason: Joi.string().max(1000).optional().allow(''),
   supporting_document: Joi.string().optional().allow(null),
-});
+  branch_id: Joi.string().uuid().optional().allow(null),
+}).unknown(true);
 
 export const approveRejectLeaveSchema = Joi.object({
   status: Joi.string().valid('APPROVED', 'REJECTED').required(),
   approval_remarks: Joi.string().max(500).optional().allow(''),
-});
+  branch_id: Joi.string().uuid().optional().allow(null),
+}).unknown(true);
 
 export const getMyLeaveRequestsQuerySchema = Joi.object({
   page: Joi.number().min(1).default(1),
@@ -41,7 +44,8 @@ export const getMyLeaveRequestsQuerySchema = Joi.object({
   to_date: Joi.date().iso().optional(),
   sortBy: Joi.string().valid('created_at', 'from_date', 'status').default('created_at'),
   sortOrder: Joi.string().valid('ASC', 'DESC').default('DESC'),
-});
+  branch_id: Joi.string().uuid().optional().allow(null),
+}).unknown(true);
 
 export const getLeaveRequestsQuerySchema = Joi.object({
   page: Joi.number().min(1).default(1),
@@ -56,8 +60,9 @@ export const getLeaveRequestsQuerySchema = Joi.object({
   sortBy: Joi.string().valid('created_at', 'from_date', 'status', 'user_id').default('created_at'),
   sortOrder: Joi.string().valid('ASC', 'DESC').default('DESC'),
   search: Joi.string().optional(),
-});
+}).unknown(true);
 
 export const cancelLeaveRequestSchema = Joi.object({
   reason: Joi.string().max(500).optional().allow(''),
-});
+  branch_id: Joi.string().uuid().optional().allow(null),
+}).unknown(true);

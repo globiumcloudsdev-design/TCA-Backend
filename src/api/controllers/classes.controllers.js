@@ -17,6 +17,7 @@ import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinar
 import { unlink } from 'fs/promises';
 import models from '../../models/postgres/index.js';
 import path from 'path';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize } = models;
 
@@ -101,13 +102,6 @@ const extractPublicId = (url) => {
 };
 
 /**
- * Get institute ID
- */
-const getInstituteId = (req) => {
-  return req.user?.institute_id || req.user?.school_id;
-};
-
-/**
  * CREATE Class - FIXED VERSION
  */
 export const createClass = async (req, res) => {
@@ -119,6 +113,8 @@ export const createClass = async (req, res) => {
       await transaction.rollback();
       return sendError(res, 'Institute ID not found', 400);
     }
+
+    const branchId = getBranchId(req);
 
     console.log('📥 RAW Request Body:', req.body);
     console.log('📥 RAW Files:', req.files?.map(f => ({ name: f.originalname, size: f.size })));
@@ -164,6 +160,7 @@ export const createClass = async (req, res) => {
     // 5. Prepare final data
     const classData = {
       institute_id: instituteId,
+      branch_id: branchId || body.branch_id || null,
       name: body.name,
       description: body.description || '',
       academic_year_id: body.academic_year_id,
@@ -260,8 +257,11 @@ export const getAllClasses = async (req, res) => {
     const instituteId = getInstituteId(req);
     if (!instituteId) return sendError(res, 'Institute ID not found', 400);
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId,
       academic_year_id: req.query.academic_year_id,
       status: req.query.status,
       is_active: req.query.is_active,
@@ -291,9 +291,12 @@ export const getClassOptions = async (req, res) => {
     const instituteId = getInstituteId(req);
     if (!instituteId) return sendError(res, 'Institute ID not found', 400);
 
+    const branchId = getBranchId(req);
+
     const options = await classService.getClassOptions(
       instituteId,
-      req.query.academic_year_id
+      req.query.academic_year_id,
+      branchId
     );
 
     return sendSuccess(res, options, 'Class options fetched successfully');
@@ -314,7 +317,9 @@ export const getClassById = async (req, res) => {
     
     if (!instituteId) return sendError(res, 'Institute ID not found', 400);
 
-    const classData = await classService.getClassById(id, instituteId);
+    const branchId = getBranchId(req);
+
+    const classData = await classService.getClassById(id, instituteId, branchId);
     if (!classData) return sendNotFound(res, 'Class not found');
 
     return sendSuccess(res, classData, 'Class fetched successfully');
@@ -336,7 +341,9 @@ export const deleteClass = async (req, res) => {
     
     if (!instituteId) return sendError(res, 'Institute ID not found', 400);
 
-    const result = await classService.deleteClass(id, instituteId);
+    const branchId = getBranchId(req);
+
+    const result = await classService.deleteClass(id, instituteId, branchId);
     return sendSuccess(res, null, result.message);
 
   } catch (error) {

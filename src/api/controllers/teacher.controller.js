@@ -224,8 +224,10 @@ export const getTeacherById = async (req, res) => {
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
+
+    const branchId = getBranchId(req);
         
-    const teacher = await teacherService.getTeacherById(id, instituteId);
+    const teacher = await teacherService.getTeacherById(id, instituteId, branchId);
     
     if (!teacher) {
       return sendNotFound(res, 'Teacher not found');
@@ -368,11 +370,6 @@ export const toggleTeacherStatus = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    if (is_active === undefined) {
-      await transaction.rollback();
-      return sendError(res, 'is_active field is required', 400);
-    }
-    
     const teacher = await User.findOne({
       where: { id, school_id: instituteId, user_type: 'TEACHER' }
     });
@@ -382,7 +379,8 @@ export const toggleTeacherStatus = async (req, res) => {
       return sendNotFound(res, 'Teacher not found');
     }
     
-    teacher.is_active = is_active;
+    const newStatus = is_active !== undefined ? is_active : !teacher.is_active;
+    teacher.is_active = newStatus;
     await teacher.save({ transaction });
     
     await transaction.commit();
@@ -390,7 +388,7 @@ export const toggleTeacherStatus = async (req, res) => {
     return sendSuccess(res, { 
       id: teacher.id, 
       is_active: teacher.is_active 
-    }, `Teacher ${is_active ? 'activated' : 'deactivated'} successfully`);
+    }, `Teacher ${newStatus ? 'activated' : 'deactivated'} successfully`);
     
   } catch (error) {
     await transaction.rollback();

@@ -235,20 +235,25 @@ export const seedRoles = async (models) => {
   let updated = 0;
 
   for (const roleDef of ROLE_DEFINITIONS) {
-    const [role, wasCreated] = await Role.findOrCreate({
+    let role = await Role.findOne({
       where: { code: roleDef.code, school_id: null },
-      defaults: roleDef,
+      paranoid: false,
     });
 
-    if (!wasCreated) {
+    if (role) {
+      if (role.deleted_at) {
+        await role.restore();
+      }
       await role.update({
         name:        roleDef.name,
         description: roleDef.description,
         permissions: roleDef.permissions,
         is_template: true,
+        is_active:   true,
       });
       updated++;
     } else {
+      await Role.create(roleDef);
       created++;
     }
   }

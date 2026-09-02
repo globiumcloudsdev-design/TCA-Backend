@@ -10,9 +10,10 @@ import { Op } from 'sequelize';
 /**
  * Mark attendance for a class (bulk)
  */
-export const markAttendance = async (schoolId, classId, date, records, markedBy) => {
+export const markAttendance = async (schoolId, classId, date, records, markedBy, branchId = null) => {
   const attendanceData = records.map((r) => ({
     school_id: schoolId,
+    branch_id: branchId || null,
     class_id: classId,
     student_id: r.studentId,
     date,
@@ -31,9 +32,12 @@ export const markAttendance = async (schoolId, classId, date, records, markedBy)
 /**
  * Get attendance by class and date
  */
-export const getAttendanceByClassDate = async (schoolId, classId, date) => {
+export const getAttendanceByClassDate = async (schoolId, classId, date, branchId = null) => {
+  const where = { school_id: schoolId, class_id: classId, date };
+  if (branchId) where.branch_id = branchId;
+
   const attendance = await Attendance.findAll({
-    where: { school_id: schoolId, class_id: classId, date },
+    where,
     include: [{ model: User, attributes: ['id', 'first_name', 'last_name', 'registration_no', 'details'] }],
   });
   return attendance;
@@ -42,13 +46,16 @@ export const getAttendanceByClassDate = async (schoolId, classId, date) => {
 /**
  * Get student attendance summary
  */
-export const getStudentAttendanceSummary = async (schoolId, studentId, startDate, endDate) => {
+export const getStudentAttendanceSummary = async (schoolId, studentId, startDate, endDate, branchId = null) => {
+  const where = {
+    school_id: schoolId,
+    student_id: studentId,
+    date: { [Op.between]: [startDate, endDate] },
+  };
+  if (branchId) where.branch_id = branchId;
+
   const records = await Attendance.findAll({
-    where: {
-      school_id: schoolId,
-      student_id: studentId,
-      date: { [Op.between]: [startDate, endDate] },
-    },
+    where,
   });
 
   const total = records.length;

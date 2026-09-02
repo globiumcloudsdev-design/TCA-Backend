@@ -411,6 +411,7 @@ export const createStudent = async (data, options = {}) => {
     const userData = {
       id: uuidv4(),
       school_id: data.institute_id,
+      branch_id: data.branch_id || null,
       role_id: studentRole.id,
       user_type: "STUDENT",
       first_name: data.first_name,
@@ -661,6 +662,10 @@ export const getAllStudents = async (filters = {}, pagination = {}) => {
     school_id: filters.institute_id,
     user_type: "STUDENT",
   };
+
+  if (filters.branch_id) {
+    where.branch_id = filters.branch_id;
+  }
 
   if (filters.search) {
     where[Op.or] = [
@@ -1451,16 +1456,19 @@ export const getStudentsByClass = async (classId, instituteId) => {
 /**
  * Get students by section
  */
-export const getStudentsBySection = async (sectionId, instituteId) => {
+export const getStudentsBySection = async (sectionId, instituteId, branchId = null) => {
+  const where = {
+    school_id: instituteId,
+    user_type: "STUDENT",
+    is_active: true,
+    [Op.and]: sequelize.literal(
+      `"User"."details"->'studentDetails'->>'section_id' = '${sectionId}'`,
+    ),
+  };
+  if (branchId) where.branch_id = branchId;
+
   return await User.findAll({
-    where: {
-      school_id: instituteId,
-      user_type: "STUDENT",
-      is_active: true,
-      [Op.and]: sequelize.literal(
-        `"User"."details"->'studentDetails'->>'section_id' = '${sectionId}'`,
-      ),
-    },
+    where,
     order: [["first_name", "ASC"]],
   });
 };
@@ -1470,6 +1478,7 @@ export const getStudentsBySection = async (sectionId, instituteId) => {
  */
 export const getStudentStats = async (instituteId, filters = {}) => {
   const where = { school_id: instituteId, user_type: "STUDENT" };
+  if (filters.branch_id) where.branch_id = filters.branch_id;
   
   if (filters.academicYearId) {
     where[Op.and] = where[Op.and] || [];
@@ -1494,21 +1503,27 @@ export const getStudentStats = async (instituteId, filters = {}) => {
 
   const inactive = total - active;
 
+  const maleWhere = {
+    school_id: instituteId,
+    user_type: "STUDENT",
+    "details.studentDetails.gender": "male",
+  };
+  if (filters.branch_id) maleWhere.branch_id = filters.branch_id;
+
   // Get gender distribution
   const maleCount = await User.count({
-    where: {
-      school_id: instituteId,
-      user_type: "STUDENT",
-      "details.studentDetails.gender": "male",
-    },
+    where: maleWhere,
   });
 
+  const femaleWhere = {
+    school_id: instituteId,
+    user_type: "STUDENT",
+    "details.studentDetails.gender": "female",
+  };
+  if (filters.branch_id) femaleWhere.branch_id = filters.branch_id;
+
   const femaleCount = await User.count({
-    where: {
-      school_id: instituteId,
-      user_type: "STUDENT",
-      "details.studentDetails.gender": "female",
-    },
+    where: femaleWhere,
   });
 
   return {
@@ -1905,6 +1920,7 @@ export const bulkImportStudents = async (
         usersToCreate.push({
           id: uuidv4(),
           school_id: instituteId,
+          branch_id: options.branch_id || s.branch_id || null,
           role_id: studentRole.id,
           user_type: "STUDENT",
           first_name: firstName,

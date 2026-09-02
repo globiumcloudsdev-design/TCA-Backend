@@ -17,12 +17,7 @@ import models from '../../models/postgres/index.js';
 
 const { sequelize } = models;
 
-/**
- * Helper to get institute ID from user
- */
-const getInstituteId = (req) => {
-  return req.user?.institute_id || req.user?.school_id || req.user?.schoolId;
-};
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 /**
  * Create academic year
@@ -36,9 +31,12 @@ export const createAcademicYear = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const academicYearData = {
       ...req.body,
       institute_id: instituteId,
+      branch_id: branchId || req.body.branch_id || null,
     };
 
     const academicYear = await academicYearService.createAcademicYear(academicYearData, { transaction });
@@ -63,8 +61,11 @@ export const getAllAcademicYears = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId,
       is_current: req.query.is_current,
       is_active: req.query.is_active,
     };
@@ -150,10 +151,10 @@ export const deleteAcademicYear = async (req, res) => {
     return sendSuccess(res, null, result.message);
   } catch (error) {
     await transaction.rollback();
-    if (error.message === 'Academic year not found' || error.message === 'Cannot delete current academic year') {
+    if (error.message === 'Academic year not found') {
       return sendNotFound(res, error.message);
     }
-    return sendError(res, error.message || 'Failed to delete academic year');
+    return sendError(res, error.message || 'Failed to delete academic year', 400);
   }
 };
 
@@ -218,9 +219,10 @@ export const getAcademicYearOptions = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
     const onlyActive = req.query.onlyActive !== 'false'; // Default true
     
-    const result = await academicYearService.getAcademicYearOptions(instituteId, onlyActive);
+    const result = await academicYearService.getAcademicYearOptions(instituteId, onlyActive, branchId);
     
     return sendSuccess(res, result.data, 'Academic year options fetched successfully');
   } catch (error) {

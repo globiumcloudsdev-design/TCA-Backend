@@ -17,16 +17,32 @@ export const seedMasterAdmin = async (models) => {
   const saltRounds = config.bcrypt.saltRounds;
 
   // Resolve MASTER_ADMIN template role
-  const masterRole = await Role.findOne({ where: { code: 'MASTER_ADMIN', school_id: null } });
+  const masterRole = await Role.findOne({ where: { code: 'MASTER_ADMIN', school_id: null }, paranoid: false });
   if (!masterRole) {
     throw new Error('MASTER_ADMIN role not found — ensure roles seeder ran first (01.roles.seed.js)');
   }
 
   const password_hash = await bcrypt.hash(password, saltRounds);
 
-  const [, created] = await User.scope('withPassword').findOrCreate({
+  let user = await User.scope('withPassword').findOne({
     where: { email },
-    defaults: {
+    paranoid: false,
+  });
+
+  if (user) {
+    if (user.deleted_at) {
+      await user.restore();
+    }
+    await user.update({
+      password_hash,
+      role_id: masterRole.id,
+      user_type: 'MASTER_ADMIN',
+      email_verified: true,
+      is_active: true,
+    });
+    console.log(`ℹ️  Master Admin already exists / updated: ${email}`);
+  } else {
+    await User.create({
       first_name:     'Master',
       last_name:      'Admin',
       email,
@@ -37,17 +53,12 @@ export const seedMasterAdmin = async (models) => {
       email_verified: true,
       is_active:      true,
       details:        {},
-    },
-  });
-
-  if (created) {
+    });
     console.log(`✅ Master Admin created: ${email}`);
     console.log('─'.repeat(55));
     console.log('  🔐  MASTER ADMIN LOGIN CREDENTIALS');
     console.log(`  Email    : ${email}`);
     console.log(`  Password : ${password}`);
     console.log('─'.repeat(55));
-  } else {
-    console.log(`ℹ️  Master Admin already exists: ${email}`);
   }
 };

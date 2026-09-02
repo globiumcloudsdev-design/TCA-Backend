@@ -26,6 +26,7 @@ router.use(protect);
 router.get('/statistics/my-stats', leaveRequestController.getMyLeaveStatistics);
 
 // Get my leave requests
+router.get('/my', validate(getMyLeaveRequestsQuerySchema, 'query'), leaveRequestController.getMyLeaveRequests);
 router.get('/my-requests', validate(getMyLeaveRequestsQuerySchema, 'query'), leaveRequestController.getMyLeaveRequests);
 
 // Create new leave request
@@ -68,6 +69,11 @@ router.patch(
 );
 
 // Approve or reject leave request
+router.patch(
+  '/:id/status',
+  validate(approveRejectLeaveSchema),
+  leaveRequestController.approveRejectLeaveRequest
+);
 router.patch(
   '/:id/approve-reject',
   validate(approveRejectLeaveSchema),

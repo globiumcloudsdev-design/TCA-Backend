@@ -45,19 +45,29 @@ export const schoolContext = catchAsync(async (req, res, next) => {
   req.institute = institute;
   req.school    = institute; // backward-compat alias
 
-  // ── Branch context (optional) ────────────────────────────────────────────
+  // ── Branch context (enforces security isolation) ────────────────────────
   const hasBranches = institute.settings?.has_branches ?? institute.has_branches ?? false;
-  if (hasBranches) {
-    const headerBranchId = req.headers['x-branch-id'];
-    if (headerBranchId) {
-      req.branch_id = headerBranchId;
-    } else if (req.user?.branch_id) {
-      req.branch_id = req.user.branch_id;
-    } else {
-      req.branch_id = null;
-    }
+  const userType = req.user?.user_type;
+  const userBranchId = req.user?.branch_id;
+  const isBranchScoped = userType === 'BRANCH_ADMIN' || (Boolean(userBranchId) && userType !== 'INSTITUTE_ADMIN');
+
+  if (isBranchScoped && userBranchId) {
+    // Master lock for Branch Admin / Branch-scoped staff
+    req.allowedBranchId = userBranchId;
+    req.branch_id = userBranchId;
+    req.isBranchRestricted = true;
+  } else if (hasBranches) {
+    const rawBranch = req.headers['x-branch-id'] || req.query?.branch_id || req.body?.branch_id || null;
+    const targetBranch = (rawBranch && typeof rawBranch === 'string' && !['all', 'null', 'undefined', ''].includes(rawBranch.trim()))
+      ? rawBranch.trim()
+      : null;
+    req.allowedBranchId = targetBranch;
+    req.branch_id = targetBranch;
+    req.isBranchRestricted = false;
   } else {
+    req.allowedBranchId = null;
     req.branch_id = null;
+    req.isBranchRestricted = false;
   }
 
   next();

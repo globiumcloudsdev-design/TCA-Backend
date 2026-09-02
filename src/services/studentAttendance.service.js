@@ -10,20 +10,15 @@ const { StudentAttendance, User, Class, Section, Institute } = models;
  * Helper: Get active academic session from student details
  */
 const getActiveSession = (user) => {
-  const studentDetails = user?.details?.studentDetails || {};
+  const studentDetails = user?.details?.studentDetails || user?.details || {};
   const academicSessions = studentDetails.academicSessions || [];
-  const activeSession = academicSessions.find((s) => s.status === "active");
+  const activeSession = academicSessions.find((s) => s.status === "active") || {};
 
-  if (!activeSession) {
-    throw new Error("No active academic session found for this student");
-  }
-
-  // Return sanitized session with nulls instead of empty strings for UUID fields
   return {
     ...activeSession,
-    class_id: activeSession.class_id || null,
-    section_id: activeSession.section_id || null,
-    academic_year_id: activeSession.academic_year_id || null
+    class_id: activeSession.class_id || studentDetails.class_id || null,
+    section_id: activeSession.section_id || studentDetails.section_id || null,
+    academic_year_id: activeSession.academic_year_id || studentDetails.academic_year_id || null
   };
 };
 
@@ -185,6 +180,7 @@ export const markAttendance = async (data, options = {}) => {
   // 3. Prepare data
   const sanitizedData = {
     ...data,
+    status: (data.status || 'present').toLowerCase(),
     class_id: data.class_id || null,
     section_id: data.section_id || null,
     academic_year_id: data.academic_year_id || null,
@@ -246,10 +242,11 @@ export const bulkMarkAttendance = async (data, options = {}) => {
     for (const record of data.records) {
       let attendanceData = {
         school_id: data.school_id,
+        branch_id: data.branch_id || null,
         date: data.date,
         marked_by: data.marked_by,
         student_id: record.student_id,
-        status: record.status,
+        status: (record.status || 'present').toLowerCase(),
         remarks: record.remarks || null,
         type: record.type || data.type || null,
       };
@@ -420,6 +417,7 @@ export const getAttendance = async (filters = {}, pagination = {}) => {
 
   const where = {};
   if (filters.school_id) where.school_id = filters.school_id;
+  if (filters.branch_id) where.branch_id = filters.branch_id;
   if (filters.class_id) where.class_id = filters.class_id;
   if (filters.section_id) where.section_id = filters.section_id;
   if (filters.student_id) where.student_id = filters.student_id;
@@ -469,9 +467,10 @@ export const getAttendance = async (filters = {}, pagination = {}) => {
  * Get attendance report
  */
 export const getAttendanceReport = async (params) => {
-  const { school_id, class_id, section_id, student_id, month, year } = params;
+  const { school_id, branch_id, class_id, section_id, student_id, month, year } = params;
   const where = { school_id };
 
+  if (branch_id) where.branch_id = branch_id;
   if (class_id) where.class_id = class_id;
   if (section_id) where.section_id = section_id;
   if (student_id) where.student_id = student_id;

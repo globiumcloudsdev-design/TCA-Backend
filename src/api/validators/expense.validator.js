@@ -14,7 +14,8 @@ export const createExpenseSchema = Joi.object({
   status: Joi.string().valid('pending', 'approved', 'paid', 'rejected').default('pending'),
   receipt_url: Joi.string().max(500).optional().allow(null, ''),
   payment_reference: Joi.string().max(255).optional().allow(null, ''),
-}).custom((value, helpers) => {
+  branch_id: Joi.string().uuid().optional().allow(null, ''),
+}).unknown(true).custom((value, helpers) => {
   const cleaned = { ...value };
   
   // Trim and clean vendor_id
@@ -50,7 +51,8 @@ export const updateExpenseSchema = Joi.object({
   status: Joi.string().valid('pending', 'approved', 'paid', 'rejected').optional(),
   receipt_url: Joi.string().max(500).optional().allow(null, ''),
   payment_reference: Joi.string().max(255).optional().allow(null, ''),
-}).custom((value, helpers) => {
+  branch_id: Joi.string().uuid().optional().allow(null, ''),
+}).unknown(true).custom((value, helpers) => {
   const cleaned = { ...value };
   
   // Trim and clean vendor_id

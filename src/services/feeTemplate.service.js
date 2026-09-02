@@ -128,10 +128,9 @@ export const createFeeTemplate = async (data, options = {}) => {
 
   // Generate code if not provided
   if (!data.code) {
-    const count = await FeeTemplate.count({
-      where: { institute_id: data.institute_id }
-    });
-    data.code = `FT-${String(count + 1).padStart(4, '0')}`;
+    const count = await FeeTemplate.count();
+    const uniqueSuffix = Date.now().toString().slice(-4);
+    data.code = `FT-${String(count + 1).padStart(4, '0')}-${uniqueSuffix}`;
   }
 
   // Calculate totals from components

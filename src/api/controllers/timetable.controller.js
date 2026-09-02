@@ -18,15 +18,9 @@ import {
   sendError,
   sendNotFound
 } from '../../utils/helpers/response.helper.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize } = models;
-
-/**
- * Helper function: Request se institute ID nikalta hai
- */
-const getInstituteId = (req) => {
-  return req.user?.institute_id || req.user?.school_id;
-};
 
 /**
  * GET /api/v1/timetable/entities
@@ -40,11 +34,12 @@ export const getEntities = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
+    const branchId = getBranchId(req);
     const { academic_year_id } = req.query;
     
     console.log('📋 Entities fetch ho rahi hain, institute:', instituteId);
 
-    const entities = await timetableService.getTimetableEntities(instituteId, academic_year_id);
+    const entities = await timetableService.getTimetableEntities(instituteId, academic_year_id, branchId);
 
     return sendSuccess(res, entities, 'Entities fetch ho gayin');
   } catch (error) {
@@ -68,11 +63,14 @@ export const createTimetable = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
+    const branchId = getBranchId(req);
+
     console.log('📥 Timetable create ho raha hai:', req.body);
 
     const timetableData = {
       ...req.body,
       school_id: instituteId,
+      branch_id: branchId || req.body.branch_id || null,
       created_by: req.user.id,
       updated_by: req.user.id
     };
@@ -100,8 +98,11 @@ export const getAllTimetables = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId,
       academic_year_id: req.query.academic_year_id,
       entity_type: req.query.entity_type,
       class_id: req.query.class_id,
@@ -144,9 +145,11 @@ export const getTimetableById = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
+    const branchId = getBranchId(req);
+
     console.log('🔍 Timetable dhond rahe hain:', id);
 
-    const timetable = await timetableService.getTimetableById(id, instituteId);
+    const timetable = await timetableService.getTimetableById(id, instituteId, branchId);
 
     if (!timetable) {
       return sendNotFound(res, 'Timetable nahi mila');
@@ -176,10 +179,13 @@ export const updateTimetable = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
+    const branchId = getBranchId(req);
+
     console.log('📝 Timetable update ho raha hai:', id);
 
     const updateData = {
       ...req.body,
+      branch_id: branchId || req.body.branch_id || undefined,
       updated_by: req.user.id
     };
 
@@ -218,9 +224,11 @@ export const deleteTimetable = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
+    const branchId = getBranchId(req);
+
     console.log('🗑️ Timetable delete ho raha hai:', id);
 
-    const result = await timetableService.deleteTimetable(id, instituteId);
+    const result = await timetableService.deleteTimetable(id, instituteId, branchId);
 
     return sendSuccess(res, null, result.message);
   } catch (error) {
@@ -251,9 +259,11 @@ export const toggleTimetableStatus = async (req, res) => {
       return sendError(res, 'is_active field zaroori hai', 400);
     }
 
+    const branchId = getBranchId(req);
+
     console.log('🔄 Timetable status change ho raha hai:', id);
 
-    const timetable = await timetableService.toggleTimetableStatus(id, instituteId, is_active);
+    const timetable = await timetableService.toggleTimetableStatus(id, instituteId, is_active, branchId);
 
     return sendSuccess(res, timetable, `Timetable ${is_active ? 'activate' : 'deactivate'} ho gaya`);
   } catch (error) {
@@ -283,6 +293,8 @@ export const checkTeacherConflict = async (req, res) => {
       return sendError(res, 'teacher_id aur day zaroori hain', 400);
     }
 
+    const branchId = getBranchId(req);
+
     console.log('🔍 Teacher conflict check ho raha hai:', { teacher_id, day, period });
 
     const hasConflict = await timetableService.checkTeacherConflict(
@@ -292,7 +304,8 @@ export const checkTeacherConflict = async (req, res) => {
       period,
       start_time,
       end_time,
-      exclude_id
+      exclude_id,
+      branchId
     );
 
     return sendSuccess(res, { hasConflict }, 'Conflict check complete');
@@ -301,8 +314,6 @@ export const checkTeacherConflict = async (req, res) => {
     return sendError(res, error.message || 'Conflict check nahi ho saka', 500);
   }
 };
-
-// backend/src/controllers/timetable.controller.js
 
 /**
  * GET /api/v1/timetable/busy-teachers
@@ -322,6 +333,8 @@ export const getBusyTeachers = async (req, res) => {
       return sendError(res, 'day parameter zaroori hai', 400);
     }
 
+    const branchId = getBranchId(req);
+
     console.log('🔍 Busy teachers fetch ho rahe hain:', { day, period, class_id, section_id });
 
     const busyTeachers = await timetableService.getBusyTeachers(
@@ -332,7 +345,8 @@ export const getBusyTeachers = async (req, res) => {
       end_time,
       exclude_timetable_id,
       class_id,
-      section_id
+      section_id,
+      branchId
     );
 
     return sendSuccess(res, { busyTeachers }, 'Busy teachers fetch ho gaye');

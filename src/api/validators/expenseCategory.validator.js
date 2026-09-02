@@ -7,7 +7,8 @@ export const createExpenseCategorySchema = Joi.object({
   parent_category: Joi.string().max(100).optional().allow('', null),
   budget_limit: Joi.number().positive().optional().allow(null),
   is_active: Joi.boolean().default(true),
-});
+  branch_id: Joi.string().uuid().optional().allow(null, ''),
+}).unknown(true);
 
 export const updateExpenseCategorySchema = Joi.object({
   name: Joi.string().max(100).optional(),
@@ -15,4 +16,5 @@ export const updateExpenseCategorySchema = Joi.object({
   parent_category: Joi.string().max(100).optional().allow('', null),
   budget_limit: Joi.number().positive().optional().allow(null),
   is_active: Joi.boolean().optional(),
-});
+  branch_id: Joi.string().uuid().optional().allow(null, ''),
+}).unknown(true);

@@ -38,15 +38,16 @@ export const getParentDashboard = async (parentId, instituteId) => {
     })
   );
 
+  const p = parent || {};
   return {
     parent: {
-      id: parent.id,
-      name: `${parent.first_name} ${parent.last_name}`,
-      email: parent.email,
-      phone: parent.phone,
-      avatar: parent.avatar_url
+      id: p.id || parentId,
+      name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Parent',
+      email: p.email,
+      phone: p.phone,
+      avatar: p.avatar_url
     },
-    wards: wardsData,
+    wards: wardsData || [],
     total_wards: wards.length,
     recent_notices: await getRecentNotices(instituteId),
     quick_actions: [

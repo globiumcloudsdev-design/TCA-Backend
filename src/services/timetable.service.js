@@ -28,21 +28,31 @@ const { Timetable, Class, User, Subject, AcademicYear } = models;
  * - Subjects (from Class.courses JSONB)
  * - Courses, Batches, Programs, Departments, Semesters
  */
-export const getTimetableEntities = async (instituteId, academicYearId) => {
+export const getTimetableEntities = async (instituteId, academicYearId, branchId = null) => {
   // console.log('📋 Entities fetch ho rahi hain institute:', instituteId);
 
   const entities = {};
 
+  const academicYearWhere = { institute_id: instituteId };
+  if (branchId) {
+    academicYearWhere[Op.or] = [{ branch_id: branchId }, { branch_id: null }];
+  }
+
   // 1. Academic Years fetch karo
   entities.academicYears = await AcademicYear.findAll({
-    where: { school_id: instituteId },
+    where: academicYearWhere,
     attributes: ['id', 'name', 'start_date', 'end_date', 'is_current'],
     order: [['start_date', 'DESC']]
   });
 
+  const classWhere = { school_id: instituteId, is_active: true };
+  if (branchId) {
+    classWhere.branch_id = branchId;
+  }
+
   // 2. Classes fetch karo with their sections (JSONB se)
   const classes = await Class.findAll({
-    where: { school_id: instituteId, is_active: true },
+    where: classWhere,
     attributes: ['id', 'name', 'sections', 'courses'],
     order: [['name', 'ASC']]
   });
@@ -58,9 +68,14 @@ export const getTimetableEntities = async (instituteId, academicYearId) => {
     }))
   }));
 
+  const teacherWhere = { school_id: instituteId, user_type: 'TEACHER', is_active: true };
+  if (branchId) {
+    teacherWhere.branch_id = branchId;
+  }
+
   // 3. Teachers fetch karo
   entities.teachers = await User.findAll({
-    where: { school_id: instituteId, user_type: 'TEACHER', is_active: true },
+    where: teacherWhere,
     attributes: ['id', 'first_name', 'last_name'],
     order: [['first_name', 'ASC']]
   });
@@ -194,6 +209,7 @@ export const createTimetable = async (data, options = {}) => {
   const timetable = await Timetable.create({
     id: uuidv4(),
     school_id: data.school_id,
+    branch_id: data.branch_id || null,
     academic_year_id: data.academic_year_id,
     entity_type: data.entity_type,
     entity_ids: data.entity_ids,
@@ -224,8 +240,13 @@ export const updateTimetable = async (id, instituteId, updateData, options = {})
 
   // console.log('📝 Timetable update ho raha hai:', id);
 
+  const where = { id, school_id: instituteId };
+  if (updateData.branch_id) {
+    where.branch_id = updateData.branch_id;
+  }
+
   const timetable = await Timetable.findOne({
-    where: { id, school_id: instituteId }
+    where
   });
 
   if (!timetable) {
@@ -334,6 +355,10 @@ export const getAllTimetables = async (filters = {}, pagination = {}) => {
 
   const where = { school_id: filters.institute_id };
 
+  if (filters.branch_id) {
+    where.branch_id = filters.branch_id;
+  }
+
   if (filters.academic_year_id) {
     where.academic_year_id = filters.academic_year_id;
   }
@@ -397,11 +422,14 @@ export const getAllTimetables = async (filters = {}, pagination = {}) => {
  * -------------------------------------
  * Ek timetable ki details fetch karta hai
  */
-export const getTimetableById = async (id, instituteId) => {
+export const getTimetableById = async (id, instituteId, branchId = null) => {
   // console.log('🔍 Timetable dhond rahe hain:', id);
 
+  const where = { id, school_id: instituteId };
+  if (branchId) where.branch_id = branchId;
+
   const timetable = await Timetable.findOne({
-    where: { id, school_id: instituteId },
+    where,
     include: [
       { model: AcademicYear, as: 'academicYear', attributes: ['id', 'name'] }
     ]
@@ -419,11 +447,14 @@ export const getTimetableById = async (id, instituteId) => {
  * ------------------------------------
  * Timetable delete karta hai
  */
-export const deleteTimetable = async (id, instituteId) => {
+export const deleteTimetable = async (id, instituteId, branchId = null) => {
   // console.log('🗑️ Timetable delete ho raha hai:', id);
 
+  const where = { id, school_id: instituteId };
+  if (branchId) where.branch_id = branchId;
+
   const timetable = await Timetable.findOne({
-    where: { id, school_id: instituteId }
+    where
   });
 
   if (!timetable) {
@@ -441,11 +472,14 @@ export const deleteTimetable = async (id, instituteId) => {
  * ----------------------------------------------------
  * Timetable ko activate/deactivate karta hai
  */
-export const toggleTimetableStatus = async (id, instituteId, isActive) => {
+export const toggleTimetableStatus = async (id, instituteId, isActive, branchId = null) => {
   // console.log('🔄 Timetable status change ho raha hai:', id, 'to:', isActive);
 
+  const where = { id, school_id: instituteId };
+  if (branchId) where.branch_id = branchId;
+
   const timetable = await Timetable.findOne({
-    where: { id, school_id: instituteId }
+    where
   });
 
   if (!timetable) {
@@ -510,15 +544,18 @@ export const toggleTimetableStatus = async (id, instituteId, isActive) => {
  * Specific day aur period ke liye busy teachers fetch karta hai
  * Agar koi teacher already kisi class mein busy hai to woh yahan aayega
  */
-export const getBusyTeachers = async (instituteId, day, period, startTime, endTime, excludeTimetableId, classId, sectionId) => {
+export const getBusyTeachers = async (instituteId, day, period, startTime, endTime, excludeTimetableId, classId, sectionId, branchId = null) => {
   // console.log('🔍 Busy teachers fetch ho rahe hain:', { day, period, classId, sectionId });
+
+  const where = {
+    school_id: instituteId,
+    is_active: true
+  };
+  if (branchId) where.branch_id = branchId;
 
   // Active timetables fetch karo
   const timetables = await Timetable.findAll({
-    where: {
-      school_id: instituteId,
-      is_active: true
-    },
+    where,
     include: [
       { model: AcademicYear, as: 'academicYear', attributes: ['id', 'name', 'is_current'] }
     ]
@@ -611,14 +648,17 @@ export const getBusyTeachers = async (instituteId, day, period, startTime, endTi
 };
 
 // Update checkTeacherConflict function
-export const checkTeacherConflict = async (instituteId, teacherId, day, period, startTime, endTime, excludeId = null) => {
+export const checkTeacherConflict = async (instituteId, teacherId, day, period, startTime, endTime, excludeId = null, branchId = null) => {
   console.log('🔍 Teacher conflict check ho raha hai:', { teacherId, day, period });
 
+  const where = {
+    school_id: instituteId,
+    is_active: true
+  };
+  if (branchId) where.branch_id = branchId;
+
   const timetables = await Timetable.findAll({
-    where: {
-      school_id: instituteId,
-      is_active: true
-    }
+    where
   });
 
   for (const timetable of timetables) {

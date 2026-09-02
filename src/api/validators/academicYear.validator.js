@@ -24,8 +24,9 @@ export const createAcademicYearSchema = Joi.object({
   is_current: Joi.boolean().default(false),
   is_active: Joi.boolean().default(true),
   description: Joi.string().max(500).optional().allow('', null),
-  institute_id: Joi.string().optional(), // Controller uses auth user's institute_id, body value is ignored
-});
+  institute_id: Joi.string().optional(),
+  branch_id: Joi.string().uuid().optional().allow('', null),
+}).unknown(true);
 
 export const updateAcademicYearSchema = Joi.object({
   name: Joi.string().max(20).optional(),
@@ -35,4 +36,5 @@ export const updateAcademicYearSchema = Joi.object({
   is_active: Joi.boolean().optional(),
   description: Joi.string().max(500).optional().allow('', null),
   institute_id: Joi.string().optional(),
-}).min(1);
+  branch_id: Joi.string().uuid().optional().allow('', null),
+}).min(1).unknown(true);

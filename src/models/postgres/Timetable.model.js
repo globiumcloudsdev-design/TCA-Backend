@@ -31,6 +31,14 @@ const Timetable = sequelize.define(
       comment: 'Kis institute ka timetable hai (FK → institutes.id)'
     },
 
+    branch_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'branches', key: 'id' },
+      onDelete: 'SET NULL',
+      comment: 'Optional branch for this timetable (FK → branches.id)'
+    },
+
     academic_year_id: {
       type: DataTypes.UUID,
       allowNull: false,
@@ -174,6 +182,7 @@ const Timetable = sequelize.define(
 
 Timetable.associate = (models) => {
   Timetable.belongsTo(models.Institute, { foreignKey: 'school_id', as: 'institute' });
+  Timetable.belongsTo(models.Branch, { foreignKey: 'branch_id', as: 'branch' });
   Timetable.belongsTo(models.AcademicYear, { foreignKey: 'academic_year_id', as: 'academicYear' });
   Timetable.belongsTo(models.User, { foreignKey: 'created_by', as: 'creator' });
   Timetable.belongsTo(models.User, { foreignKey: 'updated_by', as: 'updater' });

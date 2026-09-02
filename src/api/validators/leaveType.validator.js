@@ -33,7 +33,8 @@ export const createLeaveTypeSchema = Joi.object({
     .messages({
       'string.pattern.base': 'Color code must be a valid hex color (e.g., #3B82F6)',
     }),
-}).unknown(false);
+  branch_id: Joi.string().uuid().optional().allow(null, ''),
+}).unknown(true);
 
 /**
  * Update Leave Type Schema
@@ -61,7 +62,8 @@ export const updateLeaveTypeSchema = Joi.object({
       'string.pattern.base': 'Color code must be a valid hex color (e.g., #3B82F6)',
     }),
   is_active: Joi.boolean().optional(),
-}).unknown(false);
+  branch_id: Joi.string().uuid().optional().allow(null, ''),
+}).unknown(true);
 
 /**
  * Get Leave Types Query Schema
@@ -71,4 +73,5 @@ export const getLeaveTypesQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(10).optional(),
   is_active: Joi.string().valid('true', 'false').optional(),
   search: Joi.string().max(100).optional(),
-}).unknown(false);
+  branch_id: Joi.string().uuid().optional().allow(null, ''),
+}).unknown(true);

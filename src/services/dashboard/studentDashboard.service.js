@@ -18,7 +18,7 @@ import { Op } from 'sequelize';
 import models from '../../models/postgres/index.js';
 import { startOfWeek, endOfWeek, format } from 'date-fns';
 
-const { User, Timetable, FeeVoucher, Attendance, sequelize } = models;
+const { User, Timetable, FeeVoucher, StudentAttendance, sequelize } = models;
 
 /**
  * Get complete student dashboard data
@@ -50,22 +50,23 @@ export const getStudentDashboard = async (studentId, instituteId) => {
     getStudentStatistics(studentId, instituteId)
   ]);
 
+  const s = student || {};
   return {
     student: {
-      id: student.id,
-      name: `${student.first_name} ${student.last_name}`,
-      registration_no: student.registration_no,
-      avatar: student.avatar_url,
-      class: student.details?.class_name,
-      section: student.details?.section_name,
-      roll_number: student.details?.roll_number,
-      guardian: student.details?.guardian_name
+      id: s.id || studentId,
+      name: `${s.first_name || ''} ${s.last_name || ''}`.trim() || 'Student',
+      registration_no: s.registration_no,
+      avatar: s.avatar_url,
+      class: s.details?.class_name,
+      section: s.details?.section_name,
+      roll_number: s.details?.roll_number,
+      guardian: s.details?.guardian_name
     },
     my_classes: myClasses,
     weekly_timetable: weeklyTimetable,
     attendance: {
-      summary: attendance.summary,
-      recent: attendance.recent
+      summary: attendance?.summary || {},
+      recent: attendance?.recent || []
     },
     recent_results: recentResults,
     fee_status: feeStatus,
@@ -172,7 +173,7 @@ const getStudentAttendance = async (studentId, instituteId) => {
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
   const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
-  const attendance = await Attendance.findAll({
+  const attendance = await StudentAttendance.findAll({
     where: {
       school_id: instituteId,
       student_id: studentId,
@@ -231,7 +232,7 @@ const getRecentResults = async (studentId, instituteId) => {
 const getStudentFeeStatus = async (studentId, instituteId) => {
   const vouchers = await FeeVoucher.findAll({
     where: {
-      school_id: instituteId,
+      institute_id: instituteId,
       student_id: studentId
     },
     order: [['due_date', 'ASC']],
@@ -240,7 +241,7 @@ const getStudentFeeStatus = async (studentId, instituteId) => {
 
   const totalDue = await FeeVoucher.sum('net_amount', {
     where: {
-      school_id: instituteId,
+      institute_id: instituteId,
       student_id: studentId,
       status: { [Op.in]: ['pending', 'overdue'] }
     }

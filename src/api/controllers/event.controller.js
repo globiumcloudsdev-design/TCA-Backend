@@ -53,9 +53,11 @@ export const getAllEvents = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
-      branch_id: req.query.branch_id,
+      branch_id: branchId,
       event_type: req.query.event_type,
       status: req.query.status,
       audience_type: req.query.audience_type,
@@ -201,7 +203,7 @@ export const toggleEventStatus = async (req, res) => {
 export const getUpcomingEvents = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
-    const branch_id = req.query.branch_id;
+    const branch_id = getBranchId(req);
     const limit = parseInt(req.query.limit, 10) || 10;
 
     if (!instituteId) {

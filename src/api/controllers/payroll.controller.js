@@ -2,14 +2,14 @@ import sequelize from '../../config/database.js';
 import Payslip from '../../models/postgres/Payslip.model.js';
 import * as payrollService from '../../services/payrollGeneration.service.js';
 import { sendSuccess, sendCreated, sendPaginated, sendError, sendNotFound, sendBadRequest } from '../../utils/helpers/response.helper.js';
-
-const getInstituteId = (req) => req.user?.institute_id || req.user?.school_id;
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 export const generatePayroll = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
     if (!instituteId) return sendBadRequest(res, 'Institute ID not found');
 
+    const branchId = getBranchId(req);
     const { month, year, category, staff_ids } = req.body;
     if (!month || !year) return sendBadRequest(res, 'Month and year are required');
 
@@ -18,6 +18,7 @@ export const generatePayroll = async (req, res) => {
       year: parseInt(year),
       category,
       staffIds: staff_ids,
+      branchId
     });
     return sendSuccess(res, result, 'Payroll generation completed');
   } catch (error) {
@@ -30,9 +31,11 @@ export const getAllPayslips = async (req, res) => {
     const instituteId = getInstituteId(req);
     if (!instituteId) return sendBadRequest(res, 'Institute ID not found');
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
-      branch_id: req.query.branch_id,
+      branch_id: branchId || req.query.branch_id,
       staff_id: req.query.staff_id,
       month: req.query.month,
       year: req.query.year,
@@ -100,8 +103,14 @@ export const getPayrollYears = async (req, res) => {
       return sendBadRequest(res, 'Institute ID not found');
     }
 
+    const branchId = getBranchId(req);
+    const where = { institute_id: instituteId };
+    if (branchId) {
+      where.branch_id = branchId;
+    }
+
     const years = await Payslip.findAll({
-      where: { institute_id: instituteId },
+      where,
       attributes: [[sequelize.fn('DISTINCT', sequelize.col('year')), 'year']],
       order: [[sequelize.col('year'), 'DESC']],
       raw: true,

@@ -35,6 +35,7 @@ const FeePayment = sequelize.define(
 FeePayment.associate = (models) => {
   FeePayment.belongsTo(models.Institute, { foreignKey: 'school_id', as: 'institute' });
   FeePayment.belongsTo(models.FeeVoucher, { foreignKey: 'voucher_id' });
+  FeePayment.belongsTo(models.User, { foreignKey: 'collected_by', as: 'collector' });
 };
 
 export default FeePayment;

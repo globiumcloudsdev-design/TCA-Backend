@@ -174,6 +174,7 @@ export const createTeacher = async (data, options = {}) => {
     const userData = {
       id: uuidv4(),
       school_id: data.institute_id,
+      branch_id: data.branch_id || null,
       role_id: teacherRole.id,
       user_type: 'TEACHER',
       first_name: data.first_name,
@@ -357,6 +358,10 @@ export const getAllTeachers = async (filters = {}, pagination = {}) => {
     school_id: filters.institute_id,
     user_type: 'TEACHER'
   };
+
+  if (filters.branch_id) {
+    where.branch_id = filters.branch_id;
+  }
   
   if (filters.search) {
     where[Op.or] = [

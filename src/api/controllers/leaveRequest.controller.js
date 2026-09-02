@@ -1,4 +1,3 @@
-// src/api/controllers/leaveRequest.controller.js
 import {
   sendSuccess,
   sendCreated,
@@ -10,22 +9,9 @@ import {
 } from '../../utils/helpers/response.helper.js';
 import * as leaveRequestService from '../../services/leaveRequest.service.js';
 import models from '../../models/postgres/index.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize } = models;
-
-/**
- * Helper to get institute ID from request
- */
-const getInstituteId = (req) => {
-  return req.user?.institute_id || req.user?.school_id || req.user?.schoolId;
-};
-
-/**
- * Helper to get branch ID from request
- */
-const getBranchId = (req) => {
-  return req.user?.branch_id || req.body?.branch_id || req.query?.branch_id;
-};
 
 /**
  * Helper to determine user type from token
@@ -132,9 +118,11 @@ export const getAllLeaveRequests = async (req, res) => {
       return sendBadRequest(res, 'Institute ID not found');
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
-      branch_id: req.query.branch_id,
+      branch_id: branchId,
       status: req.query.status,
       user_type: req.query.user_type,
       user_id: req.query.user_id,

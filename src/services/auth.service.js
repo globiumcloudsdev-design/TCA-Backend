@@ -623,6 +623,17 @@ export const impersonateUserService = async (userId) => {
   return { accessToken, refreshToken, user: userProfile };
 };
 
+export const getInstitutePoliciesService = async (instituteId, policyType = null) => {
+  const where = { institute_id: instituteId };
+  if (policyType) where.policy_type = policyType;
+  const policies = await Policy.findAll({ where, order: [['created_at', 'DESC']] });
+  const latest = {};
+  policies.forEach((p) => {
+    if (!latest[p.policy_type]) latest[p.policy_type] = p;
+  });
+  return { policies, latest };
+};
+
 export default { 
   loginService, 
   refreshTokenService, 
@@ -633,5 +644,6 @@ export default {
   loginWithAccountService,
   getInstituteDataService,
   refreshInstituteDataService,
-  impersonateUserService
+  impersonateUserService,
+  getInstitutePoliciesService
 };

@@ -16,7 +16,7 @@ import {
 
 // Helper to get institute ID from request
 const getInstituteId = (req) => {
-  return req.user?.school_id || req.user?.institute_id;
+  return req.institute?.id || req.user?.school_id || req.user?.institute_id;
 };
 
 // ==================== STUDENT REPORTS ====================

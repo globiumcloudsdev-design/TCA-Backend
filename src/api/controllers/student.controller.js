@@ -16,15 +16,9 @@ import {
   sendNotFound,
   sendNoContent
 } from '../../utils/helpers/response.helper.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize, User } = models;
-
-/**
- * Get institute ID from request
- */
-const getInstituteId = (req) => {
-  return req.user?.institute_id || req.user?.school_id;
-};
 
 /**
  * Get institute type from request
@@ -184,9 +178,12 @@ export const createStudent = async (req, res) => {
     }
     
     // Prepare data for service
+    const branchId = getBranchId(req);
+
     const studentData = {
       ...body,
       institute_id: instituteId,
+      branch_id: branchId || body.branch_id || null,
       created_by: req.user.id,
       date_of_birth: body.dob || body.date_of_birth,
       guardians: body.guardians,
@@ -233,9 +230,12 @@ export const getAllStudents = async (req, res) => {
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
+
+    const branchId = getBranchId(req);
     
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId,
       search: req.query.search,
       status: req.query.status,
       class_id: req.query.class_id,
@@ -618,9 +618,11 @@ export const getStudentStats = async (req, res) => {
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
+
+    const branchId = getBranchId(req);
     
     const { academicYearId, classId, sectionId } = req.query;
-    const stats = await studentService.getStudentStats(instituteId, { academicYearId, classId, sectionId });
+    const stats = await studentService.getStudentStats(instituteId, { academicYearId, classId, sectionId, branch_id: branchId });
     
     return sendSuccess(res, stats, 'Student statistics fetched successfully');
     
@@ -639,6 +641,7 @@ export const bulkImportStudents = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
     const instituteType = getInstituteType(req);
+    const branchId = getBranchId(req);
     
     let { students } = req.body;
     
@@ -659,7 +662,11 @@ export const bulkImportStudents = async (req, res) => {
       students,
       instituteId,
       instituteType,
-      { created_by: req.user.id }
+      {
+        created_by: req.user.id,
+        branch_id: branchId || req.body.branch_id || null,
+        send_emails: req.body.send_emails === true || req.body.send_emails === 'true'
+      }
     );
     
     // Determine response status based on results

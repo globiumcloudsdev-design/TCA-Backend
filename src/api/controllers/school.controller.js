@@ -12,7 +12,8 @@ import * as schoolService from '../../services/school.service.js';
 // Returns the school profile for the currently authenticated school context,
 // including its assigned role and that role's permissions.
 export const getSchoolProfile = catchAsync(async (req, res) => {
-  const school = await schoolService.getSchoolProfile(req.school.id);
+  const schoolId = req.institute?.id || req.school?.id || req.user?.school_id;
+  const school = await schoolService.getSchoolProfile(schoolId);
   sendSuccess(res, school, 'School profile fetched successfully');
 });
 
@@ -22,14 +23,16 @@ export const getSchoolProfile = catchAsync(async (req, res) => {
 // Body: { role_id: "uuid" }
 export const assignRoleToSchool = catchAsync(async (req, res) => {
   const { role_id } = req.body;
-  const result = await schoolService.assignRoleToSchool(req.school.id, role_id);
+  const schoolId = req.institute?.id || req.school?.id || req.user?.school_id;
+  const result = await schoolService.assignRoleToSchool(schoolId, role_id);
   sendSuccess(res, result, 'Role assigned to school successfully');
 });
 
 // DELETE /api/v1/schools/assign-role
 // Removes the role from the school (sets role_id = null)
 export const removeRoleFromSchool = catchAsync(async (req, res) => {
-  await schoolService.removeRoleFromSchool(req.school.id);
+  const schoolId = req.institute?.id || req.school?.id || req.user?.school_id;
+  await schoolService.removeRoleFromSchool(schoolId);
   sendNoContent(res);
 });
 
@@ -37,6 +40,7 @@ export const removeRoleFromSchool = catchAsync(async (req, res) => {
 // Update school settings: toggle has_branches, etc.
 // Body: { has_branches: true, name: "..." }
 export const updateSchoolSettings = catchAsync(async (req, res) => {
-  const school = await schoolService.updateSchoolSettings(req.school.id, req.body);
+  const schoolId = req.institute?.id || req.school?.id || req.user?.school_id;
+  const school = await schoolService.updateSchoolSettings(schoolId, req.body);
   sendSuccess(res, school, 'School settings updated successfully');
 });

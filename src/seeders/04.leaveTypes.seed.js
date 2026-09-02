@@ -134,22 +134,27 @@ export const seedLeaveTypes = async (models, instituteId) => {
   let skipped = 0;
 
   for (const leaveType of DEFAULT_LEAVE_TYPES) {
-    const [, isNew] = await LeaveType.findOrCreate({
+    let record = await LeaveType.findOne({
       where: {
         institute_id: instituteId,
         leave_type_name: leaveType.leave_type_name,
       },
-      defaults: {
-        institute_id: instituteId,
-        ...leaveType,
-      },
+      paranoid: false,
     });
 
-    if (isNew) {
+    if (record) {
+      if (record.deleted_at) {
+        await record.restore();
+      }
+      await record.update(leaveType);
+      skipped++;
+    } else {
+      await LeaveType.create({
+        institute_id: instituteId,
+        ...leaveType,
+      });
       console.log(`  ✅ ${leaveType.leave_type_name}`);
       created++;
-    } else {
-      skipped++;
     }
   }
 

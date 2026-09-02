@@ -6,14 +6,22 @@
 import * as feeVoucherService from '../../services/feeVoucher.service.js';
 import catchAsync from '../../utils/lib/catchAsync.js';
 import { AppError } from '../../utils/lib/AppError.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 /**
  * Generate voucher for single student
  * POST /api/fee-vouchers/generate-single
  */
 export const generateSingleVoucher = catchAsync(async (req, res) => {
-  const { studentId, month, year, dueDate, academicYearId, feeType, feeTemplateId } = req.body;
-  const instituteId = req.user.school_id;
+  const studentId = req.body.studentId || req.body.student_id;
+  const month = req.body.month;
+  const year = req.body.year;
+  const dueDate = req.body.dueDate || req.body.due_date;
+  const academicYearId = req.body.academicYearId || req.body.academic_year_id;
+  const feeType = req.body.feeType || req.body.fee_type;
+  const feeTemplateId = req.body.feeTemplateId || req.body.fee_template_id;
+  const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
   const createdBy = req.user.id;
 
   if (!studentId || !month || !year) {
@@ -26,7 +34,15 @@ export const generateSingleVoucher = catchAsync(async (req, res) => {
     month,
     year,
     createdBy,
-    { dueDate, academicYearId, feeType, feeTemplateId }
+    { 
+      dueDate, 
+      academicYearId, 
+      feeType, 
+      feeTemplateId, 
+      branch_id: branchId,
+      amount: req.body.amount,
+      fee_components: req.body.fee_components || req.body.components,
+    }
   );
 
   res.status(201).json({
@@ -41,8 +57,15 @@ export const generateSingleVoucher = catchAsync(async (req, res) => {
  * POST /api/fee-vouchers/generate-class
  */
 export const generateVouchersForClass = catchAsync(async (req, res) => {
-  const { classId, month, year, dueDate, academicYearId, feeType, feeTemplateId } = req.body;
-  const instituteId = req.user.school_id;
+  const classId = req.body.classId || req.body.class_id;
+  const month = req.body.month;
+  const year = req.body.year;
+  const dueDate = req.body.dueDate || req.body.due_date;
+  const academicYearId = req.body.academicYearId || req.body.academic_year_id;
+  const feeType = req.body.feeType || req.body.fee_type;
+  const feeTemplateId = req.body.feeTemplateId || req.body.fee_template_id;
+  const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
   const createdBy = req.user.id;
 
   if (!classId || !month || !year) {
@@ -55,7 +78,7 @@ export const generateVouchersForClass = catchAsync(async (req, res) => {
     month,
     year,
     createdBy,
-    { dueDate, academicYearId, feeType, feeTemplateId }
+    { dueDate, academicYearId, feeType, feeTemplateId, branch_id: branchId }
   );
 
   res.status(201).json({
@@ -71,7 +94,8 @@ export const generateVouchersForClass = catchAsync(async (req, res) => {
  */
 export const generateVouchersForInstitute = catchAsync(async (req, res) => {
   const { month, year, dueDate, academicYearId, feeType, feeTemplateId } = req.body;
-  const instituteId = req.user.school_id;
+  const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
   const createdBy = req.user.id;
 
   if (!month || !year) {
@@ -83,7 +107,7 @@ export const generateVouchersForInstitute = catchAsync(async (req, res) => {
     month,
     year,
     createdBy,
-    { dueDate, academicYearId, feeType, feeTemplateId }
+    { dueDate, academicYearId, feeType, feeTemplateId, branch_id: branchId }
   );
 
   res.status(201).json({
@@ -99,10 +123,11 @@ export const generateVouchersForInstitute = catchAsync(async (req, res) => {
  */
 export const getFeeVouchers = catchAsync(async (req, res) => {
   const { month, year, status, student_id, academic_year_id, search, page = 1, limit = 20 } = req.query;
-  const instituteId = req.user.school_id;
-  const branchId = req.user.branch_id;
+  const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
 
   const filters = {};
+  if (branchId) filters.branch_id = branchId;
   if (month) filters.month = parseInt(month);
   if (year) filters.year = parseInt(year);
   if (status) filters.status = status;
@@ -129,7 +154,7 @@ export const getFeeVouchers = catchAsync(async (req, res) => {
  */
 export const deleteVoucher = catchAsync(async (req, res) => {
   const { voucherId } = req.params;
-  const instituteId = req.user.school_id;
+  const instituteId = getInstituteId(req);
 
   const voucher = await feeVoucherService.deleteVoucher(voucherId, instituteId);
 
@@ -147,7 +172,7 @@ export const deleteVoucher = catchAsync(async (req, res) => {
 export const updateVoucherStatus = catchAsync(async (req, res) => {
   const { voucherId } = req.params;
   const { status, partialAmount } = req.body;
-  const instituteId = req.user.school_id;
+  const instituteId = getInstituteId(req);
 
   if (!status) {
     throw new AppError('Status is required', 400);
@@ -175,8 +200,11 @@ export const updateVoucherStatus = catchAsync(async (req, res) => {
  */
 export const recordPayment = catchAsync(async (req, res) => {
   const { voucherId } = req.params;
-  const { amount, paymentMethod, reference, paidDate } = req.body;
-  const instituteId = req.user.school_id;
+  const amount = req.body.amount;
+  const paymentMethod = req.body.paymentMethod || req.body.payment_method;
+  const reference = req.body.reference || req.body.remarks;
+  const paidDate = req.body.paidDate || req.body.payment_date;
+  const instituteId = getInstituteId(req);
   const collectedBy = req.user.id;
 
   if (!amount || amount <= 0) {
@@ -212,7 +240,7 @@ export const recordPayment = catchAsync(async (req, res) => {
  */
 export const getPaymentHistory = catchAsync(async (req, res) => {
   const { voucherId } = req.params;
-  const instituteId = req.user.school_id;
+  const instituteId = getInstituteId(req);
 
   const history = await feeVoucherService.getPaymentHistory(
     voucherId,
@@ -233,12 +261,13 @@ export const getPaymentHistory = catchAsync(async (req, res) => {
 export const getPaymentSummary = catchAsync(async (req, res) => {
   const { feeTypeId } = req.params;
   const { month, year } = req.query;
-  const instituteId = req.user.school_id;
+  const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
 
   const summary = await feeVoucherService.getPaymentSummary(
     feeTypeId,
     instituteId,
-    { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null }
+    { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null, branch_id: branchId }
   );
 
   res.status(200).json({
@@ -254,7 +283,7 @@ export const getPaymentSummary = catchAsync(async (req, res) => {
  */
 export const bulkDeleteVouchers = catchAsync(async (req, res) => {
   const { voucherIds } = req.body;
-  const instituteId = req.user.school_id;
+  const instituteId = getInstituteId(req);
 
   if (!voucherIds || !Array.isArray(voucherIds) || voucherIds.length === 0) {
     throw new AppError('Voucher IDs array is required', 400);
@@ -271,12 +300,14 @@ export const bulkDeleteVouchers = catchAsync(async (req, res) => {
 
 export const getFeeVouchersStats = catchAsync(async (req, res) => {
   const { month, year, academic_year_id } = req.query;
-  const instituteId = req.user.school_id;
+  const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
 
   const stats = await feeVoucherService.getFeeVouchersStats(instituteId, {
     month,
     year,
-    academic_year_id
+    academic_year_id,
+    branch_id: branchId
   });
 
   res.status(200).json({
@@ -287,8 +318,9 @@ export const getFeeVouchersStats = catchAsync(async (req, res) => {
 });
 
 export const getFeeDefaulters = catchAsync(async (req, res) => {
-  const instituteId = req.user.school_id;
-  const defaulters = await feeVoucherService.getFeeDefaulters(instituteId);
+  const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
+  const defaulters = await feeVoucherService.getFeeDefaulters(instituteId, { branch_id: branchId });
 
   res.status(200).json({
     success: true,
@@ -299,7 +331,7 @@ export const getFeeDefaulters = catchAsync(async (req, res) => {
 
 export const warnFeeDefaulter = catchAsync(async (req, res) => {
   const { studentId } = req.params;
-  const instituteId = req.user.school_id;
+  const instituteId = getInstituteId(req);
 
   const result = await feeVoucherService.warnFeeDefaulter(instituteId, studentId);
 

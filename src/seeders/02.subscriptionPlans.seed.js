@@ -145,15 +145,19 @@ export const seedSubscriptionPlans = async (models) => {
   let updated = 0;
 
   for (const plan of SUBSCRIPTION_PLANS) {
-    const [record, wasCreated] = await SubscriptionPlan.findOrCreate({
+    let record = await SubscriptionPlan.findOne({
       where: { code: plan.code },
-      defaults: plan,
+      paranoid: false,
     });
 
-    if (!wasCreated) {
+    if (record) {
+      if (record.deleted_at) {
+        await record.restore();
+      }
       await record.update(plan);
       updated++;
     } else {
+      await SubscriptionPlan.create(plan);
       created++;
     }
   }

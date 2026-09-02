@@ -21,30 +21,12 @@ export const createExpense = async (data, options = {}) => {
     data.vendor_id = null;
   }
   
-  // Generate expense number (EXP-YYYY-00001 format)
+  // Generate expense number (EXP-YYYY-00001-XXXX format)
   const expenseDate = new Date(data.date);
   const year = expenseDate.getFullYear();
-  const lastExpense = await Expense.findOne({
-    where: {
-      institute_id: data.institute_id,
-      [Op.and]: sequelize.where(
-        sequelize.fn('EXTRACT', sequelize.literal('YEAR FROM "date"')),
-        Op.eq,
-        year
-      ),
-    },
-    order: [['created_at', 'DESC']],
-    attributes: ['expense_number'],
-    transaction,
-  });
-  
-  let sequence = 1;
-  if (lastExpense && lastExpense.expense_number) {
-    const lastSequence = parseInt(lastExpense.expense_number.split('-').pop());
-    sequence = lastSequence + 1;
-  }
-  
-  const expenseNumber = generateExpenseNumber(expenseDate, sequence);
+  const count = await Expense.count({ transaction });
+  const uniqueSuffix = Date.now().toString().slice(-5);
+  const expenseNumber = `EXP-${year}-${String(count + 1).padStart(5, '0')}-${uniqueSuffix}`;
   
   // Prepare data for creation
   const expenseData = {

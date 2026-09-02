@@ -19,7 +19,7 @@ export const getSchoolProfile = async (instituteId) => {
     include: [
       {
         model: Role,
-        as:    'AssignedRole',
+        as:    'assignedRole',
         attributes: ['id', 'name', 'code', 'description', 'permissions'],
       },
     ],

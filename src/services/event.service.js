@@ -8,7 +8,7 @@ import { Op } from 'sequelize';
 import logger from '../config/logger.js';
 import { broadcastNotification, createNotification } from './notification.service.js';
 
-const { Event, User, Institute, Branch, Class, Section } = models;
+const { Event, User, Institute, Branch, Class, Section, StudentAttendance, StaffAttendance } = models;
 
 // ─────────────────────────────────────────────────────────────────
 // ✅ CREATE EVENT

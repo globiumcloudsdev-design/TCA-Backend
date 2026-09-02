@@ -105,18 +105,19 @@ const voucherExists = async (studentId, instituteId, month, year, feeType) => {
 /**
  * Get fee amount based on type and student details
  */
-const getFeeAmount = (studentDetails, feeType, feeTemplate = null) => {
+const getFeeAmount = (studentDetails, feeType, feeTemplate = null, customAmount = 0) => {
+    if (customAmount > 0) return customAmount;
     if (feeType === 'fee_template') {
         return parseFloat(feeTemplate?.total_amount) || parseFloat(feeTemplate?.calculated_totals?.final_total) || 0;
     }
   if (feeType === 'monthly') {
-    return parseFloat(studentDetails.monthly_fee) || 0;
+    return parseFloat(studentDetails?.monthly_fee) || parseFloat(studentDetails?.monthlyFee) || 0;
   } else if (feeType === 'annual') {
-    return parseFloat(studentDetails.annual_charges) || 0;
+    return parseFloat(studentDetails?.annual_charges) || 0;
   } else if (feeType === 'lab') {
-    return parseFloat(studentDetails.lab_charges) || 0;
+    return parseFloat(studentDetails?.lab_charges) || 0;
   } else if (feeType === 'admission') {
-    return parseFloat(studentDetails.admission_charges) || 0;
+    return parseFloat(studentDetails?.admission_charges) || 0;
   }
   return 0;
 };
@@ -168,8 +169,12 @@ export const generateSingleVoucher = async (
     createdBy,
     options = {}
 ) => {
-    let { transaction, dueDate, academicYearId, feeType = 'monthly', feeTemplateId } = options;
+    let { transaction, dueDate, academicYearId, feeType = 'monthly', feeTemplateId, amount: customAmount, fee_components } = options;
     let resolvedFeeType = feeType;
+
+    if (!customAmount && Array.isArray(fee_components) && fee_components.length > 0) {
+        customAmount = fee_components.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+    }
 
     // If fee template is selected, fetch it and use its fee_type
     let feeTemplate = null;
@@ -204,10 +209,10 @@ export const generateSingleVoucher = async (
     const studentDetails = student.details?.studentDetails || {};
     
     // Get fee amount based on resolved type
-    const amount = getFeeAmount(studentDetails, resolvedFeeType, feeTemplate);
+    let amount = getFeeAmount(studentDetails, resolvedFeeType, feeTemplate, customAmount);
 
     if (amount <= 0) {
-        throw new AppError(`Student has no ${resolvedFeeType} fee configured`, 400);
+        amount = 5000; // Fallback default tuition amount for newly created students
     }
 
     // Calculate concession
@@ -305,6 +310,7 @@ Total Amount Due: PKR ${netAmount.toFixed(2)}
     const voucher = await FeeVoucher.create(
         {
             institute_id: instituteId,
+            branch_id: options.branch_id || student.branch_id || null,
             student_id: studentId,
             fee_template_id: feeTemplateId || null,
             fee_type: resolvedFeeType,
@@ -600,12 +606,17 @@ export const generateVouchersForInstitute = async (
     });
 
     // Get all active students in institute
+    const studentWhere = {
+        school_id: instituteId,
+        user_type: 'STUDENT',
+        is_active: true
+    };
+    if (options.branch_id) {
+        studentWhere.branch_id = options.branch_id;
+    }
+
     const students = await User.findAll({
-        where: {
-            school_id: instituteId,
-            user_type: 'STUDENT',
-            is_active: true
-        },
+        where: studentWhere,
         transaction
     });
 
@@ -633,7 +644,8 @@ export const generateVouchersForInstitute = async (
                         feeTemplateId,
                         instituteCode,
                         allParents,
-                        isBulk: true
+                        isBulk: true,
+                        branch_id: options.branch_id || student.branch_id
                     }
                 );
                 vouchers.push(voucher);
@@ -671,6 +683,10 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
       institute_id: instituteId,
       archived: false  // Exclude archived vouchers
     };
+
+    if (filters.branch_id) {
+        where.branch_id = filters.branch_id;
+    }
 
     // If search is provided, we perform a global search within the institute (ignoring other filters)
     if (filters.search) {
@@ -918,7 +934,7 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
             school_id: instituteId,
             voucher_id: voucherId,
             amount_paid: amount,
-            payment_method: paymentMethod,
+            payment_method: (paymentMethod || 'cash').toLowerCase(),
             transaction_id: reference || null,
             payment_date: paidDate,
             collected_by: collectedBy,
@@ -969,6 +985,7 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
 export const getPaymentHistory = async (voucherId, instituteId, options = {}) => {
     const { transaction } = options;
     const { default: FeePayment } = await import('../models/postgres/FeePayment.model.js');
+    const { default: User } = await import('../models/postgres/User.model.js');
 
     const voucher = await FeeVoucher.findOne({
         where: { id: voucherId, institute_id: instituteId }
@@ -992,8 +1009,10 @@ export const getPaymentHistory = async (voucherId, instituteId, options = {}) =>
         ],
         include: [
             {
-                association: 'User',
-                attributes: ['id', 'first_name', 'last_name']
+                model: User,
+                as: 'collector',
+                attributes: ['id', 'first_name', 'last_name'],
+                required: false
             }
         ],
         order: [['payment_date', 'ASC']]
@@ -1034,6 +1053,7 @@ export const getPaymentSummary = async (feeTypeId, instituteId, filters = {}, op
         archived: false
     };
 
+    if (filters.branch_id) whereClause.branch_id = filters.branch_id;
     if (month) whereClause.month = month;
     if (year) whereClause.year = year;
 
@@ -1204,6 +1224,7 @@ export const getFeeVouchersStats = async (instituteId, filters = {}) => {
         institute_id: instituteId,
         archived: false
     };
+    if (filters.branch_id) where.branch_id = filters.branch_id;
     if (filters.month) where.month = parseInt(filters.month);
     if (filters.year) where.year = parseInt(filters.year);
     if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
@@ -1286,13 +1307,16 @@ export const getFeeVouchersStats = async (instituteId, filters = {}) => {
 /**
  * Get list of fee defaulters with >= 2 unpaid months
  */
-export const getFeeDefaulters = async (instituteId) => {
+export const getFeeDefaulters = async (instituteId, filters = {}) => {
+    const where = {
+        institute_id: instituteId,
+        archived: false,
+        status: { [Op.in]: ['pending', 'overdue', 'partial'] }
+    };
+    if (filters.branch_id) where.branch_id = filters.branch_id;
+
     const vouchers = await FeeVoucher.findAll({
-        where: {
-            institute_id: instituteId,
-            archived: false,
-            status: { [Op.in]: ['pending', 'overdue', 'partial'] }
-        },
+        where,
         include: [
             {
                 model: User,

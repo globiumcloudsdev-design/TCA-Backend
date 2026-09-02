@@ -19,8 +19,23 @@ const AcademicYear = sequelize.define(
     institute_id: {
       type: DataTypes.UUID,
       allowNull: false,
-      references: { model: 'institutes', key: 'id' },
+      references: {
+        model: 'institutes',
+        key: 'id',
+      },
       onDelete: 'CASCADE',
+      comment: 'Institute this academic year belongs to',
+    },
+
+    branch_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'branches',
+        key: 'id',
+      },
+      onDelete: 'SET NULL',
+      comment: 'Optional branch this academic year is scoped to (null for institute-wide)',
     },
     
     name: {
@@ -67,6 +82,11 @@ AcademicYear.associate = (models) => {
   AcademicYear.belongsTo(models.Institute, {
     foreignKey: 'institute_id',
     as: 'institute',
+  });
+
+  AcademicYear.belongsTo(models.Branch, {
+    foreignKey: 'branch_id',
+    as: 'branch',
   });
   
   AcademicYear.hasMany(models.Class, {

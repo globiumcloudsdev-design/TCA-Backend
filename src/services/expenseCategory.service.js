@@ -50,7 +50,8 @@ export const getOrCreateCategory = async (instituteId, categoryName, createdBy, 
     where: {
       institute_id: instituteId,
       name: { [Op.iLike]: categoryName }
-    }
+    },
+    transaction
   });
   
   if (!category) {

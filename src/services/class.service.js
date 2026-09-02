@@ -11,13 +11,18 @@ const { Class } = models;
 export const createCompleteClass = async (data, options = {}) => {
   const { transaction } = options;
 
+  const duplicateWhere = {
+    school_id: data.institute_id,
+    academic_year_id: data.academic_year_id,
+    name: data.name
+  };
+  if (data.branch_id) {
+    duplicateWhere.branch_id = data.branch_id;
+  }
+
   // Check duplicate
   const existing = await Class.findOne({
-    where: {
-      school_id: data.institute_id,
-      academic_year_id: data.academic_year_id,
-      name: data.name
-    }
+    where: duplicateWhere
   });
 
   if (existing) {
@@ -56,6 +61,7 @@ export const createCompleteClass = async (data, options = {}) => {
   const classData = {
     id: uuidv4(),
     school_id: data.institute_id,
+    branch_id: data.branch_id || null,
     academic_year_id: data.academic_year_id,
     name: data.name,
     description: data.description || '',
@@ -211,6 +217,7 @@ export const getAllClasses = async (filters = {}, pagination = {}) => {
   const offset = (page - 1) * limit;
 
   const where = { school_id: filters.institute_id };
+  if (filters.branch_id) where.branch_id = filters.branch_id;
   if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
   
   if (filters.search) {
@@ -242,11 +249,15 @@ export const getAllClasses = async (filters = {}, pagination = {}) => {
   };
 };
 
-export const getClassOptions = async (instituteId, academicYearId) => {
+export const getClassOptions = async (instituteId, academicYearId, branchId = null) => {
   const where = {
     school_id: instituteId,
     is_active: true
   };
+
+  if (branchId) {
+    where.branch_id = branchId;
+  }
 
   if (academicYearId) {
     where.academic_year_id = academicYearId;
@@ -265,16 +276,16 @@ export const getClassOptions = async (instituteId, academicYearId) => {
   }));
 };
 
-export const getClassById = async (id, instituteId) => {
-  return await Class.findOne({
-    where: { id, school_id: instituteId }
-  });
+export const getClassById = async (id, instituteId, branchId = null) => {
+  const where = { id, school_id: instituteId };
+  if (branchId) where.branch_id = branchId;
+  return await Class.findOne({ where });
 };
 
-export const deleteClass = async (id, instituteId) => {
-  const classData = await Class.findOne({
-    where: { id, school_id: instituteId }
-  });
+export const deleteClass = async (id, instituteId, branchId = null) => {
+  const where = { id, school_id: instituteId };
+  if (branchId) where.branch_id = branchId;
+  const classData = await Class.findOne({ where });
   
   if (!classData) throw new Error('Class not found');
   await classData.destroy();

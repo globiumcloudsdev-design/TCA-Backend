@@ -68,12 +68,15 @@ export const seedInstituteTypes = async (models) => {
   let updated = 0;
 
   for (const typeData of INSTITUTE_TYPES) {
-    const [record, wasCreated] = await InstituteType.findOrCreate({
+    let record = await InstituteType.findOne({
       where: { slug: typeData.slug },
-      defaults: typeData,
+      paranoid: false,
     });
 
-    if (!wasCreated) {
+    if (record) {
+      if (record.deleted_at) {
+        await record.restore();
+      }
       await record.update({
         name:        typeData.name,
         description: typeData.description,
@@ -83,6 +86,7 @@ export const seedInstituteTypes = async (models) => {
       });
       updated++;
     } else {
+      await InstituteType.create(typeData);
       created++;
     }
   }

@@ -19,6 +19,7 @@ import Branch from '../../models/postgres/Branch.model.js'; // ✅ Import Branch
 import { AppError } from '../../utils/lib/AppError.js';
 import catchAsync from '../../utils/lib/catchAsync.js';
 import { verifyAccessToken } from '../../config/auth.js';
+import { branchIsolation, branchContext } from './branchContext.middleware.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CORE AUTHENTICATION
@@ -118,6 +119,9 @@ export const protect = catchAsync(async (req, res, next) => {
   // 7. Attach user and token to request
   req.user = user;
   req.token = token;
+
+  // 8. Enforce branch isolation & inject allowedBranchId
+  branchIsolation(req, res, () => {});
 
   next();
 });
@@ -382,6 +386,9 @@ export const optionalAuth = async (req, res, next) => {
     });
 
     req.user = user || null;
+    if (req.user) {
+      branchIsolation(req, res, () => {});
+    }
     next();
   } catch (error) {
     req.user = null;
@@ -419,12 +426,17 @@ export const verifyRefreshToken = catchAsync(async (req, res, next) => {
   }
 });
 
+// Export branch context middlewares
+export { branchIsolation, branchContext };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default {
   protect,
+  branchIsolation,
+  branchContext,
   restrictTo,
   isMasterAdmin,
   isInstituteAdmin,

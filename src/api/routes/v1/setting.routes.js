@@ -1,6 +1,5 @@
-// backend/src/routes/v1/setting.routes.js
 import { Router } from 'express';
-import { protect } from '../../middlewares/auth.middleware.js';
+import { protect, restrictTo } from '../../middlewares/auth.middleware.js';
 import {
     getSettings,
     updateGeneralSettings,
@@ -25,6 +24,9 @@ router.use(protect);
 // Main settings endpoint
 router.route('/')
     .get(getSettings);
+
+// Settings mutation requires Admin privileges
+router.use(restrictTo('MASTER_ADMIN', 'INSTITUTE_ADMIN', 'SYSTEM_ADMIN', 'BRANCH_ADMIN'));
 
 // Section-wise updates
 router.put('/general', updateGeneralSettings);

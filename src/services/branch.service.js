@@ -136,7 +136,7 @@ export const getBranchById = async (id, institute_id) => {
       {
         model: Class,
         as: 'classes',
-        attributes: ['id', 'name', 'student_count'],
+        attributes: ['id', 'name'],
         limit: 10
       }
     ]

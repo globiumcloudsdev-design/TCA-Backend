@@ -40,6 +40,7 @@ import publicRoutes from './public.routes.js'; // ✅ Import public routes
 import supportRoutes from './support.routes.js'; // ✅ Import support routes
 
 import { optionalAuth } from '../../middlewares/auth.middleware.js';
+import { branchIsolation } from '../../middlewares/branchContext.middleware.js';
 import { maintenanceGuard } from '../../middlewares/maintenance.middleware.js';
 
 const router = Router();
@@ -51,6 +52,7 @@ router.use('/public', publicRoutes);
 // optionalAuth extracts user from token but doesn't block if missing.
 // This allows maintenanceGuard to bypass Master Admins correctly.
 router.use(optionalAuth);
+router.use(branchIsolation);
 router.use(maintenanceGuard);
 
 // ── Core Auth ──────────────────────────────────────────────────────────────

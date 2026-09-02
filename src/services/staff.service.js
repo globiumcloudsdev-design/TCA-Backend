@@ -101,6 +101,10 @@ export const getAllStaff = async (instituteId, query = {}) => {
   };
 
   // Apply filters
+  if (query.branch_id) {
+    where.branch_id = query.branch_id;
+  }
+
   if (query.staff_type) {
     where.staff_type = query.staff_type;
   }
@@ -395,6 +399,7 @@ export const createStaff = async (instituteId, data, createdBy, file = null, doc
     // Create staff user
     const staff = await User.create({
       school_id: instituteId,
+      branch_id: data.branch_id || null,
       user_type: 'STAFF',
       staff_type: data.staff_type,
       first_name: data.first_name,

@@ -49,6 +49,13 @@ export const getAllAcademicYears = async (filters = {}, pagination = {}) => {
 
   const where = { institute_id: filters.institute_id };
   
+  if (filters.branch_id) {
+    where[Op.or] = [
+      { branch_id: filters.branch_id },
+      { branch_id: null }
+    ];
+  }
+
   if (filters.is_current !== undefined) {
     where.is_current = filters.is_current;
   }
@@ -185,11 +192,18 @@ export const getCurrentAcademicYear = async (instituteId) => {
  * GET ACADEMIC YEAR OPTIONS FOR DROPDOWN
  * Yeh function frontend dropdown ke liye hai
  */
-export const getAcademicYearOptions = async (instituteId, onlyActive = true) => {
+export const getAcademicYearOptions = async (instituteId, onlyActive = true, branchId = null) => {
   const where = { institute_id: instituteId };
   
   if (onlyActive) {
     where.is_active = true;
+  }
+
+  if (branchId) {
+    where[Op.or] = [
+      { branch_id: branchId },
+      { branch_id: null }
+    ];
   }
 
   const academicYears = await AcademicYear.findAll({

@@ -30,7 +30,7 @@ export const rateLimiter = rateLimit({
   max: config.isDevelopment ? Math.max(config.rateLimit.max, 5000) : config.rateLimit.max,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => config.isDevelopment && isLocalhostRequest(req),
+  skip: (req) => config.isTest || (config.isDevelopment && isLocalhostRequest(req)),
   message: {
     success: false,
     message: 'Too many requests. Please slow down.',
@@ -42,6 +42,7 @@ export const rateLimiter = rateLimit({
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
   max: 30, // 10 attempts
+  skip: (req) => config.isTest || (config.isDevelopment && isLocalhostRequest(req)),
   message: { success: false, message: 'Too many login attempts. Try after 15 minutes.' },
 });
 
@@ -49,6 +50,7 @@ export const authRateLimiter = rateLimit({
 export const publicRateLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 min
   max: 60,
+  skip: (req) => config.isTest || (config.isDevelopment && isLocalhostRequest(req)),
   message: { success: false, message: 'Too many requests.' },
 });
 

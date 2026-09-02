@@ -1,4 +1,3 @@
-// src/api/controllers/vendor.controller.js
 import {
   sendSuccess,
   sendCreated,
@@ -8,16 +7,9 @@ import {
 } from '../../utils/helpers/response.helper.js';
 import * as vendorService from '../../services/vendor.service.js';
 import models from '../../models/postgres/index.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize } = models;
-
-const getInstituteId = (req) => {
-  return req.user?.institute_id || req.user?.school_id || req.user?.schoolId;
-};
-
-const getBranchId = (req) => {
-  return req.user?.branch_id || req.query?.branch_id || req.body?.branch_id;
-};
 
 /**
  * Create vendor
@@ -58,10 +50,12 @@ export const getAllVendors = async (req, res) => {
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
+
+    const branchId = getBranchId(req);
     
     const filters = {
       institute_id: instituteId,
-      branch_id: req.query.branch_id,
+      branch_id: branchId,
       type: req.query.type,
       status: req.query.status,
       search: req.query.search,
@@ -113,7 +107,7 @@ export const getVendorOptions = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    const branchId = req.query.branch_id;
+    const branchId = getBranchId(req);
     const type = req.query.type;
     
     const options = await vendorService.getVendorOptions(instituteId, branchId, type);

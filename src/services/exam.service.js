@@ -197,7 +197,7 @@ export const createExam = async (data, options = {}) => {
       end_date: dates.end_date,
       total_marks: totalMarks,
       pass_marks: Math.round((totalMarks * (data.pass_percentage || 40)) / 100),
-      code: data.code || `${data.type.toUpperCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`
+      code: data.code || `${(data.type || data.exam_type || 'EXAM').toUpperCase()}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`
     };
 
     const exam = await Exam.create(examData, { transaction });
@@ -221,6 +221,8 @@ export const getAllExams = async (filters = {}, pagination = {}) => {
   const offset = (page - 1) * limit;
 
   const where = { school_id: filters.institute_id };
+
+  if (filters.branch_id) where.branch_id = filters.branch_id;
 
   // Basic filters
   if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
@@ -974,8 +976,10 @@ export const generateGradeSheet = async (examId, instituteId, studentId) => {
   if (!result) throw new Error('Result not found');
 
   // Get student class/section info
-  const studentClass = exam.entity_ids.class_id ? await Class.findByPk(exam.entity_ids.class_id) : null;
-  const studentSection = exam.entity_ids.section_id ? await Section.findByPk(exam.entity_ids.section_id) : null;
+  const classId = exam.class_id || exam.entity_ids?.class_id;
+  const sectionId = exam.section_id || exam.entity_ids?.section_id;
+  const studentClass = classId ? await Class.findByPk(classId) : null;
+  const studentSection = sectionId ? await Section.findByPk(sectionId) : null;
 
   return {
     student_info: {

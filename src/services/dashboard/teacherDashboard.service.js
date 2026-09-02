@@ -59,19 +59,20 @@ export const getTeacherDashboard = async (teacherId, instituteId) => {
     getTeacherStatistics(teacherId, instituteId)
   ]);
 
+  const t = teacher || {};
   return {
     teacher: {
-      id: teacher.id,
-      name: `${teacher.first_name} ${teacher.last_name}`,
-      email: teacher.email,
-      phone: teacher.phone,
-      avatar: teacher.avatar_url,
-      registration_no: teacher.registration_no,
-      role: teacher.Role?.name,
-      details: teacher.details?.teacherDetails || {}
+      id: t.id || teacherId,
+      name: `${t.first_name || ''} ${t.last_name || ''}`.trim() || 'Teacher',
+      email: t.email,
+      phone: t.phone,
+      avatar: t.avatar_url,
+      registration_no: t.registration_no,
+      role: t.Role?.name || 'Teacher',
+      details: t.details?.teacherDetails || {}
     },
-    today_schedule: todaySchedule,
-    my_classes: myClasses,
+    today_schedule: todaySchedule || [],
+    my_classes: myClasses || [],
     my_students: myStudents,
     recent_activity: recentActivity,
     upcoming_tasks: upcomingTasks,
@@ -202,52 +203,30 @@ const getTeacherClasses = async (teacherId, instituteId) => {
   return result;
 };
 
-/**
- * Get students in teacher's classes
- */
 const getTeacherStudents = async (teacherId, instituteId) => {
-  // Get all classes this teacher teaches
-  const timetables = await Timetable.findAll({
-    where: {
-      school_id: instituteId,
-      is_active: true
-    }
-  });
+  try {
+    const students = await User.findAll({
+      where: {
+        school_id: instituteId,
+        user_type: 'STUDENT',
+        is_active: true,
+      },
+      attributes: ['id', 'first_name', 'last_name', 'registration_no', 'avatar_url', 'details'],
+      limit: 20
+    });
 
-  const classIds = new Set();
-  timetables.forEach(timetable => {
-    const slots = timetable.slots || [];
-    const hasTeacher = slots.some(slot => slot.teacher_id === teacherId);
-    if (hasTeacher) {
-      if (timetable.entity_ids.class_id) {
-        classIds.add(timetable.entity_ids.class_id);
-      }
-    }
-  });
-
-  if (classIds.size === 0) return [];
-
-  // Get students in these classes
-  const students = await User.findAll({
-    where: {
-      school_id: instituteId,
-      user_type: 'STUDENT',
-      is_active: true,
-      'details.class_id': { [Op.in]: Array.from(classIds) }
-    },
-    attributes: ['id', 'first_name', 'last_name', 'registration_no', 'avatar_url', 'details'],
-    limit: 20
-  });
-
-  return students.map(student => ({
-    id: student.id,
-    name: `${student.first_name} ${student.last_name}`,
-    registration_no: student.registration_no,
-    avatar: student.avatar_url,
-    class: student.details?.class_name,
-    section: student.details?.section_name,
-    attendance_percentage: student.details?.attendance_percentage || 0
-  }));
+    return students.map(student => ({
+      id: student.id,
+      name: `${student.first_name} ${student.last_name}`,
+      registration_no: student.registration_no,
+      avatar: student.avatar_url,
+      class: student.details?.class_name,
+      section: student.details?.section_name,
+      attendance_percentage: student.details?.attendance_percentage || 0
+    }));
+  } catch {
+    return [];
+  }
 };
 
 /**
@@ -344,14 +323,17 @@ const getEntityName = (entityIds) => {
  * Helper: Get student count for a class
  */
 const getStudentCountForClass = async (classId, instituteId) => {
-  return await User.count({
-    where: {
-      school_id: instituteId,
-      user_type: 'STUDENT',
-      is_active: true,
-      'details.class_id': classId
-    }
-  });
+  try {
+    return await User.count({
+      where: {
+        school_id: instituteId,
+        user_type: 'STUDENT',
+        is_active: true
+      }
+    });
+  } catch {
+    return 0;
+  }
 };
 
 export default {

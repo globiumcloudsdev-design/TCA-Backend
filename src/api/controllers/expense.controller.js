@@ -1,4 +1,3 @@
-// src/api/controllers/expense.controller.js
 import {
   sendSuccess,
   sendCreated,
@@ -9,22 +8,9 @@ import {
 import * as expenseService from '../../services/expense.service.js';
 import * as expenseCategoryService from '../../services/expenseCategory.service.js';
 import models from '../../models/postgres/index.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize } = models;
-
-/**
- * Helper to get institute ID from request
- */
-const getInstituteId = (req) => {
-  return req.user?.institute_id || req.user?.school_id || req.user?.schoolId;
-};
-
-/**
- * Helper to get branch ID from request
- */
-const getBranchId = (req) => {
-  return req.user?.branch_id || req.query?.branch_id || req.body?.branch_id;
-};
 
 /**
  * Create expense
@@ -75,7 +61,8 @@ export const createExpense = async (req, res) => {
     return sendCreated(res, expense, 'Expense created successfully');
   } catch (error) {
     await transaction.rollback();
-    return sendError(res, error.message || 'Failed to create expense');
+    console.error('❌ Create expense error:', error);
+    return sendError(res, error.message || 'Failed to create expense', 500);
   }
 };
 
@@ -88,10 +75,12 @@ export const getAllExpenses = async (req, res) => {
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
+
+    const branchId = getBranchId(req);
     
     const filters = {
       institute_id: instituteId,
-      branch_id: req.query.branch_id,
+      branch_id: branchId,
       category: req.query.category,
       status: req.query.status,
       vendor_id: req.query.vendor_id,
@@ -204,7 +193,7 @@ export const getExpenseStats = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    const branchId = req.query.branch_id;
+    const branchId = getBranchId(req);
     const year = req.query.year;
     
     const stats = await expenseService.getExpenseStats(instituteId, branchId, year);
