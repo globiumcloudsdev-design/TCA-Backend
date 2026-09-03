@@ -436,25 +436,58 @@ export const updateBranch = async (id, institute_id, updateData) => {
 };
 
 /**
- * Delete branch (soft delete)
+ * Delete branch (soft delete) and delete associated branch users
  */
 export const deleteBranch = async (id, institute_id, deleted_by) => {
-  const branch = await Branch.findOne({
-    where: { id, institute_id }
-  });
+  const transaction = await models.sequelize.transaction();
+  try {
+    const branch = await Branch.findOne({
+      where: { id, institute_id },
+      transaction
+    });
 
-  if (!branch) {
-    return null;
+    if (!branch) {
+      await transaction.rollback();
+      return null;
+    }
+
+    // Check if branch has any active classes/students
+    if (branch.class_count > 0 || branch.student_count > 0) {
+      throw new AppError('Cannot delete branch with active classes or students', 400);
+    }
+
+    // Delete users created for/assigned to this branch (Branch Head & Branch Admin)
+    // Protect INSTITUTE_ADMIN, SUPER_ADMIN, MASTER_ADMIN
+    await User.destroy({
+      where: {
+        branch_id: id,
+        school_id: institute_id,
+        user_type: {
+          [Op.notIn]: ['MASTER_ADMIN', 'SUPER_ADMIN', 'INSTITUTE_ADMIN']
+        }
+      },
+      transaction
+    });
+
+    // Also delete any staff specifically marked as Branch Head for this branch
+    await User.destroy({
+      where: {
+        school_id: institute_id,
+        staff_type: 'Branch Head',
+        branch_id: id
+      },
+      transaction
+    });
+
+    // Soft delete branch
+    await branch.destroy({ transaction });
+
+    await transaction.commit();
+    return true;
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
   }
-
-  // Check if branch has any active classes/students
-  if (branch.class_count > 0 || branch.student_count > 0) {
-    throw new AppError('Cannot delete branch with active classes or students', 400);
-  }
-
-  // Soft delete
-  await branch.destroy();
-  return true;
 };
 
 /**
