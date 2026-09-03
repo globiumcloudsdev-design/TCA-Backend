@@ -49,7 +49,7 @@ export const getAllAcademicYears = async (filters = {}, pagination = {}) => {
 
   const where = { institute_id: filters.institute_id };
   
-  if (filters.branch_id) {
+  if (filters.branch_id && AcademicYear.rawAttributes?.branch_id) {
     where[Op.or] = [
       { branch_id: filters.branch_id },
       { branch_id: null }
@@ -199,7 +199,7 @@ export const getAcademicYearOptions = async (instituteId, onlyActive = true, bra
     where.is_active = true;
   }
 
-  if (branchId) {
+  if (branchId && AcademicYear.rawAttributes?.branch_id) {
     where[Op.or] = [
       { branch_id: branchId },
       { branch_id: null }

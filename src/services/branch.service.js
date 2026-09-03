@@ -4,6 +4,7 @@ import { Op } from 'sequelize';
 import models from '../models/postgres/index.js';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
+import AppError from '../utils/lib/AppError.js';
 
 const { Branch, User, Class, FeeTemplate } = models;
 
@@ -179,7 +180,7 @@ export const createBranch = async (data) => {
       });
 
       if (existing) {
-        throw new Error('Branch with this code already exists');
+        throw new AppError('Branch with this code already exists', 400);
       }
     }
 
@@ -254,46 +255,67 @@ export const createBranch = async (data) => {
 
     const branch = await Branch.create(branchData, { transaction });
 
-    // 2. CREATE HEAD USER (if provided)
-    if (data.head && data.head.first_name && data.head.last_name && data.head.email) {
+    // 2. CREATE / ASSIGN HEAD USER (if provided)
+    if (data.head && data.head.first_name && data.head.email) {
+      const headEmail = data.head.email.trim().toLowerCase();
 
       // Check if user with this email already exists
       const existingUser = await User.findOne({
-        where: { email: data.head.email },
+        where: { email: headEmail },
         transaction
       });
 
       if (existingUser) {
-        throw new Error('User with this email already exists');
-      }
-
-      // Generate password if not provided
-      const password = data.head.password || Math.random().toString(36).slice(-8);
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      const userData = {
-        id: uuidv4(),
-        school_id: data.institute_id,
-        branch_id: branch.id, // ✅ Branch ID set here
-        role_id: null, // 👈 NULL because we're using custom permissions
-        user_type: 'BRANCH_ADMIN',
-        staff_type: 'Branch Head',
-        first_name: data.head.first_name,
-        last_name: data.head.last_name,
-        email: data.head.email,
-        phone: data.head.phone || null,
-        password_hash: hashedPassword,
-        permissions: data.head.permissions || [], // 👈 Custom permissions
-        is_active: true,
-        created_by: data.created_by,
-        updated_by: data.updated_by,
-        details: {
-          designation: 'Branch Head',
-          joining_date: new Date().toISOString().split('T')[0]
+        // If user already belongs to this institute, assign them to this branch as Branch Head
+        if (existingUser.school_id === data.institute_id) {
+          existingUser.branch_id = branch.id;
+          existingUser.staff_type = 'Branch Head';
+          if (!['MASTER_ADMIN', 'SUPER_ADMIN', 'INSTITUTE_ADMIN'].includes(existingUser.user_type)) {
+            existingUser.user_type = 'BRANCH_ADMIN';
+          }
+          if (Array.isArray(data.head.permissions) && data.head.permissions.length > 0) {
+            existingUser.permissions = data.head.permissions;
+          }
+          if (data.head.first_name) existingUser.first_name = data.head.first_name;
+          if (data.head.last_name) existingUser.last_name = data.head.last_name;
+          if (data.head.phone) existingUser.phone = data.head.phone;
+          if (data.head.password) {
+            existingUser.password_hash = await bcrypt.hash(data.head.password, 10);
+          }
+          await existingUser.save({ transaction });
+        } else {
+          // User belongs to a different institute: email conflict
+          throw new AppError('User with this email already exists in another organization. Please use a unique email address.', 400);
         }
-      };
+      } else {
+        // Generate password if not provided
+        const password = data.head.password || Math.random().toString(36).slice(-8);
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-      await User.create(userData, { transaction });
+        const userData = {
+          id: uuidv4(),
+          school_id: data.institute_id,
+          branch_id: branch.id, // ✅ Branch ID set here
+          role_id: null, // 👈 NULL because we're using custom permissions
+          user_type: 'BRANCH_ADMIN',
+          staff_type: 'Branch Head',
+          first_name: data.head.first_name,
+          last_name: data.head.last_name || '',
+          email: headEmail,
+          phone: data.head.phone || null,
+          password_hash: hashedPassword,
+          permissions: data.head.permissions || [], // 👈 Custom permissions
+          is_active: true,
+          created_by: data.created_by,
+          updated_by: data.updated_by,
+          details: {
+            designation: 'Branch Head',
+            joining_date: new Date().toISOString().split('T')[0]
+          }
+        };
+
+        await User.create(userData, { transaction });
+      }
     }
 
     await transaction.commit();
@@ -340,7 +362,7 @@ export const updateBranch = async (id, institute_id, updateData) => {
     });
 
     if (existing) {
-      throw new Error('Branch with this code already exists');
+      throw new AppError('Branch with this code already exists', 400);
     }
   }
 
@@ -427,7 +449,7 @@ export const deleteBranch = async (id, institute_id, deleted_by) => {
 
   // Check if branch has any active classes/students
   if (branch.class_count > 0 || branch.student_count > 0) {
-    throw new Error('Cannot delete branch with active classes or students');
+    throw new AppError('Cannot delete branch with active classes or students', 400);
   }
 
   // Soft delete

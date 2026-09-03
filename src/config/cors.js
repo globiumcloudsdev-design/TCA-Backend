@@ -22,7 +22,7 @@ export const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-School-Code'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-School-Code', 'X-Branch-ID', 'x-branch-id'],
   exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Per-Page'],
 };
 

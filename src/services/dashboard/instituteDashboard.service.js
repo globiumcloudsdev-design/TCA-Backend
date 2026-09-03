@@ -76,7 +76,9 @@ const resolveTypeSlug = (instituteType = null, fallback = 'school') => {
 const buildWhere = (instituteId, branchId = null, isFeeVoucher = false) => {
   const fieldName = isFeeVoucher ? 'institute_id' : 'school_id';
   const where = { [fieldName]: instituteId };
-  if (branchId) where.branch_id = branchId;
+  if (branchId && branchId !== 'all') {
+    where[Op.or] = [{ branch_id: branchId }, { branch_id: null }];
+  }
   return where;
 };
 
