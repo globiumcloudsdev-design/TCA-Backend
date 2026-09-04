@@ -8,6 +8,20 @@ import { sendPasswordResetEmail } from '../../services/email.service.js';
 import { AppError } from '../../utils/lib/AppError.js';
 
 /**
+ * Helper to set httpOnly refresh token cookie
+ */
+const setRefreshTokenCookie = (res, token) => {
+  if (!token) return;
+  res.cookie('refreshToken', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    path: '/'
+  });
+};
+
+/**
  * Login - Modified to handle both scenarios
  */
 export const login = catchAsync(async (req, res) => {
@@ -24,9 +38,12 @@ export const login = catchAsync(async (req, res) => {
       throw new AppError('Password is required', 400);
     }
     const result = await authService.loginService(loginId, password);
+    setRefreshTokenCookie(res, result.refreshToken);
     return sendSuccess(res, {
       accessToken: result.accessToken,
+      access_token: result.accessToken,
       refreshToken: result.refreshToken,
+      refresh_token: result.refreshToken,
       user: result.user
     }, 'Login successful');
   }
@@ -36,9 +53,12 @@ export const login = catchAsync(async (req, res) => {
     // If password is provided, try direct login with that specific account
     if (password) {
       const result = await authService.loginService(email, password);
+      setRefreshTokenCookie(res, result.refreshToken);
       return sendSuccess(res, {
         accessToken: result.accessToken,
+        access_token: result.accessToken,
         refreshToken: result.refreshToken,
+        refresh_token: result.refreshToken,
         user: result.user
       }, 'Login successful');
     }
@@ -95,10 +115,13 @@ export const loginWithAccount = catchAsync(async (req, res) => {
   }
   
   const result = await authService.loginWithAccountService(accountId, password);
+  setRefreshTokenCookie(res, result.refreshToken);
   
   sendSuccess(res, {
     accessToken: result.accessToken,
+    access_token: result.accessToken,
     refreshToken: result.refreshToken,
+    refresh_token: result.refreshToken,
     user: result.user
   }, 'Login successful');
 });
@@ -114,24 +137,34 @@ export const selectAccount = catchAsync(async (req, res) => {
     throw new AppError('Account ID is required', 400);
   }
   
-  const result = await authService.selectAccountService(userId, accountId);
+  const result = await authService.selectAccountService(accountId, null, null);
+  setRefreshTokenCookie(res, result.refreshToken);
   
   sendSuccess(res, {
     accessToken: result.accessToken,
+    access_token: result.accessToken,
     refreshToken: result.refreshToken,
+    refresh_token: result.refreshToken,
     user: result.user
   }, 'Account selected successfully');
 });
 
 export const logout = catchAsync(async (req, res) => {
-  res.clearCookie('refreshToken');
+  res.clearCookie('refreshToken', { path: '/' });
   sendSuccess(res, null, 'Logged out successfully');
 });
 
 export const refreshToken = catchAsync(async (req, res) => {
-  const token = req.cookies?.refreshToken || req.body?.refreshToken;
+  const token = req.cookies?.refreshToken || req.body?.refreshToken || req.body?.refresh_token;
   const result = await authService.refreshTokenService(token);
-  sendSuccess(res, result, 'Token refreshed');
+  setRefreshTokenCookie(res, result.refreshToken);
+  sendSuccess(res, {
+    accessToken: result.accessToken,
+    access_token: result.accessToken,
+    refreshToken: result.refreshToken,
+    refresh_token: result.refreshToken,
+    user: result.user
+  }, 'Token refreshed');
 });
 
 export const forgotPassword = catchAsync(async (req, res) => {
@@ -229,10 +262,13 @@ export const impersonateUser = catchAsync(async (req, res) => {
   if (!userId) throw new AppError('User ID is required', 400);
 
   const result = await authService.impersonateUserService(userId);
+  setRefreshTokenCookie(res, result.refreshToken);
 
   sendSuccess(res, {
     accessToken: result.accessToken,
+    access_token: result.accessToken,
     refreshToken: result.refreshToken,
+    refresh_token: result.refreshToken,
     user: result.user
   }, `Successfully impersonated ${result.user.first_name}`);
 });

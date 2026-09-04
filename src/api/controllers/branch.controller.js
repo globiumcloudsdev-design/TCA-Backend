@@ -25,7 +25,7 @@ export const getAllBranches = catchAsync(async (req, res) => {
   const filters = {
     institute_id: instituteId,
     search: req.query.search,
-    status: req.query.status,
+    status: req.query.status || (req.query.is_active === 'true' || req.query.is_active === true ? 'active' : (req.query.is_active === 'false' || req.query.is_active === false ? 'inactive' : undefined)),
     city: req.query.city,
     is_main: req.query.is_main
   };

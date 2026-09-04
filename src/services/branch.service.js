@@ -28,9 +28,9 @@ export const getAllBranches = async (filters = {}, pagination = {}) => {
   }
 
   // Status filter
-  if (filters.status === 'active') {
+  if (filters.status === 'active' || filters.is_active === true || filters.is_active === 'true') {
     where.is_active = true;
-  } else if (filters.status === 'inactive') {
+  } else if (filters.status === 'inactive' || filters.is_active === false || filters.is_active === 'false') {
     where.is_active = false;
   }
 
@@ -58,7 +58,7 @@ export const getAllBranches = async (filters = {}, pagination = {}) => {
         attributes: ['id', 'first_name', 'last_name', 'email', 'phone', 'permissions']
       }
     ],
-    order: [['created_at', 'DESC']],
+    order: [['is_main', 'DESC'], ['name', 'ASC']],
     limit,
     offset
   });
@@ -102,15 +102,18 @@ export const getBranchOptions = async (institute_id) => {
       institute_id,
       is_active: true
     },
-    attributes: ['id', 'name', 'code', 'city'],
-    order: [['name', 'ASC']]
+    attributes: ['id', 'name', 'code', 'city', 'is_main'],
+    order: [['is_main', 'DESC'], ['name', 'ASC']]
   });
 
   return branches.map(b => ({
+    id: b.id,
     value: b.id,
-    label: b.name,
+    label: b.is_main ? `${b.name} (Main)` : b.name,
+    name: b.name,
     code: b.code,
-    city: b.city
+    city: b.city,
+    is_main: b.is_main
   }));
 };
 

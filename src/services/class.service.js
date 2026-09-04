@@ -1,5 +1,6 @@
 // backend/src/api/services/class.service.js
 
+import { Op } from 'sequelize';
 import models from '../models/postgres/index.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -221,7 +222,6 @@ export const getAllClasses = async (filters = {}, pagination = {}) => {
   if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
   
   if (filters.search) {
-    const { Op } = models.Sequelize;
     where.name = { [Op.iLike]: `%${filters.search}%` };
   }
   

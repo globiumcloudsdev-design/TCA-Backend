@@ -489,7 +489,19 @@ export const refreshTokenService = async (refreshToken) => {
     userType: user.user_type,
     branchId: user.branch_id,
   });
-  return { accessToken };
+  const newRefreshToken = signRefreshToken({ userId: user.id });
+  return {
+    accessToken,
+    access_token: accessToken,
+    refreshToken: newRefreshToken,
+    refresh_token: newRefreshToken,
+    user: {
+      id: user.id,
+      school_id: user.school_id,
+      user_type: user.user_type,
+      branch_id: user.branch_id,
+    }
+  };
 };
 
 export const forgotPasswordService = async (email) => {
