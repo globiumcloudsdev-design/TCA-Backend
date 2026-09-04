@@ -30,7 +30,7 @@ export const createEvent = async (req, res) => {
     const eventData = {
       ...req.body,
       institute_id: instituteId,
-      branch_id: branchId,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || req.body.branch_id || null),
     };
 
     const event = await eventService.createEvent(eventData, req.user.id);

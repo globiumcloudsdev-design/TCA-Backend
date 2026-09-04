@@ -57,16 +57,14 @@ export const getAllFeeTemplates = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
-    const branchFilter = req.query.branch_id && req.query.branch_id !== 'all'
-      ? req.query.branch_id
-      : req.branch_id;
+    const branchId = getBranchId(req);
     const academicYearFilter = req.query.academic_year_id && req.query.academic_year_id !== 'all'
       ? req.query.academic_year_id
       : undefined;
 
     const filters = {
       institute_id: instituteId,
-      branch_id: branchFilter,
+      branch_id: branchId,
       academic_year_id: academicYearFilter,
       search: req.query.search,
       status: req.query.status,
@@ -96,7 +94,8 @@ export const getFeeTemplateById = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
-    const feeTemplate = await feeTemplateService.getFeeTemplateById(id, instituteId);
+    const branchId = getBranchId(req);
+    const feeTemplate = await feeTemplateService.getFeeTemplateById(id, instituteId, branchId);
 
     if (!feeTemplate) {
       return sendNotFound(res, 'Fee template nahi mila');
@@ -119,9 +118,11 @@ export const createFeeTemplate = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
+    const branchId = getBranchId(req);
     const templateData = {
       ...normalizeTemplatePayload(req.body),
       institute_id: instituteId,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || req.body.branch_id || null),
       created_by: req.user.id,
       updated_by: req.user.id
     };
@@ -149,6 +150,7 @@ export const updateFeeTemplate = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
+    const branchId = getBranchId(req);
     const updateData = {
       ...normalizeTemplatePayload(req.body),
       updated_by: req.user.id
@@ -158,7 +160,10 @@ export const updateFeeTemplate = async (req, res) => {
       id,
       instituteId,
       updateData,
-      { transaction }
+      { 
+        transaction,
+        branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId 
+      }
     );
 
     await transaction.commit();
@@ -184,7 +189,10 @@ export const deleteFeeTemplate = async (req, res) => {
       return sendError(res, 'Institute ID nahi mila', 400);
     }
 
-    const result = await feeTemplateService.deleteFeeTemplate(id, instituteId);
+    const branchId = getBranchId(req);
+    const result = await feeTemplateService.deleteFeeTemplate(id, instituteId, {
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId
+    });
 
     return sendSuccess(res, null, result.message);
   } catch (error) {
@@ -210,7 +218,10 @@ export const toggleFeeTemplateStatus = async (req, res) => {
       return sendError(res, 'is_active field zaroori hai', 400);
     }
 
-    const feeTemplate = await feeTemplateService.toggleFeeTemplateStatus(id, instituteId, is_active);
+    const branchId = getBranchId(req);
+    const feeTemplate = await feeTemplateService.toggleFeeTemplateStatus(id, instituteId, is_active, {
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId
+    });
 
     return sendSuccess(res, feeTemplate, `Fee template ${is_active ? 'activate' : 'deactivate'} ho gaya`);
   } catch (error) {

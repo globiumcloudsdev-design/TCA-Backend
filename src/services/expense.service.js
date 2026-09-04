@@ -134,10 +134,13 @@ export const getExpenseById = async (id, instituteId, branchId = null) => {
  * Update expense
  */
 export const updateExpense = async (id, instituteId, updateData, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
+  const where = { id, institute_id: instituteId };
+  if (branch_id) where.branch_id = branch_id;
   
   const expense = await Expense.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
   
   if (!expense) {
@@ -170,10 +173,13 @@ export const updateExpense = async (id, instituteId, updateData, options = {}) =
  * Delete expense
  */
 export const deleteExpense = async (id, instituteId, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
+  const where = { id, institute_id: instituteId };
+  if (branch_id) where.branch_id = branch_id;
   
   const expense = await Expense.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
   
   if (!expense) {

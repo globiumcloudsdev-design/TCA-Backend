@@ -155,8 +155,11 @@ export const getFeeVouchers = catchAsync(async (req, res) => {
 export const deleteVoucher = catchAsync(async (req, res) => {
   const { voucherId } = req.params;
   const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
 
-  const voucher = await feeVoucherService.deleteVoucher(voucherId, instituteId);
+  const voucher = await feeVoucherService.deleteVoucher(voucherId, instituteId, {
+    branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId
+  });
 
   res.status(200).json({
     success: true,
@@ -173,6 +176,7 @@ export const updateVoucherStatus = catchAsync(async (req, res) => {
   const { voucherId } = req.params;
   const { status, partialAmount } = req.body;
   const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
 
   if (!status) {
     throw new AppError('Status is required', 400);
@@ -183,7 +187,10 @@ export const updateVoucherStatus = catchAsync(async (req, res) => {
     instituteId,
     status,
     partialAmount,
-    { updatedBy: req.user.id }
+    { 
+      updatedBy: req.user.id,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId 
+    }
   );
 
   res.status(200).json({
@@ -205,6 +212,7 @@ export const recordPayment = catchAsync(async (req, res) => {
   const reference = req.body.reference || req.body.remarks;
   const paidDate = req.body.paidDate || req.body.payment_date;
   const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
   const collectedBy = req.user.id;
 
   if (!amount || amount <= 0) {
@@ -224,6 +232,9 @@ export const recordPayment = catchAsync(async (req, res) => {
       reference,
       paidDate: paidDate || new Date(),
       collectedBy
+    },
+    {
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId
     }
   );
 
@@ -241,10 +252,14 @@ export const recordPayment = catchAsync(async (req, res) => {
 export const getPaymentHistory = catchAsync(async (req, res) => {
   const { voucherId } = req.params;
   const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
 
   const history = await feeVoucherService.getPaymentHistory(
     voucherId,
-    instituteId
+    instituteId,
+    {
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId
+    }
   );
 
   res.status(200).json({
@@ -284,12 +299,15 @@ export const getPaymentSummary = catchAsync(async (req, res) => {
 export const bulkDeleteVouchers = catchAsync(async (req, res) => {
   const { voucherIds } = req.body;
   const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
 
   if (!voucherIds || !Array.isArray(voucherIds) || voucherIds.length === 0) {
     throw new AppError('Voucher IDs array is required', 400);
   }
 
-  const result = await feeVoucherService.bulkDeleteVouchers(voucherIds, instituteId);
+  const result = await feeVoucherService.bulkDeleteVouchers(voucherIds, instituteId, {
+    branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId
+  });
 
   res.status(200).json({
     success: true,

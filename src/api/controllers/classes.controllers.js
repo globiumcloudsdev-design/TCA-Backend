@@ -160,7 +160,7 @@ export const createClass = async (req, res) => {
     // 5. Prepare final data
     const classData = {
       institute_id: instituteId,
-      branch_id: branchId || body.branch_id || null,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || body.branch_id || null),
       name: body.name,
       description: body.description || '',
       academic_year_id: body.academic_year_id,

@@ -1,14 +1,50 @@
+# Dependencies
 node_modules/
+
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Build & compilation outputs
 dist/
 build/
-src/logs/*.log
+
+# Logs & monitoring
+src/logs/*
+!src/logs/.gitkeep
+logs/
+*.log
+*.log.gz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Public uploads & backups
 public/uploads/temp/
 public/backups/
+
+# Coverage & testing outputs
 coverage/
 .nyc_output/
-*.local
-.DS_Store
-Thumbs.db
+
+# IDE & Editor files
+.vscode/
+.idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
+
+# Operating System files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Temporary files & local overrides
+*.local
+.cache/
+.temp/
+tmp/

@@ -28,7 +28,7 @@ export const createVendor = async (req, res) => {
     const vendorData = {
       ...req.body,
       institute_id: instituteId,
-      branch_id: branchId,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || req.body.branch_id || null),
       created_by: req.user.id,
     };
     
@@ -87,7 +87,8 @@ export const getVendorById = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    const vendor = await vendorService.getVendorById(id, instituteId);
+    const branchId = getBranchId(req);
+    const vendor = await vendorService.getVendorById(id, instituteId, branchId);
     if (!vendor) {
       return sendNotFound(res, 'Vendor not found');
     }
@@ -148,7 +149,11 @@ export const updateVendor = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    const vendor = await vendorService.updateVendor(id, instituteId, req.body, { transaction });
+    const branchId = getBranchId(req);
+    const vendor = await vendorService.updateVendor(id, instituteId, req.body, { 
+      transaction, 
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId 
+    });
     await transaction.commit();
     return sendSuccess(res, vendor, 'Vendor updated successfully');
   } catch (error) {
@@ -174,7 +179,11 @@ export const deleteVendor = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    const result = await vendorService.deleteVendor(id, instituteId, { transaction });
+    const branchId = getBranchId(req);
+    const result = await vendorService.deleteVendor(id, instituteId, { 
+      transaction, 
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId 
+    });
     await transaction.commit();
     return sendSuccess(res, null, result.message);
   } catch (error) {
@@ -201,7 +210,11 @@ export const assignStudentsToVendor = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    const vendor = await vendorService.assignStudentsToVendor(id, instituteId, student_ids || [], { transaction });
+    const branchId = getBranchId(req);
+    const vendor = await vendorService.assignStudentsToVendor(id, instituteId, student_ids || [], { 
+      transaction, 
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId 
+    });
     await transaction.commit();
     return sendSuccess(res, vendor, 'Students assigned successfully');
   } catch (error) {

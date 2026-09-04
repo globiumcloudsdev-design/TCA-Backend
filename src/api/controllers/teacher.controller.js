@@ -144,7 +144,7 @@ export const createTeacher = async (req, res) => {
     const teacherData = {
       ...body,
       institute_id: instituteId,
-      branch_id: branchId || body.branch_id,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || body.branch_id || null),
       created_by: req.user.id,
       date_of_birth: body.dob,
       employee_id: body.employee_id

@@ -73,7 +73,7 @@ export const createStaff = catchAsync(async (req, res) => {
   
   const result = await staffService.createStaff(
     instituteId,
-    { ...req.body, branch_id: branchId || req.body.branch_id },
+    { ...req.body, branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || req.body.branch_id || null) },
     req.user.id,
     avatarFile,
     documentFiles

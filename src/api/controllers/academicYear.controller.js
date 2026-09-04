@@ -36,7 +36,7 @@ export const createAcademicYear = async (req, res) => {
     const academicYearData = {
       ...req.body,
       institute_id: instituteId,
-      branch_id: branchId || req.body.branch_id || null,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || req.body.branch_id || null),
     };
 
     const academicYear = await academicYearService.createAcademicYear(academicYearData, { transaction });
@@ -96,7 +96,8 @@ export const getAcademicYearById = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
-    const academicYear = await academicYearService.getAcademicYearById(id, instituteId);
+    const branchId = getBranchId(req);
+    const academicYear = await academicYearService.getAcademicYearById(id, instituteId, branchId);
     if (!academicYear) {
       return sendNotFound(res, 'Academic year not found');
     }
@@ -120,7 +121,11 @@ export const updateAcademicYear = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
-    const academicYear = await academicYearService.updateAcademicYear(id, instituteId, req.body, { transaction });
+    const branchId = getBranchId(req);
+    const academicYear = await academicYearService.updateAcademicYear(id, instituteId, req.body, { 
+      transaction, 
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId 
+    });
     await transaction.commit();
     return sendSuccess(res, academicYear, 'Academic year updated successfully');
   } catch (error) {
@@ -146,7 +151,11 @@ export const deleteAcademicYear = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
-    const result = await academicYearService.deleteAcademicYear(id, instituteId, { transaction });
+    const branchId = getBranchId(req);
+    const result = await academicYearService.deleteAcademicYear(id, instituteId, { 
+      transaction, 
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId 
+    });
     await transaction.commit();
     return sendSuccess(res, null, result.message);
   } catch (error) {
@@ -172,7 +181,11 @@ export const setCurrentAcademicYear = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
-    const academicYear = await academicYearService.setCurrentAcademicYear(id, instituteId, { transaction });
+    const branchId = getBranchId(req);
+    const academicYear = await academicYearService.setCurrentAcademicYear(id, instituteId, { 
+      transaction, 
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId 
+    });
     await transaction.commit();
     return sendSuccess(res, academicYear, 'Academic year set as current successfully');
   } catch (error) {
@@ -195,7 +208,8 @@ export const getCurrentAcademicYear = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
-    const academicYear = await academicYearService.getCurrentAcademicYear(instituteId);
+    const branchId = getBranchId(req);
+    const academicYear = await academicYearService.getCurrentAcademicYear(instituteId, branchId);
     if (!academicYear) {
       return sendNotFound(res, 'No current academic year found');
     }

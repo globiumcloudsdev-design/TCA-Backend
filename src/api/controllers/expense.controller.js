@@ -49,7 +49,7 @@ export const createExpense = async (req, res) => {
     const expenseData = {
       ...rest,
       institute_id: instituteId,
-      branch_id: branchId,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || rest.branch_id || null),
       category: finalCategory,
       vendor_id: vendor_id || null,
       vendor_name: !vendor_id ? vendor_name : null,
@@ -140,12 +140,13 @@ export const updateExpense = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
+    const branchId = getBranchId(req);
     const updateData = {
       ...req.body,
       updated_by: req.user.id,
     };
     
-    const expense = await expenseService.updateExpense(id, instituteId, updateData, { transaction });
+    const expense = await expenseService.updateExpense(id, instituteId, updateData, { transaction, branch_id: branchId });
     await transaction.commit();
     return sendSuccess(res, expense, 'Expense updated successfully');
   } catch (error) {
@@ -171,7 +172,8 @@ export const deleteExpense = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
     
-    const result = await expenseService.deleteExpense(id, instituteId, { transaction });
+    const branchId = getBranchId(req);
+    const result = await expenseService.deleteExpense(id, instituteId, { transaction, branch_id: branchId });
     await transaction.commit();
     return sendSuccess(res, null, result.message);
   } catch (error) {

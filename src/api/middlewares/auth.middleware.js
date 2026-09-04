@@ -88,7 +88,7 @@ export const protect = catchAsync(async (req, res, next) => {
   // 5. Load branch if user has branch_id
   if (user.branch_id) {
     const branch = await Branch.findByPk(user.branch_id, {
-      attributes: ['id', 'name', 'code', 'address', 'city', 'is_active', 'settings']
+      attributes: ['id', 'name', 'code', 'address', 'city', 'is_active', 'settings', 'is_main']
     });
     if (branch) {
       user.branch = branch;

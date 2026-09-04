@@ -167,13 +167,17 @@ export const createFeeTemplate = async (data, options = {}) => {
  * Update fee template
  */
 export const updateFeeTemplate = async (id, instituteId, updateData, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
   const supportsBranchId = await hasFeeTemplateBranchColumn();
 
   console.log('📝 Fee template update ho raha hai:', id);
 
+  const where = { id, institute_id: instituteId };
+  if (supportsBranchId && branch_id) where.branch_id = branch_id;
+
   const feeTemplate = await FeeTemplate.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
 
   if (!feeTemplate) {
@@ -281,12 +285,15 @@ export const getAllFeeTemplates = async (filters = {}, pagination = {}) => {
 /**
  * Get fee template by ID
  */
-export const getFeeTemplateById = async (id, instituteId) => {
+export const getFeeTemplateById = async (id, instituteId, branchId = null) => {
   const supportsBranchId = await hasFeeTemplateBranchColumn();
+
+  const where = { id, institute_id: instituteId };
+  if (supportsBranchId && branchId) where.branch_id = branchId;
 
   const feeTemplate = await FeeTemplate.findOne({
     attributes: getFeeTemplateAttributes(supportsBranchId),
-    where: { id, institute_id: instituteId },
+    where,
     include: [
       { model: AcademicYear, as: 'academicYear', attributes: ['id', 'name'] }
     ]
@@ -298,30 +305,42 @@ export const getFeeTemplateById = async (id, instituteId) => {
 /**
  * Delete fee template
  */
-export const deleteFeeTemplate = async (id, instituteId) => {
+export const deleteFeeTemplate = async (id, instituteId, options = {}) => {
+  const { transaction, branch_id } = options;
+  const supportsBranchId = await hasFeeTemplateBranchColumn();
+  const where = { id, institute_id: instituteId };
+  if (supportsBranchId && branch_id) where.branch_id = branch_id;
+
   const feeTemplate = await FeeTemplate.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
 
   if (!feeTemplate) throw new Error('Fee template nahi mila');
 
-  await feeTemplate.destroy();
+  await feeTemplate.destroy({ transaction });
   return { message: 'Fee template delete ho gaya' };
 };
 
 /**
  * Toggle fee template status
  */
-export const toggleFeeTemplateStatus = async (id, instituteId, isActive) => {
+export const toggleFeeTemplateStatus = async (id, instituteId, isActive, options = {}) => {
+  const { transaction, branch_id } = options;
+  const supportsBranchId = await hasFeeTemplateBranchColumn();
+  const where = { id, institute_id: instituteId };
+  if (supportsBranchId && branch_id) where.branch_id = branch_id;
+
   const feeTemplate = await FeeTemplate.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
 
   if (!feeTemplate) throw new Error('Fee template nahi mila');
 
   feeTemplate.is_active = isActive;
   feeTemplate.updated_at = new Date();
-  await feeTemplate.save();
+  await feeTemplate.save({ transaction });
 
   return feeTemplate;
 };

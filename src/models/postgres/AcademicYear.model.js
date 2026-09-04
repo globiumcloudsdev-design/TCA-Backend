@@ -71,7 +71,7 @@ const AcademicYear = sequelize.define(
     indexes: [
       {
         unique: true,
-        fields: ['institute_id', 'name'],
+        fields: ['institute_id', 'branch_id', 'name'],
         where: { deleted_at: null },
       }
     ],

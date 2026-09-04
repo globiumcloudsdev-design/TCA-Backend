@@ -183,7 +183,7 @@ export const createStudent = async (req, res) => {
     const studentData = {
       ...body,
       institute_id: instituteId,
-      branch_id: branchId || body.branch_id || null,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || body.branch_id || null),
       created_by: req.user.id,
       date_of_birth: body.dob || body.date_of_birth,
       guardians: body.guardians,
@@ -573,8 +573,9 @@ export const getStudentsByClass = async (req, res) => {
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
-    
-    const students = await studentService.getStudentsByClass(classId, instituteId);
+
+    const branchId = getBranchId(req);
+    const students = await studentService.getStudentsByClass(classId, instituteId, branchId);
     
     return sendSuccess(res, students, 'Students fetched successfully');
     
@@ -596,8 +597,9 @@ export const getStudentsBySection = async (req, res) => {
     if (!instituteId) {
       return sendError(res, 'Institute ID not found', 400);
     }
-    
-    const students = await studentService.getStudentsBySection(sectionId, instituteId);
+
+    const branchId = getBranchId(req);
+    const students = await studentService.getStudentsBySection(sectionId, instituteId, branchId);
     
     return sendSuccess(res, students, 'Students fetched successfully');
     
@@ -954,7 +956,8 @@ export const searchStudents = async (req, res) => {
     if (!q || q.trim().length < 2) {
       return sendSuccess(res, { data: [], total: 0, query: q }, 'Enter at least 2 characters');
     }
-    const result = await studentService.searchStudents(instituteId, q, limit);
+    const branchId = getBranchId(req);
+    const result = await studentService.searchStudents(instituteId, q, limit, branchId);
     return sendSuccess(res, result, 'Students fetched successfully');
   } catch (error) {
     console.error('❌ Search students error:', error);

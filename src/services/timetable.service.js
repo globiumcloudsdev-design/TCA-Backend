@@ -35,7 +35,7 @@ export const getTimetableEntities = async (instituteId, academicYearId, branchId
 
   const academicYearWhere = { institute_id: instituteId };
   if (branchId) {
-    academicYearWhere[Op.or] = [{ branch_id: branchId }, { branch_id: null }];
+    academicYearWhere.branch_id = branchId;
   }
 
   // 1. Academic Years fetch karo

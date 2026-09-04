@@ -2,6 +2,7 @@
 
 import * as instituteDashboardService from '../../../services/dashboard/instituteDashboard.service.js';
 import { sendSuccess, sendError } from '../../../utils/helpers/response.helper.js';
+import { getBranchId } from '../../../utils/helpers/request.helper.js';
 
 const getInstituteId = (req) => {
   return req.user?.school_id || req.user?.institute_id || req.headers['x-school-id'] || null;
@@ -15,11 +16,13 @@ export const getInstituteDashboard = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const data = await instituteDashboardService.getInstituteDashboard({
       instituteId,
       user: req.user,
       type: req.query.type,
-      branchId: req.query.branch_id || null,
+      branchId,
     });
 
     return sendSuccess(res, data, 'Institute dashboard fetched successfully');

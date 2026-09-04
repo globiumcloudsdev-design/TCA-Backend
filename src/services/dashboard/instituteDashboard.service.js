@@ -77,7 +77,7 @@ const buildWhere = (instituteId, branchId = null, isFeeVoucher = false) => {
   const fieldName = isFeeVoucher ? 'institute_id' : 'school_id';
   const where = { [fieldName]: instituteId };
   if (branchId && branchId !== 'all') {
-    where[Op.or] = [{ branch_id: branchId }, { branch_id: null }];
+    where.branch_id = branchId;
   }
   return where;
 };

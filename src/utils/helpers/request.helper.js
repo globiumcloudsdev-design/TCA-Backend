@@ -22,12 +22,27 @@ export const getBranchId = (req) => {
   if (req.allowedBranchId !== undefined) {
     return req.allowedBranchId;
   }
-  // If user is locked to a branch (Branch Admin), always return their branch
-  if (req.user?.user_type === 'BRANCH_ADMIN' || req.user?.branch_id) {
-    return req.user.branch_id;
+
+  const userType = String(req.user?.user_type || '').toUpperCase();
+  const isSuperAdmin =
+    userType === 'INSTITUTE_ADMIN' ||
+    userType === 'SUPER_ADMIN' ||
+    userType === 'MASTER_ADMIN' ||
+    userType === 'SYSTEM_ADMIN' ||
+    userType === 'SUPPORT_STAFF';
+
+  // Branch Admin is strictly locked to their assigned branch
+  if (!isSuperAdmin && (userType === 'BRANCH_ADMIN' || req.user?.staff_type === 'Branch Head')) {
+    return req.user?.branch_id || null;
   }
+
   // Super Admin view
-  return req.query?.branch_id || req.headers?.['x-branch-id'] || req.body?.branch_id || null;
+  const requestedBranch = req.query?.branch_id || req.headers?.['x-branch-id'] || req.body?.branch_id;
+  if (requestedBranch && requestedBranch !== 'all' && requestedBranch !== 'null' && requestedBranch !== 'undefined') {
+    return requestedBranch;
+  }
+
+  return null;
 };
 
 /**
@@ -51,7 +66,14 @@ export const getBranchFilter = (req, fieldName = 'branch_id') => {
  */
 export const isBranchRestricted = (req) => {
   if (req?.isBranchRestricted !== undefined) return Boolean(req.isBranchRestricted);
-  return Boolean(req?.user?.user_type === 'BRANCH_ADMIN' || req?.user?.branch_id);
+  const userType = String(req.user?.user_type || '').toUpperCase();
+  const isSuperAdmin =
+    userType === 'INSTITUTE_ADMIN' ||
+    userType === 'SUPER_ADMIN' ||
+    userType === 'MASTER_ADMIN' ||
+    userType === 'SYSTEM_ADMIN' ||
+    userType === 'SUPPORT_STAFF';
+  return !isSuperAdmin && (userType === 'BRANCH_ADMIN' || req.user?.staff_type === 'Branch Head');
 };
 
 /**

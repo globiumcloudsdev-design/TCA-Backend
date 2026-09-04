@@ -42,16 +42,9 @@ export const getLeaveTypes = async (req, res) => {
 
     const where = { institute_id };
 
-    // If branch_id is provided, filter by specific branch
-    // Otherwise get both branch-specific and institute-wide leave types
+    // If branch_id is provided, filter strictly by specific branch
     if (branch_id) {
-      where[Op.or] = [
-        { branch_id: branch_id },
-        { branch_id: null },
-      ];
-    } else {
-      // Get all institute-wide leave types (branch_id is null)
-      where.branch_id = null;
+      where.branch_id = branch_id;
     }
 
     // Filter by active status

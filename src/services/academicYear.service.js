@@ -22,15 +22,19 @@ export const createAcademicYear = async (data, options = {}) => {
     throw new Error('Start date must be before end date');
   }
 
-  // If setting as current, unset any existing current year
+  // If setting as current, unset any existing current year for this branch
   if (data.is_current) {
+    const unsetWhere = {
+      institute_id: data.institute_id,
+      is_current: true
+    };
+    if (data.branch_id && AcademicYear.rawAttributes?.branch_id) {
+      unsetWhere.branch_id = data.branch_id;
+    }
     await AcademicYear.update(
       { is_current: false },
       { 
-        where: { 
-          institute_id: data.institute_id,
-          is_current: true 
-        },
+        where: unsetWhere,
         transaction 
       }
     );
@@ -50,10 +54,7 @@ export const getAllAcademicYears = async (filters = {}, pagination = {}) => {
   const where = { institute_id: filters.institute_id };
   
   if (filters.branch_id && AcademicYear.rawAttributes?.branch_id) {
-    where[Op.or] = [
-      { branch_id: filters.branch_id },
-      { branch_id: null }
-    ];
+    where.branch_id = filters.branch_id;
   }
 
   if (filters.is_current !== undefined) {
@@ -85,9 +86,13 @@ export const getAllAcademicYears = async (filters = {}, pagination = {}) => {
 /**
  * Get academic year by ID
  */
-export const getAcademicYearById = async (id, instituteId) => {
+export const getAcademicYearById = async (id, instituteId, branchId = null) => {
+  const where = { id, institute_id: instituteId };
+  if (branchId && AcademicYear.rawAttributes?.branch_id) {
+    where.branch_id = branchId;
+  }
   const academicYear = await AcademicYear.findOne({
-    where: { id, institute_id: instituteId }
+    where
   });
   return academicYear;
 };
@@ -96,10 +101,15 @@ export const getAcademicYearById = async (id, instituteId) => {
  * Update academic year
  */
 export const updateAcademicYear = async (id, instituteId, updateData, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
+  const where = { id, institute_id: instituteId };
+  if (branch_id && AcademicYear.rawAttributes?.branch_id) {
+    where.branch_id = branch_id;
+  }
   
   const academicYear = await AcademicYear.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
   
   if (!academicYear) {
@@ -107,13 +117,17 @@ export const updateAcademicYear = async (id, instituteId, updateData, options = 
   }
 
   if (updateData.is_current && !academicYear.is_current) {
+    const unsetWhere = {
+      institute_id: instituteId,
+      is_current: true
+    };
+    if (academicYear.branch_id && AcademicYear.rawAttributes?.branch_id) {
+      unsetWhere.branch_id = academicYear.branch_id;
+    }
     await AcademicYear.update(
       { is_current: false },
       { 
-        where: { 
-          institute_id: instituteId,
-          is_current: true 
-        },
+        where: unsetWhere,
         transaction 
       }
     );
@@ -127,10 +141,15 @@ export const updateAcademicYear = async (id, instituteId, updateData, options = 
  * Delete academic year
  */
 export const deleteAcademicYear = async (id, instituteId, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
+  const where = { id, institute_id: instituteId };
+  if (branch_id && AcademicYear.rawAttributes?.branch_id) {
+    where.branch_id = branch_id;
+  }
   
   const academicYear = await AcademicYear.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
   
   if (!academicYear) {
@@ -149,23 +168,33 @@ export const deleteAcademicYear = async (id, instituteId, options = {}) => {
  * Set academic year as current
  */
 export const setCurrentAcademicYear = async (id, instituteId, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
+  const where = { id, institute_id: instituteId };
+  if (branch_id && AcademicYear.rawAttributes?.branch_id) {
+    where.branch_id = branch_id;
+  }
   
   const academicYear = await AcademicYear.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
   
   if (!academicYear) {
     throw new Error('Academic year not found');
   }
 
+  const unsetWhere = {
+    institute_id: instituteId,
+    is_current: true
+  };
+  if (academicYear.branch_id && AcademicYear.rawAttributes?.branch_id) {
+    unsetWhere.branch_id = academicYear.branch_id;
+  }
+
   await AcademicYear.update(
     { is_current: false },
     { 
-      where: { 
-        institute_id: instituteId,
-        is_current: true 
-      },
+      where: unsetWhere,
       transaction 
     }
   );
@@ -177,13 +206,19 @@ export const setCurrentAcademicYear = async (id, instituteId, options = {}) => {
 /**
  * Get current academic year
  */
-export const getCurrentAcademicYear = async (instituteId) => {
+export const getCurrentAcademicYear = async (instituteId, branchId = null) => {
+  const where = { 
+    institute_id: instituteId,
+    is_current: true,
+    is_active: true
+  };
+
+  if (branchId && AcademicYear.rawAttributes?.branch_id) {
+    where.branch_id = branchId;
+  }
+
   const academicYear = await AcademicYear.findOne({
-    where: { 
-      institute_id: instituteId,
-      is_current: true,
-      is_active: true
-    }
+    where
   });
   return academicYear;
 };
@@ -200,10 +235,7 @@ export const getAcademicYearOptions = async (instituteId, onlyActive = true, bra
   }
 
   if (branchId && AcademicYear.rawAttributes?.branch_id) {
-    where[Op.or] = [
-      { branch_id: branchId },
-      { branch_id: null }
-    ];
+    where.branch_id = branchId;
   }
 
   const academicYears = await AcademicYear.findAll({

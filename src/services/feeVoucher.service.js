@@ -510,12 +510,17 @@ export const generateVouchersForClass = async (
     });
 
     // Get all active students in this class
+    const studentWhere = {
+        school_id: instituteId,
+        user_type: 'STUDENT',
+        is_active: true
+    };
+    if (options.branch_id) {
+        studentWhere.branch_id = options.branch_id;
+    }
+
     const students = await User.findAll({
-        where: {
-            school_id: instituteId,
-            user_type: 'STUDENT',
-            is_active: true
-        },
+        where: studentWhere,
         transaction
     });
 
@@ -549,6 +554,7 @@ export const generateVouchersForClass = async (
                         feeTemplateId,
                         instituteCode,
                         allParents,
+                        branch_id: options.branch_id || student.branch_id,
                         isBulk: true
                     }
                 );
@@ -783,10 +789,12 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
  * Delete voucher (soft delete via archived flag)
  */
 export const deleteVoucher = async (voucherId, instituteId, options = {}) => {
-    const { transaction } = options;
+    const { transaction, branch_id } = options;
+    const where = { id: voucherId, institute_id: instituteId };
+    if (branch_id) where.branch_id = branch_id;
 
     const voucher = await FeeVoucher.findOne({
-        where: { id: voucherId, institute_id: instituteId },
+        where,
         transaction
     });
 
@@ -808,15 +816,18 @@ export const deleteVoucher = async (voucherId, instituteId, options = {}) => {
  * Handles partial payments by tracking remaining balance
  */
 export const updateVoucherStatus = async (voucherId, instituteId, newStatus, partialAmount = null, options = {}) => {
-    const { transaction, updatedBy } = options;
+    const { transaction, updatedBy, branch_id } = options;
 
     const validStatuses = ['pending', 'paid', 'overdue', 'partial', 'cancelled'];
     if (!validStatuses.includes(newStatus)) {
         throw new AppError(`Invalid status. Valid statuses are: ${validStatuses.join(', ')}`, 400);
     }
 
+    const where = { id: voucherId, institute_id: instituteId };
+    if (branch_id) where.branch_id = branch_id;
+
     const voucher = await FeeVoucher.findOne({
-        where: { id: voucherId, institute_id: instituteId },
+        where,
         transaction
     });
 
@@ -895,11 +906,14 @@ export const updateVoucherStatus = async (voucherId, instituteId, newStatus, par
  * Tracks partial payments and updates voucher status accordingly
  */
 export const recordPayment = async (voucherId, instituteId, paymentData, options = {}) => {
-    const { transaction } = options;
+    const { transaction, branch_id } = options;
     const { amount, paymentMethod, reference, paidDate = new Date(), collectedBy } = paymentData;
 
+    const where = { id: voucherId, institute_id: instituteId };
+    if (branch_id) where.branch_id = branch_id;
+
     const voucher = await FeeVoucher.findOne({
-        where: { id: voucherId, institute_id: instituteId },
+        where,
         transaction
     });
 
@@ -983,12 +997,15 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
  * Get payment history for a voucher
  */
 export const getPaymentHistory = async (voucherId, instituteId, options = {}) => {
-    const { transaction } = options;
+    const { transaction, branch_id } = options;
     const { default: FeePayment } = await import('../models/postgres/FeePayment.model.js');
     const { default: User } = await import('../models/postgres/User.model.js');
 
+    const where = { id: voucherId, institute_id: instituteId };
+    if (branch_id) where.branch_id = branch_id;
+
     const voucher = await FeeVoucher.findOne({
-        where: { id: voucherId, institute_id: instituteId }
+        where
     });
 
     if (!voucher) {
@@ -1185,17 +1202,20 @@ export const getPaymentSummary = async (feeTypeId, instituteId, filters = {}, op
  * Bulk delete vouchers (soft delete via archived flag)
  */
 export const bulkDeleteVouchers = async (voucherIds, instituteId, options = {}) => {
-    const { transaction } = options;
+    const { transaction, branch_id } = options;
 
     if (!Array.isArray(voucherIds) || voucherIds.length === 0) {
         throw new AppError('No voucher IDs provided', 400);
     }
 
+    const where = {
+        id: { [Op.in]: voucherIds },
+        institute_id: instituteId
+    };
+    if (branch_id) where.branch_id = branch_id;
+
     const vouchers = await FeeVoucher.findAll({
-        where: {
-            id: { [Op.in]: voucherIds },
-            institute_id: instituteId
-        },
+        where,
         transaction
     });
 
@@ -1204,14 +1224,17 @@ export const bulkDeleteVouchers = async (voucherIds, instituteId, options = {}) 
         throw new AppError(`Cannot delete paid vouchers: ${undeletable.map(v => v.voucher_number).join(', ')}`, 400);
     }
 
+    const updateWhere = {
+        id: { [Op.in]: voucherIds },
+        institute_id: instituteId,
+        status: { [Op.ne]: 'paid' }
+    };
+    if (branch_id) updateWhere.branch_id = branch_id;
+
     await FeeVoucher.update(
         { archived: true },
         {
-            where: {
-                id: { [Op.in]: voucherIds },
-                institute_id: instituteId,
-                status: { [Op.ne]: 'paid' }
-            },
+            where: updateWhere,
             transaction
         }
     );

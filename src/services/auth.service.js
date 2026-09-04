@@ -294,6 +294,7 @@ const getUserProfile = async (userId) => {
     avatar_url: user.avatar_url,
     institute: instituteData,
     branch: branchData,
+    is_main_branch: branchData ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN')) : false,
     phone: user.phone,
     is_active: user.is_active,
     has_branch: !!user.branch_id,

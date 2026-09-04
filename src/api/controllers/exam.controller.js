@@ -40,7 +40,7 @@ export const createExam = async (req, res) => {
     const examData = {
       ...req.body,
       school_id: instituteId,
-      branch_id: branchId || req.body.branch_id,
+      branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || req.body.branch_id || null),
       created_by: req.user.id,
       updated_by: req.user.id
     };

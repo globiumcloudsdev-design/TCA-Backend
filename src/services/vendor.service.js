@@ -63,9 +63,11 @@ export const getAllVendors = async (filters = {}, pagination = {}) => {
 /**
  * Get vendor by ID
  */
-export const getVendorById = async (id, instituteId) => {
+export const getVendorById = async (id, instituteId, branchId = null) => {
+  const where = { id, institute_id: instituteId };
+  if (branchId) where.branch_id = branchId;
   const vendor = await Vendor.findOne({
-    where: { id, institute_id: instituteId }
+    where
   });
   return vendor;
 };
@@ -104,10 +106,13 @@ export const getVendorOptions = async (instituteId, branchId = null, type = null
  * Update vendor
  */
 export const updateVendor = async (id, instituteId, updateData, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
+  const where = { id, institute_id: instituteId };
+  if (branch_id) where.branch_id = branch_id;
   
   const vendor = await Vendor.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
   
   if (!vendor) {
@@ -128,10 +133,13 @@ export const updateVendor = async (id, instituteId, updateData, options = {}) =>
  * Delete vendor
  */
 export const deleteVendor = async (id, instituteId, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
+  const where = { id, institute_id: instituteId };
+  if (branch_id) where.branch_id = branch_id;
   
   const vendor = await Vendor.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
   
   if (!vendor) {
@@ -146,10 +154,13 @@ export const deleteVendor = async (id, instituteId, options = {}) => {
  * Assign students to vendor
  */
 export const assignStudentsToVendor = async (id, instituteId, studentIds, options = {}) => {
-  const { transaction } = options;
+  const { transaction, branch_id } = options;
+  const where = { id, institute_id: instituteId };
+  if (branch_id) where.branch_id = branch_id;
   
   const vendor = await Vendor.findOne({
-    where: { id, institute_id: instituteId }
+    where,
+    transaction
   });
   
   if (!vendor) {

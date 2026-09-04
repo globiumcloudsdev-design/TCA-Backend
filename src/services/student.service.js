@@ -1439,16 +1439,20 @@ export const toggleStudentStatus = async (id, instituteId, isActive) => {
 /**
  * Get students by class
  */
-export const getStudentsByClass = async (classId, instituteId) => {
+export const getStudentsByClass = async (classId, instituteId, branchId = null) => {
+  const where = {
+    school_id: instituteId,
+    user_type: "STUDENT",
+    is_active: true,
+    [Op.and]: sequelize.literal(
+      `"User"."details"->'studentDetails'->>'class_id' = '${classId}'`,
+    ),
+  };
+  if (branchId && branchId !== 'all') {
+    where.branch_id = branchId;
+  }
   return await User.findAll({
-    where: {
-      school_id: instituteId,
-      user_type: "STUDENT",
-      is_active: true,
-      [Op.and]: sequelize.literal(
-        `"User"."details"->'studentDetails'->>'class_id' = '${classId}'`,
-      ),
-    },
+    where,
     order: [["first_name", "ASC"]],
   });
 };
@@ -2297,7 +2301,7 @@ export const getClassPromotionEligibility = async (instituteId, classId, academi
   };
 };
 
-export const searchStudents = async (instituteId, searchQuery, limit = 20) => {
+export const searchStudents = async (instituteId, searchQuery, limit = 20, branchId = null) => {
   if (!searchQuery || searchQuery.trim().length < 2) {
     return { data: [], total: 0 };
   }
@@ -2330,12 +2334,18 @@ export const searchStudents = async (instituteId, searchQuery, limit = 20) => {
     orConditions.push({ [Op.and]: wordAndConditions });
   }
   
+  const where = {
+    school_id: instituteId,
+    user_type: 'STUDENT',
+    [Op.or]: orConditions
+  };
+
+  if (branchId && branchId !== 'all') {
+    where.branch_id = branchId;
+  }
+
   const students = await User.findAll({
-    where: {
-      school_id: instituteId,
-      user_type: 'STUDENT',
-      [Op.or]: orConditions
-    },
+    where,
     // Fetch all needed attributes including details
     attributes: [
       'id', 'school_id', 'role_id', 'user_type', 'first_name', 'last_name', 

@@ -1,37 +1,36 @@
 // src/api/middlewares/branchContext.middleware.js
 
-/**
- * Branch Isolation Middleware
- * 
- * Implements strict horizontal multi-tenant data isolation:
- * 
- * 1. Scenario A: Branch Admin / Branch-assigned user:
- *    - Automatically locked to user's assigned branch_id from token/session.
- *    - Injects req.allowedBranchId = req.user.branch_id.
- *    - Sets req.isBranchRestricted = true.
- *    - Master Lock: Overrides any client-supplied branch_id in query, body, params, or headers.
- * 
- * 2. Scenario B: Super Admin / Institute Admin (Platform Super Admins or School Owner with no branch lock):
- *    - Global View: If no branch specified, req.allowedBranchId = null (returns all branches).
- *    - Targeted View: If branch specified via ?branch_id=..., headers['x-branch-id'], or body.branch_id,
- *      injects req.allowedBranchId = requestedBranchId.
- *    - Sets req.isBranchRestricted = false.
- */
-
 export const branchIsolation = (req, res, next) => {
   if (!req.user) {
-    return next();
+    if (typeof next === 'function') next();
+    return;
   }
 
-  const userType = req.user.user_type;
+  const userType = String(req.user.user_type || '').toUpperCase();
   const userBranchId = req.user.branch_id;
 
-  // A user is branch-scoped if they are explicitly a BRANCH_ADMIN or have a branch_id assigned
-  // Platform admins (MASTER_ADMIN, SYSTEM_ADMIN, SUPPORT_STAFF) and INSTITUTE_ADMIN without fixed branch are global
-  const isGlobalRole = ['MASTER_ADMIN', 'SYSTEM_ADMIN', 'SUPPORT_STAFF'].includes(userType) ||
-    (userType === 'INSTITUTE_ADMIN' && !userBranchId);
+  // Check if assigned branch is the Main Branch
+  const isMainBranch = req.user.branch?.is_main === true ||
+    String(req.user.branch?.code || '').toUpperCase().endsWith('-MAIN') ||
+    String(req.user.branch?.name || '').toLowerCase().includes('main');
 
-  const isBranchScoped = !isGlobalRole && (userType === 'BRANCH_ADMIN' || Boolean(userBranchId));
+  // Platform and Institute Admins (Super Admins) have global multi-branch view capabilities
+  const isGlobalSuperAdmin = [
+    'MASTER_ADMIN',
+    'SYSTEM_ADMIN',
+    'SUPPORT_STAFF',
+    'INSTITUTE_ADMIN',
+    'SUPER_ADMIN',
+    'SUPER ADMIN'
+  ].includes(userType) || isMainBranch;
+
+  // Branch-scoped: non-global user who is a Branch Admin or restricted to a non-main branch
+  const isBranchScoped = !isGlobalSuperAdmin && (
+    userType === 'BRANCH_ADMIN' ||
+    req.user.staff_type === 'Branch Head' ||
+    req.user.role_code === 'BRANCH_ADMIN' ||
+    Boolean(userBranchId)
+  );
 
   if (isBranchScoped && userBranchId) {
     // Scenario A: Branch Admin / Branch-restricted user (The Master Lock)
@@ -40,7 +39,7 @@ export const branchIsolation = (req, res, next) => {
     req.isBranchRestricted = true;
     req.isSuperAdmin = false;
 
-    // Override any attempts by the client to access/manipulate another branch
+    // Hard override any attempts by client to access/manipulate another branch
     if (req.query) {
       req.query.branch_id = userBranchId;
     }
@@ -51,7 +50,7 @@ export const branchIsolation = (req, res, next) => {
       req.headers['x-branch-id'] = userBranchId;
     }
   } else {
-    // Scenario B: Super Admin / Institute Admin (Global View or Targeted View)
+    // Scenario B: Super Admin / Main Branch Admin (Global View or Targeted View)
     const rawBranch = req.query?.branch_id || req.headers?.['x-branch-id'] || req.params?.branchId || req.body?.branch_id || null;
     
     // Normalize: check if a valid branch ID string was passed (not 'all', 'null', 'undefined', '')
@@ -65,7 +64,9 @@ export const branchIsolation = (req, res, next) => {
     req.isSuperAdmin = true;
   }
 
-  next();
+  if (typeof next === 'function') {
+    next();
+  }
 };
 
 export const branchContext = branchIsolation;
