@@ -14,23 +14,33 @@ import { generateRegistrationNo } from "../utils/generators/registrationNo.gener
 import { generateRollNoFromClassInfo } from "../utils/generators/rollNo.generator.js";
 import { generateAndUploadQRCode } from "../utils/qrCodeGenerator.js";
 import { sendWelcomeEmailWithCredentials } from "./email.service.js";
-import { parse } from 'date-fns';
+import { parse, format } from 'date-fns';
 import { deleteFromCloudinary } from "../config/cloudinary.js";
 
 const { User, Role, Institute, Class, Section, AcademicYear } = models;
 const { ExamResult, StudentAttendance, FeeVoucher, LeaveRequest, Exam, Assignment, AssignmentSubmission } = models;
 
 /**
- * Robust date parser for imports
+ * Robust date parser for imports (returns YYYY-MM-DD string)
  */
 const parseImportDate = (dateVal) => {
   if (!dateVal) return null;
-  if (dateVal instanceof Date) return dateVal;
+  if (dateVal instanceof Date) {
+    if (isNaN(dateVal.getTime())) return null;
+    return format(dateVal, 'yyyy-MM-dd');
+  }
   
   const dateStr = String(dateVal).trim();
   if (!dateStr) return null;
 
-  // Try common formats
+  // 1. If starts with YYYY-MM-DD (including ISO timestamps like 2026-06-15T00:00:00.000Z)
+  const isoMatch = dateStr.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+
+  // 2. Try common formats
   const formats = [
     'MM/dd/yyyy', 'M/d/yyyy', 'yyyy-MM-dd', 'dd-MM-yyyy', 'dd/MM/yyyy', 
     'MM/dd/yy', 'M/d/yy', 'dd/MM/yy', 'd/M/yy', 'MMM dd, yyyy', 'MMMM dd, yyyy'
@@ -39,15 +49,15 @@ const parseImportDate = (dateVal) => {
   for (const fmt of formats) {
     try {
       const parsed = parse(dateStr, fmt, new Date());
-      if (!isNaN(parsed.getTime())) return parsed;
+      if (!isNaN(parsed.getTime())) return format(parsed, 'yyyy-MM-dd');
     } catch (e) {
       // continue
     }
   }
 
-  // Fallback to native Date.parse
+  // 3. Fallback to native Date.parse
   const fallback = new Date(dateStr);
-  return !isNaN(fallback.getTime()) ? fallback : null;
+  return !isNaN(fallback.getTime()) ? format(fallback, 'yyyy-MM-dd') : null;
 };
 
 
@@ -645,6 +655,15 @@ const resolveStudentRelations = async (students = []) => {
       sectionId || details.studentDetails.section_id || null;
     details.studentDetails.class_name = resolvedClassName;
     details.studentDetails.section_name = resolvedSectionName;
+
+    // Normalize date_of_birth if stored as raw ISO timestamp (e.g. from previous bulk imports)
+    if (details.studentDetails.date_of_birth && typeof details.studentDetails.date_of_birth === 'string') {
+      const isoMatch = details.studentDetails.date_of_birth.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (isoMatch) {
+        details.studentDetails.date_of_birth = isoMatch[1];
+      }
+    }
+
     student.details = details;
   });
 
@@ -1815,7 +1834,7 @@ export const bulkImportStudents = async (
 
         // Safely parse date fields
         const dob = parseImportDate(s.dob || s.date_of_birth);
-        const admissionDate = parseImportDate(s.admission_date || s.admissionDate) || new Date();
+        const admissionDate = parseImportDate(s.admission_date || s.admissionDate) || format(new Date(), 'yyyy-MM-dd');
 
         // Prepare student details with safe values
         const studentDetails = {
