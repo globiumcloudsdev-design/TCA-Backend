@@ -98,6 +98,13 @@ const getCompleteInstituteData = async (instituteId) => {
     
     if (!institute) return null;
     
+    // Fetch active branches for institute
+    const branches = await Branch.findAll({
+      where: { institute_id: instituteId, is_active: true },
+      attributes: ['id', 'name', 'code', 'phone', 'email', 'address', 'city', 'is_main'],
+      order: [['is_main', 'DESC'], ['name', 'ASC']]
+    });
+
     // Fetch policies
     const policies = await Policy.findAll({
       where: { institute_id: instituteId, is_active: true },
@@ -187,7 +194,8 @@ const getCompleteInstituteData = async (instituteId) => {
         by_type: policiesByType,
         latest: latestPolicies
       },
-      has_branches: mergedSettings.has_branches
+      branches: branches.map(b => (b.toJSON ? b.toJSON() : b)),
+      has_branches: mergedSettings.has_branches || branches.length > 0
     };
   } catch (error) {
     logger.error('Error fetching institute data:', error);
@@ -275,6 +283,26 @@ const getUserProfile = async (userId) => {
     }
   }
   
+  const mainBranch = instituteData?.branches?.find(b => b.is_main === true) ||
+    instituteData?.branches?.find(b => {
+      const code = String(b.code || '').toUpperCase();
+      const name = String(b.name || '').toLowerCase();
+      return code.endsWith('-MAIN') || code === 'MAIN' || name.includes('main');
+    }) ||
+    instituteData?.branches?.[0] ||
+    null;
+
+  const isGlobalAdmin = [
+    'MASTER_ADMIN',
+    'SYSTEM_ADMIN',
+    'SUPPORT_STAFF',
+    'INSTITUTE_ADMIN',
+    'SUPER_ADMIN',
+    'SUPER ADMIN'
+  ].includes(String(user.user_type || '').toUpperCase());
+
+  const effectiveBranch = branchData || (isGlobalAdmin && mainBranch ? (mainBranch.toJSON ? mainBranch.toJSON() : mainBranch) : null);
+
   return {
     id: user.id,
     first_name: user.first_name,
@@ -284,7 +312,7 @@ const getUserProfile = async (userId) => {
     user_type: user.user_type,
     staff_type: user.staff_type,
     school_id: user.school_id,
-    branch_id: user.branch_id,
+    branch_id: user.branch_id || (isGlobalAdmin && mainBranch ? mainBranch.id : null),
     role: user.Role ? { 
       id: user.Role.id, 
       name: user.Role.name, 
@@ -293,11 +321,12 @@ const getUserProfile = async (userId) => {
     permissions: permissions,
     avatar_url: user.avatar_url,
     institute: instituteData,
-    branch: branchData,
-    is_main_branch: branchData ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN')) : false,
+    branch: effectiveBranch,
+    main_branch: mainBranch ? (mainBranch.toJSON ? mainBranch.toJSON() : mainBranch) : null,
+    is_main_branch: branchData ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN')) : Boolean(mainBranch),
     phone: user.phone,
     is_active: user.is_active,
-    has_branch: !!user.branch_id,
+    has_branch: !!user.branch_id || Boolean(effectiveBranch),
     email_verified: user.email_verified,
     created_at: user.created_at,
     last_login_at: user.last_login_at
@@ -380,6 +409,7 @@ export const loginService = async (loginId, password) => {
           institute_type: instituteData.institute_type, // 🔥 STRING
           settings: instituteData.settings,
           has_branches: instituteData.has_branches,
+          branches: instituteData.branches,
           subscription_plan: instituteData.subscription_plan,
           active_invoice: instituteData.active_invoice
         } : null,

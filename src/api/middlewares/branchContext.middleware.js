@@ -62,6 +62,11 @@ export const branchIsolation = (req, res, next) => {
     req.branch_id = targetBranchId;
     req.isBranchRestricted = false;
     req.isSuperAdmin = true;
+
+    // Clean up req.query.branch_id if client explicitly passed 'all' or 'null'
+    if (req.query && (req.query.branch_id === 'all' || req.query.branch_id === 'null')) {
+      delete req.query.branch_id;
+    }
   }
 
   if (typeof next === 'function') {
