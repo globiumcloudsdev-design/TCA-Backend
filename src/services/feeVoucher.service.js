@@ -177,8 +177,8 @@ export const generateSingleVoucher = async (
     }
 
     // If fee template is selected, fetch it and use its fee_type
-    let feeTemplate = null;
-    if (feeTemplateId) {
+    let feeTemplate = options.feeTemplate !== undefined ? options.feeTemplate : null;
+    if (feeTemplateId && !feeTemplate) {
         feeTemplate = await FeeTemplate.findOne({
             where: { id: feeTemplateId, institute_id: instituteId, is_active: true }
         });
@@ -186,21 +186,27 @@ export const generateSingleVoucher = async (
         if (!feeTemplate) {
             throw new AppError('Fee template not found or is inactive', 404);
         }
+    }
 
+    if (feeTemplate) {
         // For template-based vouchers, always store fee type as fee_template.
         resolvedFeeType = 'fee_template';
     }
 
     // Check if voucher already exists for this student, month, and specific fee type
-    if (await voucherExists(studentId, instituteId, month, year, resolvedFeeType)) {
+    if (options.existingVoucherSet) {
+        if (options.existingVoucherSet.has(`${studentId}-${resolvedFeeType}`)) {
+            throw new AppError(`${resolvedFeeType.toUpperCase()} voucher already exists for this student in ${month}/${year}`, 400);
+        }
+    } else if (await voucherExists(studentId, instituteId, month, year, resolvedFeeType)) {
         throw new AppError(`${resolvedFeeType.toUpperCase()} voucher already exists for this student in ${month}/${year}`, 400);
     }
 
-    // Get student with details
-    const student = await User.findOne({
+    // Get student with details (use preloaded student if provided in bulk mode)
+    const student = options.student || (await User.findOne({
         where: { id: studentId, school_id: instituteId, user_type: 'STUDENT' },
         transaction
-    });
+    }));
 
     if (!student) {
         throw new AppError('Student not found', 404);
@@ -237,17 +243,21 @@ export const generateSingleVoucher = async (
         status: { [Op.in]: ['pending', 'partial', 'overdue'] },
         archived: false,
       },
+      include: [
+        {
+          model: FeePayment,
+          as: 'payments',
+          attributes: ['id', 'amount_paid']
+        }
+      ],
       order: [['issued_date', 'ASC']],
       transaction
     });
 
     for (const prevVoucher of previousVouchers) {
       // Get sum of payments for this prevVoucher
-      const payments = await sequelize.models.FeePayment.findAll({
-        where: { voucher_id: prevVoucher.id },
-        transaction
-      });
-      const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount_paid), 0);
+      const payments = prevVoucher.payments || [];
+      const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount_paid || 0), 0);
       const remaining = Math.max(parseFloat(prevVoucher.net_amount) - totalPaid, 0);
       
       if (remaining > 0) {
@@ -270,11 +280,11 @@ export const generateSingleVoucher = async (
     const instituteCode = options.instituteCode || (await Institute.findByPk(instituteId, { transaction }))?.code || 'TCA';
 
     // Generate voucher number
-    const voucherNumber = await generateVoucherNumber(
+    const voucherNumber = options.voucherNumber || (await generateVoucherNumber(
         instituteCode,
         new Date(year, month - 1, 1),
         getNextSequence
-    );
+    ));
 
     // Prepare voucher data
     const netAmount = amount - concessionAmount + previousBalance;
@@ -534,12 +544,46 @@ export const generateVouchersForClass = async (
         throw new AppError('No students found in this class', 404);
     }
 
+    // Preload fee template once
+    let feeTemplate = null;
+    if (feeTemplateId) {
+        feeTemplate = await FeeTemplate.findOne({
+            where: { id: feeTemplateId, institute_id: instituteId, is_active: true }
+        });
+        if (!feeTemplate) {
+            throw new AppError('Fee template not found or is inactive', 404);
+        }
+    }
+
+    // Preload existing vouchers for this month/year for class students to eliminate N+1 checks
+    const existingVouchers = await FeeVoucher.findAll({
+        where: {
+            institute_id: instituteId,
+            month,
+            year,
+            student_id: { [Op.in]: classStudents.map(s => s.id) },
+            archived: false
+        },
+        attributes: ['student_id', 'fee_type'],
+        transaction
+    });
+    const existingVoucherSet = new Set(
+        existingVouchers.map(v => `${v.student_id}-${v.fee_type}`)
+    );
+
+    // Fetch starting sequence number once
+    let currentSeq = await getNextSequence(instituteCode, year, month);
+
     const vouchers = [];
     const failed = [];
 
     for (const student of classStudents) {
         for (const feeTypeItem of feesToGenerate) {
             try {
+                const targetFeeType = feeTemplate ? 'fee_template' : feeTypeItem;
+                const seqStr = String(currentSeq++).padStart(4, '0');
+                const voucherNumber = `${instituteCode}-${year}${String(month).padStart(2, '0')}-${seqStr}`;
+
                 const voucher = await generateSingleVoucher(
                     student.id,
                     instituteId,
@@ -552,6 +596,10 @@ export const generateVouchersForClass = async (
                         academicYearId, 
                         feeType: feeTypeItem, 
                         feeTemplateId,
+                        feeTemplate,
+                        existingVoucherSet,
+                        voucherNumber,
+                        student,
                         instituteCode,
                         allParents,
                         branch_id: options.branch_id || student.branch_id,
@@ -559,6 +607,7 @@ export const generateVouchersForClass = async (
                     }
                 );
                 vouchers.push(voucher);
+                existingVoucherSet.add(`${student.id}-${targetFeeType}`);
             } catch (error) {
                 if (!error.message.includes('already exists')) {
                     console.error(`Failed to generate ${feeTypeItem} voucher for student ${student.id}:`, error);
@@ -630,12 +679,46 @@ export const generateVouchersForInstitute = async (
         throw new AppError('No students found in this institute', 404);
     }
 
+    // Preload fee template once
+    let feeTemplate = null;
+    if (feeTemplateId) {
+        feeTemplate = await FeeTemplate.findOne({
+            where: { id: feeTemplateId, institute_id: instituteId, is_active: true }
+        });
+        if (!feeTemplate) {
+            throw new AppError('Fee template not found or is inactive', 404);
+        }
+    }
+
+    // Preload existing vouchers for this month/year for all institute students to eliminate N+1 checks
+    const existingVouchers = await FeeVoucher.findAll({
+        where: {
+            institute_id: instituteId,
+            month,
+            year,
+            student_id: { [Op.in]: students.map(s => s.id) },
+            archived: false
+        },
+        attributes: ['student_id', 'fee_type'],
+        transaction
+    });
+    const existingVoucherSet = new Set(
+        existingVouchers.map(v => `${v.student_id}-${v.fee_type}`)
+    );
+
+    // Fetch starting sequence number once
+    let currentSeq = await getNextSequence(instituteCode, year, month);
+
     const vouchers = [];
     const failed = [];
 
     for (const student of students) {
         for (const feeTypeItem of feesToGenerate) {
             try {
+                const targetFeeType = feeTemplate ? 'fee_template' : feeTypeItem;
+                const seqStr = String(currentSeq++).padStart(4, '0');
+                const voucherNumber = `${instituteCode}-${year}${String(month).padStart(2, '0')}-${seqStr}`;
+
                 const voucher = await generateSingleVoucher(
                     student.id,
                     instituteId,
@@ -648,6 +731,10 @@ export const generateVouchersForInstitute = async (
                         academicYearId, 
                         feeType: feeTypeItem, 
                         feeTemplateId,
+                        feeTemplate,
+                        existingVoucherSet,
+                        voucherNumber,
+                        student,
                         instituteCode,
                         allParents,
                         isBulk: true,
@@ -655,6 +742,7 @@ export const generateVouchersForInstitute = async (
                     }
                 );
                 vouchers.push(voucher);
+                existingVoucherSet.add(`${student.id}-${targetFeeType}`);
             } catch (error) {
                 if (!error.message.includes('already exists')) {
                     console.error(`Failed to generate ${feeTypeItem} voucher for student ${student.id}:`, error);
@@ -694,7 +782,12 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
         where.branch_id = filters.branch_id;
     }
 
-    // If search is provided, we perform a global search within the institute (ignoring other filters)
+    if (filters.month) where.month = filters.month;
+    if (filters.year) where.year = filters.year;
+    if (filters.status) where.status = filters.status;
+    if (filters.student_id) where.student_id = filters.student_id;
+    if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
+
     if (filters.search) {
         const searchVal = `%${filters.search}%`;
         where[Op.or] = [
@@ -704,13 +797,6 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
             { '$Student.registration_no$': { [Op.iLike]: searchVal } },
             { '$Student.email$': { [Op.iLike]: searchVal } }
         ];
-    } else {
-        // Only apply other filters if search is NOT present
-        if (filters.month) where.month = filters.month;
-        if (filters.year) where.year = filters.year;
-        if (filters.status) where.status = filters.status;
-        if (filters.student_id) where.student_id = filters.student_id;
-        if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
     }
 
     const { count, rows } = await FeeVoucher.findAndCountAll({
