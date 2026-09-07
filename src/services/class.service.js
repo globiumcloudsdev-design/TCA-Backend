@@ -4,7 +4,7 @@ import { Op } from 'sequelize';
 import models from '../models/postgres/index.js';
 import { v4 as uuidv4 } from 'uuid';
 
-const { Class } = models;
+const { Class, User } = models;
 
 /**
  * CREATE Complete Class
@@ -212,6 +212,131 @@ export const updateCompleteClass = async (id, instituteId, updateData, options =
   return classData;
 };
 
+/**
+ * Helper to compute and attach active student counts to classes and their sections
+ * @param {Array|Object} classes - List of class models/objects or single class
+ * @param {Object} options - { instituteId, branchId, academicYearId }
+ * @returns {Promise<Array|Object>} Enriched classes with student_count and section.student_count
+ */
+export const attachStudentCountsToClasses = async (classes, { instituteId, branchId = null, academicYearId = null } = {}) => {
+  if (!classes) return classes;
+
+  const isArray = Array.isArray(classes);
+  const classList = isArray ? classes : [classes];
+  if (classList.length === 0) return classes;
+
+  const studentWhere = {
+    school_id: instituteId,
+    user_type: 'STUDENT',
+    is_active: true,
+  };
+  if (branchId) {
+    studentWhere.branch_id = branchId;
+  }
+
+  // Efficient single-query fetch of active student metadata
+  const students = await User.findAll({
+    where: studentWhere,
+    attributes: ['id', 'school_id', 'branch_id', 'details'],
+    raw: true,
+  });
+
+  const enriched = classList.map((cls) => {
+    const classObj = typeof cls?.toJSON === 'function' ? cls.toJSON() : { ...cls };
+    const classId = String(classObj.id || '');
+    const classAyId = classObj.academic_year_id ? String(classObj.academic_year_id) : null;
+    const targetAyId = academicYearId ? String(academicYearId) : classAyId;
+
+    const sections = Array.isArray(classObj.sections) ? classObj.sections : [];
+    const secCounts = {};
+    sections.forEach((s) => {
+      const secId = String(s.id || s.section_id || '');
+      if (secId) secCounts[secId] = 0;
+    });
+
+    let classCount = 0;
+
+    for (const st of students) {
+      const d = st.details?.studentDetails || st.details?.student_details || st.details || {};
+      if (d.is_alumni) continue;
+
+      const sessions = Array.isArray(d.academicSessions)
+        ? d.academicSessions
+        : (Array.isArray(st.details?.academicSessions) ? st.details.academicSessions : []);
+
+      const active = sessions.find((s) => s && String(s.status || '').toLowerCase() === 'active');
+
+      let sClassId, sSectionId, sSectionName, sAyId;
+      if (active) {
+        sClassId = active.class_id || d.class_id;
+        sSectionId = active.section_id || d.section_id;
+        sSectionName = active.section_name || d.section_name;
+        sAyId = active.academic_year_id || d.academic_year_id;
+      } else if (sessions.length === 0) {
+        sClassId = d.class_id;
+        sSectionId = d.section_id;
+        sSectionName = d.section_name;
+        sAyId = d.academic_year_id;
+      } else {
+        // Has sessions, none active
+        continue;
+      }
+
+      if (!sClassId || String(sClassId) !== classId) continue;
+
+      // Filter by academic year
+      if (targetAyId && sAyId && String(sAyId) !== targetAyId) continue;
+
+      classCount++;
+
+      // Section matching: by ID first, then by name, then fallback to single section if only 1 section exists
+      let matchedSec = sections.find((s) => {
+        const sid = String(s.id || s.section_id || '');
+        return sid && sid === String(sSectionId);
+      });
+
+      if (!matchedSec && sSectionName) {
+        const normName = String(sSectionName).trim().toLowerCase();
+        matchedSec = sections.find((s) => String(s.name || '').trim().toLowerCase() === normName);
+      }
+
+      if (!matchedSec && sections.length === 1) {
+        matchedSec = sections[0];
+      }
+
+      if (!matchedSec && sections.length > 0) {
+        matchedSec = sections[0];
+      }
+
+      if (matchedSec) {
+        const mid = String(matchedSec.id || matchedSec.section_id || '');
+        if (mid) {
+          secCounts[mid] = (secCounts[mid] || 0) + 1;
+        }
+      }
+    }
+
+    classObj.student_count = classCount;
+    classObj.total_students = classCount;
+
+    if (sections.length > 0) {
+      classObj.sections = sections.map((s) => {
+        const sid = String(s.id || s.section_id || '');
+        const count = secCounts[sid] || 0;
+        return {
+          ...s,
+          student_count: count,
+          total_students: count,
+        };
+      });
+    }
+
+    return classObj;
+  });
+
+  return isArray ? enriched : enriched[0];
+};
+
 // Other service functions (getAll, getById, delete)...
 export const getAllClasses = async (filters = {}, pagination = {}) => {
   const { page = 1, limit = 10 } = pagination;
@@ -238,8 +363,14 @@ export const getAllClasses = async (filters = {}, pagination = {}) => {
     offset
   });
 
+  const enrichedRows = await attachStudentCountsToClasses(rows, {
+    instituteId: filters.institute_id,
+    branchId: filters.branch_id,
+    academicYearId: filters.academic_year_id,
+  });
+
   return {
-    data: rows,
+    data: enrichedRows,
     pagination: {
       total: count,
       page: parseInt(page),
@@ -265,13 +396,21 @@ export const getClassOptions = async (instituteId, academicYearId, branchId = nu
 
   const classes = await Class.findAll({
     where,
-    attributes: ['id', 'name', 'sections'],
+    attributes: ['id', 'name', 'academic_year_id', 'sections'],
     order: [['name', 'ASC']]
   });
 
-  return classes.map((c) => ({
+  const enrichedClasses = await attachStudentCountsToClasses(classes, {
+    instituteId,
+    branchId,
+    academicYearId,
+  });
+
+  return (enrichedClasses || []).map((c) => ({
     value: c.id,
     label: c.name,
+    student_count: c.student_count || 0,
+    total_students: c.student_count || 0,
     sections: c.sections || []
   }));
 };
@@ -279,7 +418,14 @@ export const getClassOptions = async (instituteId, academicYearId, branchId = nu
 export const getClassById = async (id, instituteId, branchId = null) => {
   const where = { id, school_id: instituteId };
   if (branchId) where.branch_id = branchId;
-  return await Class.findOne({ where });
+  const classData = await Class.findOne({ where });
+  if (!classData) return null;
+
+  return await attachStudentCountsToClasses(classData, {
+    instituteId,
+    branchId,
+    academicYearId: classData.academic_year_id,
+  });
 };
 
 export const deleteClass = async (id, instituteId, branchId = null) => {
