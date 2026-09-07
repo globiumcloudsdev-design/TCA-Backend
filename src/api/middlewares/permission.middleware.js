@@ -60,6 +60,64 @@ const resolveUserPermissions = async (req) => {
 };
 
 /**
+ * Generate semantic variants for a permission check
+ * Handles singular/plural module names (fee/fees, student/students),
+ * action aliases (read/view, mark/create), and report inversions (reports.student <-> student.report).
+ */
+const getPermissionVariants = (perm) => {
+  if (!perm || typeof perm !== 'string') return [];
+  const variants = new Set([perm]);
+  const parts = perm.split('.');
+  if (parts.length === 2) {
+    const [mod, action] = parts;
+    const altMod = mod.endsWith('s') ? mod.slice(0, -1) : `${mod}s`;
+    variants.add(`${altMod}.${action}`);
+
+    // Action aliases
+    const actionAliases = {
+      read: ['view', 'read'],
+      view: ['read', 'view'],
+      mark: ['create', 'mark'],
+      enter: ['create', 'enter'],
+      list: ['read', 'view', 'list'],
+    };
+
+    const actionsToCheck = [action, ...(actionAliases[action] || [])];
+    const modsToCheck = [mod, altMod];
+
+    for (const m of modsToCheck) {
+      for (const a of actionsToCheck) {
+        variants.add(`${m}.${a}`);
+      }
+      variants.add(`${m}.*`);
+      variants.add(`${m}.ALL`);
+      variants.add(`${m}.manage`);
+    }
+
+    // Report inverses
+    if (mod === 'reports' || mod === 'report') {
+      variants.add(`${action}.report`);
+      variants.add(`${action}.reports`);
+      const altAction = action.endsWith('s') ? action.slice(0, -1) : `${action}s`;
+      variants.add(`${altAction}.report`);
+      variants.add(`${altAction}.reports`);
+    } else if (action === 'report' || action === 'reports') {
+      variants.add(`reports.${mod}`);
+      variants.add(`reports.${altMod}`);
+    }
+  }
+  return Array.from(variants);
+};
+
+const hasMatchingPermission = (userPerms, requiredPermission) => {
+  if (!Array.isArray(userPerms)) return false;
+  if (userPerms.includes('ALL') || userPerms.includes('*')) return true;
+  if (userPerms.includes(requiredPermission)) return true;
+  const variants = getPermissionVariants(requiredPermission);
+  return variants.some((v) => userPerms.includes(v));
+};
+
+/**
  * Require a single permission  — e.g. hasPermission('fee.create')
  */
 export const hasPermission = (requiredPermission) =>
@@ -71,8 +129,8 @@ export const hasPermission = (requiredPermission) =>
 
     const perms = await resolveUserPermissions(req);
 
-    // Check for ALL permission or specific permission
-    if (perms.includes('ALL') || perms.includes(requiredPermission)) {
+    // Check for ALL permission or specific / variant permission
+    if (hasMatchingPermission(perms, requiredPermission)) {
       return next();
     }
 
@@ -91,11 +149,8 @@ export const hasAnyPermission = (permissions = []) =>
 
     const perms = await resolveUserPermissions(req);
 
-    // Check for ALL permission
-    if (perms.includes('ALL')) return next();
-
-    // Check if user has ANY of the required permissions
-    const hasAny = permissions.some((p) => perms.includes(p));
+    // Check for ALL permission or any matching permission
+    const hasAny = permissions.some((p) => hasMatchingPermission(perms, p));
     
     if (hasAny) return next();
 
@@ -114,11 +169,8 @@ export const hasAllPermissions = (permissions = []) =>
 
     const perms = await resolveUserPermissions(req);
 
-    // Check for ALL permission
-    if (perms.includes('ALL')) return next();
-
     // Check if user has ALL of the required permissions
-    const hasAll = permissions.every((p) => perms.includes(p));
+    const hasAll = permissions.every((p) => hasMatchingPermission(perms, p));
     
     if (hasAll) return next();
 
@@ -149,10 +201,7 @@ export const checkPermission = async (req, requiredPermission) => {
   if (req.user?.user_type === 'MASTER_ADMIN') return true;
   
   const perms = await resolveUserPermissions(req);
-  
-  if (perms.includes('ALL')) return true;
-  
-  return perms.includes(requiredPermission);
+  return hasMatchingPermission(perms, requiredPermission);
 };
 
 export default { 

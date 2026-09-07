@@ -97,6 +97,11 @@ export const generateStudentReport = async (filters) => {
       raw: false
     };
 
+    // Filter by branch
+    if (filters.branch_id) {
+      query.where.branch_id = filters.branch_id;
+    }
+
     // Apply filters
     if (filters.search) {
       query.where[Op.or] = [
@@ -128,11 +133,15 @@ export const generateStudentReport = async (filters) => {
       else if (filters.status === 'inactive') query.where.is_active = false;
     }
 
-    // Get stats for summary - reflect filters (Class/Section/Year) but ignore search & status
+    // Get stats for summary - reflect filters (Class/Section/Year/Branch) but ignore search & status
     const statsWhere = {
       user_type: 'STUDENT',
       school_id: filters.institute_id
     };
+
+    if (filters.branch_id) {
+      statsWhere.branch_id = filters.branch_id;
+    }
 
     const andConditions = [];
     if (filters.class_id) {
@@ -249,6 +258,10 @@ export const generateAttendanceReport = async (filters) => {
       query.where.class_id = filters.class_id;
     }
 
+    if (filters.branch_id) {
+      query.where.branch_id = filters.branch_id;
+    }
+
     // Get records
     const records = await StudentAttendance.findAll(query);
 
@@ -325,6 +338,11 @@ export const generateFeeReport = async (filters) => {
       order: [['issued_date', 'DESC']],
       raw: false
     };
+
+    // Filter by branch
+    if (filters.branch_id) {
+      query.where.branch_id = filters.branch_id;
+    }
 
     // Search by student name
     if (filters.search) {
@@ -505,12 +523,16 @@ export const generateExamReport = async (filters) => {
           model: User,
           as: 'student',
           attributes: ['id', 'first_name', 'last_name', 'registration_no', 'details'],
-          where: { school_id: filters.institute_id }
+          where: {
+            school_id: filters.institute_id,
+            ...(filters.branch_id ? { branch_id: filters.branch_id } : {})
+          }
         },
         {
           model: Exam,
           as: 'exam',
-          attributes: ['id', 'name', 'type', 'total_marks']
+          attributes: ['id', 'name', 'type', 'total_marks'],
+          where: filters.branch_id ? { branch_id: filters.branch_id } : {}
         }
       ],
       order: [['total_marks_obtained', 'DESC']],
@@ -587,6 +609,10 @@ export const generatePayrollReport = async (filters) => {
       order: [['year', 'DESC'], ['month', 'DESC']],
       raw: false
     };
+
+    if (filters.branch_id) {
+      query.where.branch_id = filters.branch_id;
+    }
 
     // Filter by month
     if (filters.month) {
@@ -669,6 +695,7 @@ export const generateProfitLossReport = async (filters) => {
 
     // 1. Income (Fee Payments)
     const paymentWhere = { school_id: instituteId };
+    if (filters.branch_id) paymentWhere.branch_id = filters.branch_id;
     if (Object.keys(dateQuery).length > 0) paymentWhere.payment_date = dateQuery;
 
     const payments = await FeePayment.findAll({
@@ -679,6 +706,7 @@ export const generateProfitLossReport = async (filters) => {
 
     // 2. Expenses
     const expenseWhere = { institute_id: instituteId, status: 'approved' };
+    if (filters.branch_id) expenseWhere.branch_id = filters.branch_id;
     if (Object.keys(dateQuery).length > 0) expenseWhere.date = dateQuery;
 
     const expenses = await Expense.findAll({
@@ -689,6 +717,7 @@ export const generateProfitLossReport = async (filters) => {
 
     // 3. Payroll (Payslips where status = paid)
     const payrollWhere = { institute_id: instituteId, status: 'paid' };
+    if (filters.branch_id) payrollWhere.branch_id = filters.branch_id;
     if (Object.keys(dateQuery).length > 0) payrollWhere.paid_on = dateQuery;
 
     const payslips = await Payslip.findAll({
@@ -760,39 +789,51 @@ export const generateAnalyticsReport = async (filters) => {
     const instituteId = filters.institute_id;
 
     // Get student count
+    const userWhere = {
+      user_type: 'STUDENT',
+      school_id: instituteId
+    };
+    if (filters.branch_id) userWhere.branch_id = filters.branch_id;
     const studentCount = await User.count({
-      where: {
-        user_type: 'STUDENT',
-        school_id: instituteId
-      }
+      where: userWhere
     });
 
     // Get attendance summary
+    const presentWhere = {
+      school_id: instituteId,
+      status: 'present'
+    };
+    if (filters.branch_id) presentWhere.branch_id = filters.branch_id;
     const presentCount = await StudentAttendance.count({
-      where: {
-        school_id: instituteId,
-        status: 'present'
-      }
+      where: presentWhere
     });
 
+    const totalAttendanceWhere = {
+      school_id: instituteId
+    };
+    if (filters.branch_id) totalAttendanceWhere.branch_id = filters.branch_id;
     const totalAttendance = await StudentAttendance.count({
-      where: {
-        school_id: instituteId
-      }
+      where: totalAttendanceWhere
     });
 
     // Get fee summary
-    const totalFeeAmount = await sequelize.query(`
-      SELECT COALESCE(SUM(net_amount), 0) as total FROM "fee_vouchers" WHERE institute_id = $1
-    `, {
-      bind: [instituteId],
+    let feeQuery = `SELECT COALESCE(SUM(net_amount), 0) as total FROM "fee_vouchers" WHERE institute_id = $1`;
+    let paidQuery = `SELECT COALESCE(SUM(net_amount), 0) as total FROM "fee_vouchers" WHERE institute_id = $1 AND status = 'paid'`;
+    const binds = [instituteId];
+
+    if (filters.branch_id) {
+      feeQuery += ` AND branch_id = $2`;
+      paidQuery += ` AND branch_id = $2`;
+      binds.push(filters.branch_id);
+    }
+
+    const totalFeeAmount = await sequelize.query(feeQuery, {
+      bind: binds,
       type: sequelize.QueryTypes.SELECT
     });
 
-    const totalFeePaid = await sequelize.query(`
-      SELECT COALESCE(SUM(net_amount), 0) as total FROM "fee_vouchers" WHERE institute_id = $1 AND status = 'paid'
-    `, {
-      bind: [instituteId],
+    const totalFeePaid = await sequelize.query(paidQuery, {
+      bind: binds,
       type: sequelize.QueryTypes.SELECT
     });
 
@@ -917,16 +958,24 @@ export const getReportTemplates = async () => {
 /**
  * Get filter options for reports
  */
-export const getReportOptions = async (instituteId) => {
+export const getReportOptions = async (instituteId, branchId = null) => {
   try {
+    const classWhere = { school_id: instituteId };
+    const ayWhere = { institute_id: instituteId };
+
+    if (branchId) {
+      classWhere.branch_id = branchId;
+      ayWhere.branch_id = branchId;
+    }
+
     const classes = await Class.findAll({
-      where: { school_id: instituteId },
+      where: classWhere,
       attributes: ['id', 'name'],
       raw: true
     });
 
     const academicYears = await AcademicYear.findAll({
-      where: { institute_id: instituteId },
+      where: ayWhere,
       attributes: ['id', 'name'],
       raw: true
     });

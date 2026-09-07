@@ -30,6 +30,10 @@ export const getAllBranches = catchAsync(async (req, res) => {
     is_main: req.query.is_main
   };
 
+  if (req.isBranchRestricted && req.allowedBranchId) {
+    filters.id = req.allowedBranchId;
+  }
+
   const pagination = {
     page: parseInt(req.query.page) || 1,
     limit: parseInt(req.query.limit) || 10
@@ -51,9 +55,8 @@ export const getAllBranches = catchAsync(async (req, res) => {
  */
 export const getBranchOptions = catchAsync(async (req, res) => {
   const instituteId = req.institute?.id || req.user?.institute_id || req.user?.school_id;
-  
-  const options = await branchService.getBranchOptions(instituteId);
-  
+  const branchId = (req.isBranchRestricted && req.allowedBranchId) ? req.allowedBranchId : null;
+  const options = await branchService.getBranchOptions(instituteId, branchId);
   return sendSuccess(res, options, 'Branch options fetched successfully');
 });
 

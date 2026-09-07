@@ -12,13 +12,15 @@ import { AppError } from '../../utils/lib/AppError.js';
  */
 const setRefreshTokenCookie = (res, token) => {
   if (!token) return;
-  res.cookie('refreshToken', token, {
+  const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     path: '/'
-  });
+  };
+  res.cookie('refreshToken', token, cookieOptions);
+  res.cookie('refresh_token', token, cookieOptions);
 };
 
 /**
@@ -151,11 +153,12 @@ export const selectAccount = catchAsync(async (req, res) => {
 
 export const logout = catchAsync(async (req, res) => {
   res.clearCookie('refreshToken', { path: '/' });
+  res.clearCookie('refresh_token', { path: '/' });
   sendSuccess(res, null, 'Logged out successfully');
 });
 
 export const refreshToken = catchAsync(async (req, res) => {
-  const token = req.cookies?.refreshToken || req.body?.refreshToken || req.body?.refresh_token;
+  const token = req.cookies?.refreshToken || req.cookies?.refresh_token || req.body?.refreshToken || req.body?.refresh_token;
   const result = await authService.refreshTokenService(token);
   setRefreshTokenCookie(res, result.refreshToken);
   sendSuccess(res, {

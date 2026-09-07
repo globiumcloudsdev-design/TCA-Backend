@@ -20,7 +20,7 @@ export const createFeeVoucher = async (schoolId, data, createdBy) => {
 
   const voucher = await FeeVoucher.create({
     ...data,
-    school_id: schoolId,
+    institute_id: schoolId,
     voucher_number: generateVoucherNumber(),
     net_amount: netAmount,
     created_by: createdBy,
@@ -30,23 +30,24 @@ export const createFeeVoucher = async (schoolId, data, createdBy) => {
 };
 
 export const getFeeVouchers = async (schoolId, query = {}) => {
-  const features = new APIFeatures({ school_id: schoolId }, query).filter().sort().paginate();
+  const features = new APIFeatures({ institute_id: schoolId }, query).filter().sort().paginate();
   const opts = features.build();
   const { count, rows } = await FeeVoucher.findAndCountAll({
     ...opts,
-    include: [{ model: User, attributes: ['id', 'first_name', 'last_name', 'registration_no'] }],
+    include: [{ model: User, as: 'Student', attributes: ['id', 'first_name', 'last_name', 'registration_no'] }],
   });
   return { vouchers: rows, pagination: features.getPaginationMeta(count) };
 };
 
 export const collectFeePayment = async (schoolId, voucherId, paymentData, collectedBy) => {
-  const voucher = await FeeVoucher.findOne({ where: { id: voucherId, school_id: schoolId } });
+  const voucher = await FeeVoucher.findOne({ where: { id: voucherId, institute_id: schoolId } });
   if (!voucher) throw new AppError('Fee voucher not found.', 404);
   if (voucher.status === 'paid') throw new AppError('Voucher already paid.', 400);
 
   const receipt = await FeePayment.create({
     ...paymentData,
     school_id: schoolId,
+    branch_id: voucher.branch_id || paymentData.branch_id || null,
     voucher_id: voucherId,
     receipt_number: `RCP-${Date.now()}`,
     collected_by: collectedBy,

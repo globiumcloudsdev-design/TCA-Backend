@@ -9,12 +9,9 @@ import {
   sendError,
   sendNotFound
 } from '../../utils/helpers/response.helper.js';
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 const { sequelize } = models;
-
-const getInstituteId = (req) => {
-  return req.institute?.id || req.user?.institute_id || req.user?.school_id;
-};
 
 const normalizeUuid = (value) => {
   if (value === undefined || value === null) return undefined;

@@ -17,6 +17,10 @@ export const getAllBranches = async (filters = {}, pagination = {}) => {
 
   const where = { institute_id: filters.institute_id };
 
+  if (filters.id) {
+    where.id = filters.id;
+  }
+
   // Search filter
   if (filters.search) {
     where[Op.or] = [
@@ -96,12 +100,18 @@ export const getAllBranches = async (filters = {}, pagination = {}) => {
 /**
  * Get branch options for dropdown
  */
-export const getBranchOptions = async (institute_id) => {
+export const getBranchOptions = async (institute_id, branch_id = null) => {
+  const where = {
+    institute_id,
+    is_active: true
+  };
+
+  if (branch_id) {
+    where.id = branch_id;
+  }
+
   const branches = await Branch.findAll({
-    where: {
-      institute_id,
-      is_active: true
-    },
+    where,
     attributes: ['id', 'name', 'code', 'city', 'is_main'],
     order: [['is_main', 'DESC'], ['name', 'ASC']]
   });

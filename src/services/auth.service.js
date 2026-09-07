@@ -505,32 +505,40 @@ export const refreshTokenService = async (refreshToken) => {
   } catch {
     throw new AppError('Invalid or expired refresh token.', 401);
   }
-  const user = await User.findByPk(decoded.userId, {
-    attributes: ['id', 'school_id', 'user_type', 'branch_id', 'is_active'],
-    include: [{ model: Institute, as: 'institute', attributes: ['is_active'] }]
-  });
-  if (!user || !user.is_active) throw new AppError('User not found.', 401);
-  if (user.school_id && user.institute && !user.institute.is_active) {
-    throw new AppError('Your institute account is currently inactive.', 401);
+  if (!decoded || !decoded.userId) {
+    throw new AppError('Invalid refresh token payload.', 401);
   }
-  const accessToken = signAccessToken({
+
+  const user = await User.unscoped().findByPk(decoded.userId, {
+    include: [
+      { model: Role, as: 'Role' },
+      { model: Institute, as: 'institute' },
+      { model: Branch, as: 'branch' }
+    ]
+  });
+
+  if (!user || !user.is_active) throw new AppError('User not found or account deactivated.', 401);
+  if (user.school_id && user.institute && !user.institute.is_active) {
+    throw new AppError('Your institute account is currently inactive.', 403);
+  }
+
+  const tokenPayload = {
     userId: user.id,
     schoolId: user.school_id,
     userType: user.user_type,
     branchId: user.branch_id,
-  });
+  };
+
+  const accessToken = signAccessToken(tokenPayload);
   const newRefreshToken = signRefreshToken({ userId: user.id });
+  const userProfile = await getUserProfile(user.id);
+
   return {
     accessToken,
     access_token: accessToken,
     refreshToken: newRefreshToken,
     refresh_token: newRefreshToken,
-    user: {
-      id: user.id,
-      school_id: user.school_id,
-      user_type: user.user_type,
-      branch_id: user.branch_id,
-    }
+    user: userProfile
   };
 };
 
@@ -623,7 +631,6 @@ export const loginWithAccountService = async (accountId, password) => {
   const userProfile = await getUserProfile(user.id);
   return { accessToken, refreshToken, user: userProfile };
 };
-
 export const getInstituteDataService = async (instituteId) => {
   return await getCompleteInstituteData(instituteId);
 };

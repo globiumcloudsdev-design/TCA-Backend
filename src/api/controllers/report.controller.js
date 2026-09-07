@@ -13,11 +13,7 @@ import {
   sendError,
   sendNotFound
 } from '../../utils/helpers/response.helper.js';
-
-// Helper to get institute ID from request
-const getInstituteId = (req) => {
-  return req.institute?.id || req.user?.school_id || req.user?.institute_id;
-};
+import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
 // ==================== STUDENT REPORTS ====================
 
@@ -32,8 +28,11 @@ export const getStudentReport = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId || undefined,
       class_id: req.query.class_id,
       section_id: req.query.section_id,
       academic_year_id: req.query.academic_year_id,
@@ -66,8 +65,11 @@ export const getAttendanceReport = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId || undefined,
       class_id: req.query.class_id,
       section_id: req.query.section_id,
       academic_year_id: req.query.academic_year_id,
@@ -102,6 +104,8 @@ export const getFeeReport = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     // Calculate skip from page/limit or use direct skip
     const limit = parseInt(req.query.limit) || 50;
     const page = parseInt(req.query.page) || 1;
@@ -109,6 +113,7 @@ export const getFeeReport = async (req, res) => {
 
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId || undefined,
       class_id: req.query.class_id,
       section_id: req.query.section_id,
       academic_year_id: req.query.academic_year_id,
@@ -147,8 +152,11 @@ export const getExamReport = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId || undefined,
       exam_id: req.query.exam_id,
       class_id: req.query.class_id,
       section_id: req.query.section_id,
@@ -183,12 +191,14 @@ export const getPayrollReport = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
       month: req.query.month,
       year: req.query.year,
       staff_id: req.query.staff_id,
-      branch_id: req.query.branch_id,
+      branch_id: branchId || req.query.branch_id || undefined,
       status: req.query.status, // pending, paid, on_hold
       search: req.query.search,
       skip: parseInt(req.query.skip) || 0,
@@ -216,8 +226,11 @@ export const getAnalyticsReport = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId || undefined,
       academic_year_id: req.query.academic_year_id,
       from_date: req.query.from_date,
       to_date: req.query.to_date,
@@ -243,8 +256,11 @@ export const getProfitLossReport = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const filters = {
       institute_id: instituteId,
+      branch_id: branchId || undefined,
       academic_year_id: req.query.academic_year_id,
       month: req.query.month ? parseInt(req.query.month) : null,
       year: req.query.year ? parseInt(req.query.year) : null,
@@ -283,10 +299,16 @@ export const exportReport = async (req, res) => {
       return sendError(res, 'Format must be pdf or excel', 400);
     }
 
+    const branchId = getBranchId(req);
+
     const data = {
       report_type,
       format,
-      filters: { ...filters, institute_id: instituteId },
+      filters: {
+        ...filters,
+        institute_id: instituteId,
+        ...(branchId ? { branch_id: branchId } : {})
+      },
       user: req.user
     };
 
@@ -330,7 +352,8 @@ export const getReportOptions = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
-    const options = await reportService.getReportOptions(instituteId);
+    const branchId = getBranchId(req);
+    const options = await reportService.getReportOptions(instituteId, branchId);
     return sendSuccess(res, options, 'Report options retrieved');
   } catch (error) {
     console.error('Get options error:', error);
