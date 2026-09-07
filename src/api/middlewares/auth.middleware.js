@@ -385,6 +385,16 @@ export const optionalAuth = async (req, res, next) => {
       attributes: { exclude: ['password_hash'] }
     });
 
+    if (user?.branch_id) {
+      const branch = await Branch.findByPk(user.branch_id, {
+        attributes: ['id', 'name', 'code', 'address', 'city', 'is_active', 'settings', 'is_main']
+      });
+      if (branch) {
+        user.branch = branch;
+        req.branch = branch;
+      }
+    }
+
     req.user = user || null;
     if (req.user) {
       branchIsolation(req, res, () => {});

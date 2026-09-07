@@ -619,8 +619,22 @@ const buildStatCards = (typeSlug, stats) => {
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const resolveBranchScope = ({ reqUser, requestedBranchId }) => {
-  if (reqUser?.user_type === 'BRANCH_ADMIN') {
-    return reqUser.branch_id || null;
+  const isBranchScopedUser = [
+    'BRANCH_ADMIN',
+    'CAMPUS_ADMIN',
+    'BRANCH ADMIN',
+    'CAMPUS ADMIN',
+    'BRANCH_STAFF',
+    'TEACHER',
+    'STUDENT',
+    'PARENT'
+  ].includes(String(reqUser?.user_type || '').toUpperCase()) ||
+    reqUser?.staff_type === 'Branch Head' ||
+    reqUser?.role_code === 'BRANCH_ADMIN' ||
+    Boolean(reqUser?.isBranchRestricted);
+
+  if (isBranchScopedUser && reqUser?.branch_id) {
+    return reqUser.branch_id;
   }
 
   if (requestedBranchId && requestedBranchId !== 'all' && requestedBranchId !== 'null' && requestedBranchId !== 'undefined') {
@@ -638,7 +652,18 @@ export const getInstituteDashboard = async ({
 }) => {
   const rawBranchId = resolveBranchScope({ reqUser: user, requestedBranchId: branchId });
 
-  if (branchId && user?.user_type === 'BRANCH_ADMIN' && user?.branch_id && branchId !== user.branch_id) {
+  const isBranchScoped = [
+    'BRANCH_ADMIN',
+    'CAMPUS_ADMIN',
+    'BRANCH ADMIN',
+    'CAMPUS ADMIN',
+    'BRANCH_STAFF'
+  ].includes(String(user?.user_type || '').toUpperCase()) ||
+    user?.staff_type === 'Branch Head' ||
+    user?.role_code === 'BRANCH_ADMIN' ||
+    Boolean(user?.isBranchRestricted);
+
+  if (branchId && isBranchScoped && user?.branch_id && branchId !== user.branch_id) {
     throw new Error('Branch access denied for current user');
   }
 

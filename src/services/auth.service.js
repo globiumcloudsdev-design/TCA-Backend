@@ -301,6 +301,25 @@ const getUserProfile = async (userId) => {
     'SUPER ADMIN'
   ].includes(String(user.user_type || '').toUpperCase());
 
+  const isExplicitBranchAdminUser = [
+    'BRANCH_ADMIN',
+    'CAMPUS_ADMIN',
+    'BRANCH ADMIN',
+    'CAMPUS ADMIN',
+    'BRANCH_STAFF',
+    'STAFF',
+    'TEACHER',
+    'STUDENT',
+    'PARENT'
+  ].includes(String(user.user_type || '').toUpperCase()) ||
+    user.staff_type === 'Branch Head';
+
+  const isMainBranchResolved = !isExplicitBranchAdminUser && (
+    branchData
+      ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN') || String(branchData.name || '').toLowerCase().includes('main'))
+      : (isGlobalAdmin && Boolean(mainBranch))
+  );
+
   const effectiveBranch = branchData || (isGlobalAdmin && mainBranch ? (mainBranch.toJSON ? mainBranch.toJSON() : mainBranch) : null);
 
   return {
@@ -323,7 +342,8 @@ const getUserProfile = async (userId) => {
     institute: instituteData,
     branch: effectiveBranch,
     main_branch: mainBranch ? (mainBranch.toJSON ? mainBranch.toJSON() : mainBranch) : null,
-    is_main_branch: branchData ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN')) : Boolean(mainBranch),
+    is_main_branch: isMainBranchResolved,
+    is_branch_admin: isExplicitBranchAdminUser,
     phone: user.phone,
     is_active: user.is_active,
     has_branch: !!user.branch_id || Boolean(effectiveBranch),
@@ -337,7 +357,7 @@ export const loginService = async (loginId, password) => {
   let users;
   if (loginId.includes('@')) {
     users = await User.unscoped().findAll({ 
-      where: { email: loginId.toLowerCase() },
+      where: { email: { [Op.iLike]: loginId.trim() } },
       include: [
         { model: Role, as: 'Role' },
         { model: Institute, as: 'institute' },

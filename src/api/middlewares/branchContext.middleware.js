@@ -14,21 +14,36 @@ export const branchIsolation = (req, res, next) => {
     String(req.user.branch?.code || '').toUpperCase().endsWith('-MAIN') ||
     String(req.user.branch?.name || '').toLowerCase().includes('main');
 
-  // Platform and Institute Admins (Super Admins) have global multi-branch view capabilities
-  const isGlobalSuperAdmin = [
-    'MASTER_ADMIN',
-    'SYSTEM_ADMIN',
-    'SUPPORT_STAFF',
-    'INSTITUTE_ADMIN',
-    'SUPER_ADMIN',
-    'SUPER ADMIN'
-  ].includes(userType) || isMainBranch;
-
-  // Branch-scoped: non-global user who is a Branch Admin or restricted to a non-main branch
-  const isBranchScoped = !isGlobalSuperAdmin && (
-    userType === 'BRANCH_ADMIN' ||
+  // Explicit branch admin / branch restricted role check
+  const isExplicitBranchAdmin = [
+    'BRANCH_ADMIN',
+    'CAMPUS_ADMIN',
+    'BRANCH ADMIN',
+    'CAMPUS ADMIN',
+    'BRANCH_STAFF',
+    'STAFF',
+    'TEACHER',
+    'STUDENT',
+    'PARENT'
+  ].includes(userType) ||
     req.user.staff_type === 'Branch Head' ||
-    req.user.role_code === 'BRANCH_ADMIN' ||
+    req.user.role_code === 'BRANCH_ADMIN';
+
+  // Platform and Institute Admins (Super Admins) have global multi-branch view capabilities
+  const isGlobalSuperAdmin = !isExplicitBranchAdmin && (
+    [
+      'MASTER_ADMIN',
+      'SYSTEM_ADMIN',
+      'SUPPORT_STAFF',
+      'INSTITUTE_ADMIN',
+      'SUPER_ADMIN',
+      'SUPER ADMIN'
+    ].includes(userType) || isMainBranch
+  );
+
+  // Branch-scoped: non-global user who is a Branch Admin or restricted to an assigned branch
+  const isBranchScoped = !isGlobalSuperAdmin && (
+    isExplicitBranchAdmin ||
     Boolean(userBranchId)
   );
 

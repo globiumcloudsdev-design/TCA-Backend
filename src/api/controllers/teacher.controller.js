@@ -403,8 +403,23 @@ export const toggleTeacherStatus = async (req, res) => {
 export const searchTeachers = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
-    const results = await teacherService.searchTeachers(instituteId, req.query);
-    return sendPaginated(res, results.rows, results.total, results.page, results.limit, 'Teachers searched successfully');
+    const branchId = getBranchId(req);
+    const effectiveBranchId = req.isBranchRestricted ? req.allowedBranchId : (branchId || req.query?.branch_id);
+    const results = await teacherService.searchTeachers(instituteId, {
+      ...req.query,
+      branch_id: effectiveBranchId
+    });
+    return sendPaginated(
+      res,
+      results.rows,
+      {
+        total: results.total,
+        page: results.page,
+        limit: results.limit,
+        totalPages: results.totalPages
+      },
+      'Teachers searched successfully'
+    );
   } catch (error) {
     console.error('❌ Search teachers error:', error);
     return sendError(res, error.message || 'Failed to search teachers');

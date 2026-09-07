@@ -405,9 +405,14 @@ export const getAllTeachers = async (filters = {}, pagination = {}) => {
 /**
  * Get teacher by ID with role
  */
-export const getTeacherById = async (id, instituteId) => {
+export const getTeacherById = async (id, instituteId, branchId = null) => {
+  const where = { id, school_id: instituteId, user_type: 'TEACHER' };
+  if (branchId && branchId !== 'all') {
+    where.branch_id = branchId;
+  }
+
   const teacher = await User.findOne({
-    where: { id, school_id: instituteId, user_type: 'TEACHER' },
+    where,
     include: [
       {
         model: Role,
@@ -536,6 +541,10 @@ export const searchTeachers = async (instituteId, query = {}) => {
     school_id: instituteId,
     user_type: 'TEACHER'
   };
+
+  if (query.branch_id && query.branch_id !== 'all') {
+    where.branch_id = query.branch_id;
+  }
 
   if (searchTerm) {
     where[Op.or] = [

@@ -272,9 +272,9 @@ export const createBranch = async (data) => {
     if (data.head && data.head.first_name && data.head.email) {
       const headEmail = data.head.email.trim().toLowerCase();
 
-      // Check if user with this email already exists
+      // Check if user with this email already exists (case-insensitive)
       const existingUser = await User.findOne({
-        where: { email: headEmail },
+        where: { email: { [Op.iLike]: headEmail } },
         transaction
       });
 
