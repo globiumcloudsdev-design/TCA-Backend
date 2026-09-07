@@ -616,12 +616,18 @@ const buildStatCards = (typeSlug, stats) => {
   ];
 };
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const resolveBranchScope = ({ reqUser, requestedBranchId }) => {
   if (reqUser?.user_type === 'BRANCH_ADMIN') {
     return reqUser.branch_id || null;
   }
 
-  return requestedBranchId || null;
+  if (requestedBranchId && requestedBranchId !== 'all' && requestedBranchId !== 'null' && requestedBranchId !== 'undefined') {
+    return requestedBranchId;
+  }
+
+  return null;
 };
 
 export const getInstituteDashboard = async ({
@@ -630,7 +636,7 @@ export const getInstituteDashboard = async ({
   type,
   branchId,
 }) => {
-  const resolvedBranchId = resolveBranchScope({ reqUser: user, requestedBranchId: branchId });
+  const rawBranchId = resolveBranchScope({ reqUser: user, requestedBranchId: branchId });
 
   if (branchId && user?.user_type === 'BRANCH_ADMIN' && user?.branch_id && branchId !== user.branch_id) {
     throw new Error('Branch access denied for current user');
@@ -645,24 +651,29 @@ export const getInstituteDashboard = async ({
     throw new Error('Institute not found');
   }
 
-  if (resolvedBranchId) {
+  let effectiveBranchId = null;
+  if (rawBranchId && UUID_REGEX.test(String(rawBranchId))) {
     const branch = await Branch.findOne({
-      where: { id: resolvedBranchId, institute_id: instituteId, is_active: true },
+      where: { id: rawBranchId, institute_id: instituteId, is_active: true },
       attributes: ['id', 'name'],
     });
-    if (!branch) throw new Error('Branch not found');
+    if (branch) {
+      effectiveBranchId = branch.id;
+    } else if (user?.user_type === 'BRANCH_ADMIN') {
+      effectiveBranchId = rawBranchId;
+    }
   }
 
   const typeSlug = String(type || resolveTypeSlug(institute.type)).trim().toLowerCase() || 'school';
 
   const [overviewStats, attendance, fees, enrollmentData, feeStatus, recentActivity, incomeExpense] = await Promise.all([
-    getOverviewStats({ instituteId, branchId: resolvedBranchId }),
-    getAttendanceChart({ instituteId, branchId: resolvedBranchId }),
-    getFeesChart({ instituteId, branchId: resolvedBranchId }),
-    getEnrollmentCharts({ instituteId, branchId: resolvedBranchId }),
-    getFeeStatusChart({ instituteId, branchId: resolvedBranchId }),
-    getRecentActivity({ instituteId, branchId: resolvedBranchId }),
-    getIncomeExpenseChart({ instituteId, branchId: resolvedBranchId }),
+    getOverviewStats({ instituteId, branchId: effectiveBranchId }),
+    getAttendanceChart({ instituteId, branchId: effectiveBranchId }),
+    getFeesChart({ instituteId, branchId: effectiveBranchId }),
+    getEnrollmentCharts({ instituteId, branchId: effectiveBranchId }),
+    getFeeStatusChart({ instituteId, branchId: effectiveBranchId }),
+    getRecentActivity({ instituteId, branchId: effectiveBranchId }),
+    getIncomeExpenseChart({ instituteId, branchId: effectiveBranchId }),
   ]);
 
   return {
@@ -684,7 +695,7 @@ export const getInstituteDashboard = async ({
     },
     recentActivity,
     scope: {
-      branch_id: resolvedBranchId || null,
+      branch_id: effectiveBranchId || null,
       generated_at: new Date().toISOString(),
     },
     lastUpdated: new Date().toISOString(),
