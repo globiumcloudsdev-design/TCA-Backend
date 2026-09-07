@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon server.js",
+    "build": "echo 'Build complete'",
     "start": "node server.js",
     "seed": "node src/seeders/index.seed.js",
     "migrate:prod": "cross-env NODE_ENV=production node src/seeders/migrate-dev-to-prod.js",
