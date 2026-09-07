@@ -1697,6 +1697,12 @@ export const bulkImportStudents = async (
         if (!className) errors.push("Class name is required");
         if (!academicYearName) errors.push("Academic year name is required");
 
+        // Validate monthly fee (strictly required)
+        const rawMonthlyFee = s.monthly_fee !== undefined && s.monthly_fee !== null && String(s.monthly_fee).trim() !== '' ? s.monthly_fee : null;
+        if (rawMonthlyFee === null || isNaN(Number(rawMonthlyFee)) || Number(rawMonthlyFee) < 0) {
+          errors.push("Monthly fee is required and must be a valid number");
+        }
+
         // Validate email uniqueness (per institute)
         if (email) {
           const emailLower = email.toLowerCase();
@@ -1784,10 +1790,18 @@ export const bulkImportStudents = async (
             usersToCreate.some(u => u.registration_no === registrationNo)) {
             registrationNo = await generateRegistrationNo(instituteId, instituteType, { transaction });
             counter++;
-            if (counter > 5) {
-              registrationNo = `TEMP-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+            if (counter > 10) {
+              errors.push("Failed to generate a unique registration number. Please provide registration number manually.");
               break;
             }
+          }
+          if (errors.length > 0) {
+            failedRecords.push({
+              row: rowNumber,
+              data: s,
+              errors: errors
+            });
+            continue;
           }
         } else {
           // Check if provided registration number is unique
@@ -1867,25 +1881,31 @@ export const bulkImportStudents = async (
           mother_cnic: safeString(s.mother_cnic) || null,
           mother_occupation: safeString(s.mother_occupation) || null,
           
-          // Handle Guardians Array (Sync with createStudent logic)
+          // Handle Guardians Array (Sync with createStudent logic and StudentForm)
           guardians: [
             ...(safeString(s.father_name) ? [{
               name: safeString(s.father_name),
               relation: 'father',
+              type: 'father',
               phone: safeString(s.father_phone) || null,
               cnic: safeString(s.father_cnic) || null,
-              email: null
+              email: null,
+              occupation: safeString(s.father_occupation) || null,
+              education: safeString(s.father_education) || null,
             }] : []),
             ...(safeString(s.mother_name) ? [{
               name: safeString(s.mother_name),
               relation: 'mother',
+              type: 'mother',
               phone: safeString(s.mother_phone) || null,
               cnic: safeString(s.mother_cnic) || null,
-              email: null
+              email: null,
+              occupation: safeString(s.mother_occupation) || null,
             }] : []),
             ...(safeString(s.guardian_name) ? [{
               name: safeString(s.guardian_name),
-              relation: safeString(s.guardian_relation) || safeString(s.guardian_type) || 'guardian',
+              relation: safeString(s.guardian_relation) || safeString(s.guardian_type)?.toLowerCase() || 'guardian',
+              type: safeString(s.guardian_type)?.toLowerCase() || safeString(s.guardian_relation)?.toLowerCase() || 'guardian',
               phone: safeString(s.guardian_phone) || null,
               cnic: safeString(s.guardian_cnic) || null,
               email: safeString(s.guardian_email) || null
@@ -1906,22 +1926,10 @@ export const bulkImportStudents = async (
           city: safeString(s.city) || null,
 
           // Fee Info
-          monthly_fee: s.monthly_fee || null,
-          admission_fee: s.admission_fee || null,
+          monthly_fee: rawMonthlyFee !== null ? Number(rawMonthlyFee) : null,
+          admission_fee: s.admission_fee !== undefined && s.admission_fee !== null && s.admission_fee !== '' ? Number(s.admission_fee) : 0,
           concession_type: safeString(s.concession_type) || "none",
-          concession_percentage: s.concession_percentage || 0,
-
-          // Build Guardians Array
-          guardians: s.guardian_name ? [
-            {
-              name: safeString(s.guardian_name),
-              relation: safeString(s.guardian_relation),
-              phone: safeString(s.guardian_phone),
-              cnic: safeString(s.guardian_cnic),
-              email: safeString(s.guardian_email) || null,
-              type: safeString(s.guardian_type)?.toLowerCase() || "guardian",
-            }
-          ] : [],
+          concession_percentage: s.concession_percentage ? Number(s.concession_percentage) : 0,
 
           academicSessions: [
             {

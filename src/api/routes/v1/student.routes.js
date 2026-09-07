@@ -4,6 +4,7 @@ import { hasPermission } from '../../middlewares/permission.middleware.js';
 import { auditLog } from '../../middlewares/audit.middleware.js';
 import { uploadFields } from '../../middlewares/upload.middleware.js';
 import * as studentController from '../../controllers/student.controller.js';
+import * as feeVoucherController from '../../controllers/feeVoucher.controller.js';
 
 const router = Router();
 
@@ -46,6 +47,29 @@ router.get(
 
 // Sirf ek route - simple!
 router.post('/bulk-import', hasPermission('students.create'), studentController.bulkImportStudents);
+
+/**
+ * GET - Student fee vouchers (safeguard alias for /student/fees-vouchers or /students/fees-vouchers)
+ * GET /api/v1/students/fees-vouchers
+ */
+router.get(
+  '/fees-vouchers',
+  hasPermission('fees.read'),
+  feeVoucherController.getFeeVouchers
+);
+
+/**
+ * GET - Student unpaid fee vouchers
+ * GET /api/v1/students/:studentId/unpaid-vouchers
+ */
+router.get(
+  '/:studentId/unpaid-vouchers',
+  hasPermission('fees.read'),
+  (req, res, next) => {
+    req.query.student_id = req.params.studentId;
+    return feeVoucherController.getFeeVouchers(req, res, next);
+  }
+);
 
 /**
  * GET - Student by ID

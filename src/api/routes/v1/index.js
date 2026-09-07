@@ -75,6 +75,7 @@ router.use('/roles', roleRoutes);
 
 // ── Students ───────────────────────────────────────────────────────────────
 router.use('/students', studentRoutes);
+router.use('/student', studentRoutes); // Alias for singular route calls
 
 // ── Parents ────────────────────────────────────────────────────────────────
 router.use('/parents', parentRoutes);
