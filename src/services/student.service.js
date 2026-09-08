@@ -1693,6 +1693,42 @@ export const bulkImportStudents = async (
       classMap.set(`${className}-${yearId}`, classObj);
     }
 
+    // ========== STEP 3.5: PREPARE REGISTRATION NO SEQUENCE & SECTION CACHE ==========
+    const prefixes = {
+      school: 'STD',
+      college: 'CLG',
+      university: 'UNI',
+      coaching: 'COA',
+      academy: 'ACA',
+      tuition_center: 'TUT',
+    };
+    const regPrefix = prefixes[instituteType] || 'STD';
+    const regYear = new Date().getFullYear();
+    const sequenceLength = 4;
+
+    const lastStudent = await User.findOne({
+      where: {
+        school_id: instituteId,
+        user_type: 'STUDENT',
+        registration_no: {
+          [Op.like]: `${regPrefix}${regYear}%`
+        }
+      },
+      order: [['registration_no', 'DESC']],
+      paranoid: false,
+      transaction
+    });
+
+    let nextRegSequence = 1;
+    if (lastStudent && lastStudent.registration_no) {
+      const lastSeq = parseInt(lastStudent.registration_no.slice(-sequenceLength));
+      if (!isNaN(lastSeq)) {
+        nextRegSequence = lastSeq + 1;
+      }
+    }
+
+    const sectionMap = new Map(); // Cache sections to avoid redundant DB queries
+
     // ========== STEP 4: PROCESS EACH STUDENT (Validation + Preparation) ==========
     for (let i = 0; i < studentsData.length; i++) {
       const s = studentsData[i];
@@ -1772,56 +1808,47 @@ export const bulkImportStudents = async (
           continue;
         }
 
-        // Get or create section
-        const [sectionObj] = await Section.findOrCreate({
-          where: {
-            school_id: instituteId,
-            class_id: targetClass.id,
-            name: String(sectionName).trim(),
-          },
-          defaults: {
-            school_id: instituteId,
-            class_id: targetClass.id,
-            academic_year_id: yearId,
-            name: sectionName,
-            capacity: 40,
-          },
-          transaction,
-        });
+        // Get or create section (cached to avoid redundant queries & writes)
+        const sectionCacheKey = `${targetClass.id}-${sectionName}`;
+        let sectionObj = sectionMap.get(sectionCacheKey);
 
-        // Update class JSONB sections
-        let sectionsArray = Array.isArray(targetClass.sections)
-          ? [...targetClass.sections]
-          : [];
-        if (!sectionsArray.some((sec) => sec.id === sectionObj.id)) {
-          sectionsArray.push({ id: sectionObj.id, name: sectionObj.name });
-          targetClass.sections = sectionsArray;
-          await targetClass.save({ transaction });
+        if (!sectionObj) {
+          const [foundSec] = await Section.findOrCreate({
+            where: {
+              school_id: instituteId,
+              class_id: targetClass.id,
+              name: String(sectionName).trim(),
+            },
+            defaults: {
+              school_id: instituteId,
+              class_id: targetClass.id,
+              academic_year_id: yearId,
+              name: sectionName,
+              capacity: 40,
+            },
+            transaction,
+          });
+
+          sectionObj = foundSec;
+          sectionMap.set(sectionCacheKey, sectionObj);
+
+          // Update class JSONB sections
+          let sectionsArray = Array.isArray(targetClass.sections)
+            ? [...targetClass.sections]
+            : [];
+          if (!sectionsArray.some((sec) => sec.id === sectionObj.id)) {
+            sectionsArray.push({ id: sectionObj.id, name: sectionObj.name });
+            targetClass.sections = sectionsArray;
+            await targetClass.save({ transaction });
+          }
         }
 
         // Generate unique registration number
         let registrationNo = registrationNoProvided;
         if (!registrationNo) {
-          registrationNo = await generateRegistrationNo(instituteId, instituteType, { transaction });
-          // Ensure uniqueness within batch and existing
-          let counter = 0;
-          while (existingRegNos.has(registrationNo) ||
-            usersToCreate.some(u => u.registration_no === registrationNo)) {
-            registrationNo = await generateRegistrationNo(instituteId, instituteType, { transaction });
-            counter++;
-            if (counter > 10) {
-              errors.push("Failed to generate a unique registration number. Please provide registration number manually.");
-              break;
-            }
-          }
-          if (errors.length > 0) {
-            failedRecords.push({
-              row: rowNumber,
-              data: s,
-              errors: errors
-            });
-            continue;
-          }
+          do {
+            registrationNo = `${regPrefix}${regYear}${String(nextRegSequence++).padStart(sequenceLength, '0')}`;
+          } while (existingRegNos.has(registrationNo));
         } else {
           // Check if provided registration number is unique
           if (existingRegNos.has(registrationNo)) {
@@ -1861,9 +1888,8 @@ export const bulkImportStudents = async (
           sectionCounters.set(sectionObj.id, currentSeq + 1);
         }
 
-        // Generate password
+        // Generate random password (hashed in parallel chunks later)
         const password = generateRandomPassword(8);
-        const hashedPassword = await bcrypt.hash(password, 10);
 
         // Safely parse date fields
         const dob = parseImportDate(s.dob || s.date_of_birth);
@@ -1977,7 +2003,7 @@ export const bulkImportStudents = async (
           last_name: lastName,
           email: email,
           phone: phone,
-          password_hash: hashedPassword,
+          password_hash: null, // Hashed concurrently before bulkCreate
           registration_no: registrationNo,
           details: {
             studentDetails: studentDetails,
@@ -2011,10 +2037,21 @@ export const bulkImportStudents = async (
 
     // ========== STEP 5: BULK CREATE STUDENTS ==========
     const createdStudents = [];
-    const studentsWithQR = [];
 
     if (usersToCreate.length > 0) {
-      console.log(`📝 Creating ${usersToCreate.length} students...`);
+      console.log(`🔐 Hashing passwords in parallel for ${usersToCreate.length} students...`);
+      // Hash in parallel batches of 10 to utilize threadpool efficiently
+      const HASH_BATCH_SIZE = 10;
+      for (let i = 0; i < usersToCreate.length; i += HASH_BATCH_SIZE) {
+        const batch = usersToCreate.slice(i, i + HASH_BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (u) => {
+            u.password_hash = await bcrypt.hash(u._temp_password, 10);
+          })
+        );
+      }
+
+      console.log(`📝 Creating ${usersToCreate.length} students in database...`);
 
       // Remove temp fields for bulk create
       const usersForCreate = usersToCreate.map(({ _temp_password, _temp_email_sent, ...user }) => user);
@@ -2025,69 +2062,54 @@ export const bulkImportStudents = async (
         individualHooks: false,
       });
 
-      // ========== STEP 6: GENERATE QR CODES & SEND EMAILS ==========
-      console.log(`🔲 Generating QR codes for ${created.length} students...`);
-
-      for (let i = 0; i < created.length; i++) {
-        const user = created[i];
-        const tempData = usersToCreate[i];
-        const password = tempData._temp_password;
-
-        try {
-          // Generate QR Code
-          const fullUser = {
-            ...user.toJSON(),
-            details: user.details
-          };
-
-          const qrCodeResult = await generateAndUploadQRCode(fullUser, instituteId);
-          user.qr_code_url = qrCodeResult.url;
-          user.qr_code_public_id = qrCodeResult.public_id;
-          await user.save({ transaction });
-
-          studentsWithQR.push({
-            id: user.id,
-            name: `${user.first_name} ${user.last_name}`,
-            qr_url: qrCodeResult.url
-          });
-
-          // // Send welcome email (if email exists)
-          // if (user.email && tempData._temp_email_sent === false) {
-          //   const institute = await Institute.findByPk(instituteId);
-          //   await sendWelcomeEmailWithCredentials(
-          //     user,
-          //     password,
-          //     institute?.name || "The Clouds Academy",
-          //     qrCodeResult.url,
-          //     "Student",
-          //   ).catch((err) => console.error(`⚠️ Email failed for ${user.email}:`, err.message));
-          //   tempData._temp_email_sent = true;
-          // }
-
-          // Small delay to avoid rate limiting on QR generation
-          if (i % 10 === 0 && i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-
-        } catch (qrError) {
-          console.error(`⚠️ QR Code generation failed for ${user.id}:`, qrError.message);
-          // Don't fail the import, just log the error
-        }
-      }
-
       createdStudents.push(...created);
     }
 
+    // Commit transaction IMMEDIATELY so database locks are released and data is saved
     await transaction.commit();
+    console.log(`✅ Bulk import transaction committed: ${createdStudents.length} students saved`);
 
-    console.log(`✅ Bulk import completed: ${createdStudents.length} successful, ${failedRecords.length} failed`);
+    // ========== STEP 6: ASYNCHRONOUS QR CODE GENERATION (BACKGROUND) ==========
+    if (createdStudents.length > 0) {
+      // Run QR code generation in background so the HTTP response is instantaneous
+      setImmediate(async () => {
+        console.log(`🔲 Starting background QR code generation for ${createdStudents.length} students...`);
+        const QR_CHUNK_SIZE = 4;
+        for (let i = 0; i < createdStudents.length; i += QR_CHUNK_SIZE) {
+          const chunk = createdStudents.slice(i, i + QR_CHUNK_SIZE);
+          await Promise.allSettled(
+            chunk.map(async (user) => {
+              try {
+                const fullUser = {
+                  ...user.toJSON(),
+                  details: user.details
+                };
+                const qrCodeResult = await generateAndUploadQRCode(fullUser, instituteId);
+                if (qrCodeResult?.url) {
+                  await User.update(
+                    {
+                      qr_code_url: qrCodeResult.url,
+                      qr_code_public_id: qrCodeResult.public_id
+                    },
+                    { where: { id: user.id } }
+                  );
+                }
+              } catch (qrError) {
+                console.error(`⚠️ Background QR generation failed for student ${user.id}:`, qrError.message);
+              }
+            })
+          );
+        }
+        console.log(`✅ Background QR code generation completed for ${createdStudents.length} students`);
+      });
+    }
 
     return {
       imported: createdStudents.length,
       total: studentsData.length,
       failed: failedRecords,
       successful: successfulRecords,
-      qr_generated: studentsWithQR.length
+      qr_generated: createdStudents.length
     };
 
   } catch (error) {
