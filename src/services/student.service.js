@@ -229,6 +229,25 @@ export const createStudent = async (data, options = {}) => {
   try {
     console.log("📝 Creating student with data:", data);
 
+    // Strict Validation Guard
+    const firstName = String(data.first_name || '').trim();
+    const lastName = String(data.last_name || '').trim();
+
+    if (!firstName) {
+      throw new Error('First name is required');
+    }
+    if (!lastName) {
+      throw new Error('Last name is required');
+    }
+    if (!data.institute_id) {
+      throw new Error('Institute ID is required');
+    }
+
+    const resolvedClassId = data.class_id || data.details?.studentDetails?.class_id;
+    if ((data.institute_type === 'school' || !data.institute_type) && !resolvedClassId) {
+      throw new Error('Class is required');
+    }
+
     // Keep both naming conventions in sync for downstream fee voucher logic.
     const resolvedAdmissionFee =
       data.admission_fee !== undefined && data.admission_fee !== null

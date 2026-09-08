@@ -79,6 +79,26 @@ export const createStudent = async (req, res) => {
       return sendError(res, 'Institute ID not found', 400);
     }
 
+    // Strict Validation Guard: Verify required fields
+    const firstName = String(req.body.first_name || '').trim();
+    const lastName = String(req.body.last_name || '').trim();
+    if (!firstName || !lastName) {
+      await transaction.rollback();
+      return sendError(res, 'First name and last name are required to create a student.', 400);
+    }
+
+    let rawDetails = {};
+    if (req.body.details) {
+      try {
+        rawDetails = typeof req.body.details === 'string' ? JSON.parse(req.body.details) : req.body.details;
+      } catch {}
+    }
+    const resolvedClassId = req.body.class_id || rawDetails?.studentDetails?.class_id;
+    if (instituteType === 'school' && !resolvedClassId) {
+      await transaction.rollback();
+      return sendError(res, 'Class is required to create a student.', 400);
+    }
+
     // Parse form data
     const body = { ...req.body, institute_type: instituteType };
     
