@@ -80,6 +80,7 @@ const getPermissionVariants = (perm) => {
       mark: ['create', 'mark'],
       enter: ['create', 'enter'],
       list: ['read', 'view', 'list'],
+      delete: ['delete', 'remove', 'destroy', 'bulk_actions'],
     };
 
     const actionsToCheck = [action, ...(actionAliases[action] || [])];

@@ -1393,7 +1393,7 @@ export const deleteStudent = async (id, instituteId, type = 'inactive') => {
  */
 export const bulkDeleteStudents = async (ids, instituteId, type = 'inactive') => {
   if (type === 'delete') {
-    // Fetch students to delete their Cloudinary assets first
+    // Fetch students to get their Cloudinary asset IDs for background cleanup
     const usersToDelete = await User.findAll({
       where: {
         id: { [Op.in]: ids },
@@ -1403,34 +1403,7 @@ export const bulkDeleteStudents = async (ids, instituteId, type = 'inactive') =>
       attributes: ['id', 'qr_code_public_id', 'avatar_public_id', 'documents']
     });
 
-    for (const user of usersToDelete) {
-      // Delete QR Code
-      if (user.qr_code_public_id) {
-        await deleteFromCloudinary(user.qr_code_public_id).catch(err =>
-          console.error(`QR Code deletion error for user ${user.id}:`, err)
-        );
-      }
-
-      // Delete Avatar
-      if (user.avatar_public_id) {
-        await deleteFromCloudinary(user.avatar_public_id).catch(err =>
-          console.error(`Avatar deletion error for user ${user.id}:`, err)
-        );
-      }
-
-      // Delete Documents
-      if (user.documents && Array.isArray(user.documents)) {
-        for (const doc of user.documents) {
-          if (doc.public_id) {
-            await deleteFromCloudinary(doc.public_id).catch(err =>
-              console.error(`Document deletion error for user ${user.id}:`, err)
-            );
-          }
-        }
-      }
-    }
-
-    // Now permanently delete from database
+    // Now permanently delete from database immediately
     const result = await User.destroy({
       where: {
         id: { [Op.in]: ids },
@@ -1438,6 +1411,26 @@ export const bulkDeleteStudents = async (ids, instituteId, type = 'inactive') =>
         user_type: "STUDENT",
       },
     });
+
+    // Asynchronously delete Cloudinary assets in background without blocking response
+    if (usersToDelete.length > 0) {
+      setImmediate(async () => {
+        for (const user of usersToDelete) {
+          try {
+            if (user.qr_code_public_id) await deleteFromCloudinary(user.qr_code_public_id).catch(() => {});
+            if (user.avatar_public_id) await deleteFromCloudinary(user.avatar_public_id).catch(() => {});
+            if (user.documents && Array.isArray(user.documents)) {
+              for (const doc of user.documents) {
+                if (doc.public_id) await deleteFromCloudinary(doc.public_id).catch(() => {});
+              }
+            }
+          } catch (err) {
+            // Non-critical background cleanup error
+          }
+        }
+      });
+    }
+
     return { deletedCount: result };
   }
 
