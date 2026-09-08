@@ -1652,11 +1652,18 @@ export const bulkImportStudents = async (
 
     // ========== STEP 2: CREATE/FIND ACADEMIC YEARS ==========
     const yearMap = new Map();
+    const importBranchId = options.branch_id || null;
     for (const name of uniqueYearNames) {
+      // First try to find an academic year scoped to this branch
+      const yearWhere = { institute_id: instituteId, name: String(name).trim() };
+      if (importBranchId) {
+        yearWhere.branch_id = importBranchId;
+      }
       const [yearObj] = await AcademicYear.findOrCreate({
-        where: { institute_id: instituteId, name: String(name).trim() },
+        where: yearWhere,
         defaults: {
           institute_id: instituteId,
+          branch_id: importBranchId,
           name: String(name),
           start_date: new Date(),
           end_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
@@ -1676,14 +1683,20 @@ export const bulkImportStudents = async (
       );
       const yearId = yearMap.get(safeString(sampleStudent?.academic_year_name));
 
+      const classWhere = {
+        school_id: instituteId,
+        academic_year_id: yearId,
+        name: String(className).trim(),
+      };
+      if (importBranchId) {
+        classWhere.branch_id = importBranchId;
+      }
+
       const [classObj] = await Class.findOrCreate({
-        where: {
-          school_id: instituteId,
-          academic_year_id: yearId,
-          name: String(className).trim(),
-        },
+        where: classWhere,
         defaults: {
           school_id: instituteId,
+          branch_id: importBranchId,
           academic_year_id: yearId,
           name: String(className),
           sections: [],
@@ -1813,14 +1826,20 @@ export const bulkImportStudents = async (
         let sectionObj = sectionMap.get(sectionCacheKey);
 
         if (!sectionObj) {
+          const sectionWhere = {
+            school_id: instituteId,
+            class_id: targetClass.id,
+            name: String(sectionName).trim(),
+          };
+          if (importBranchId) {
+            sectionWhere.branch_id = importBranchId;
+          }
+
           const [foundSec] = await Section.findOrCreate({
-            where: {
-              school_id: instituteId,
-              class_id: targetClass.id,
-              name: String(sectionName).trim(),
-            },
+            where: sectionWhere,
             defaults: {
               school_id: instituteId,
+              branch_id: importBranchId,
               class_id: targetClass.id,
               academic_year_id: yearId,
               name: sectionName,

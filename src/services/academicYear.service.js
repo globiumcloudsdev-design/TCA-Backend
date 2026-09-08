@@ -54,7 +54,11 @@ export const getAllAcademicYears = async (filters = {}, pagination = {}) => {
   const where = { institute_id: filters.institute_id };
   
   if (filters.branch_id && AcademicYear.rawAttributes?.branch_id) {
-    where.branch_id = filters.branch_id;
+    // Include both branch-specific AND institute-wide (null branch_id) academic years
+    where[Op.or] = [
+      { branch_id: filters.branch_id },
+      { branch_id: null },
+    ];
   }
 
   if (filters.is_current !== undefined) {

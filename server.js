@@ -54,6 +54,10 @@ const startServer = async () => {
     const PORT = process.env.PORT || config.port;
     const HOST = process.env.HOST || "0.0.0.0";
 
+    httpServer.setTimeout(300000); // 5 minutes timeout for heavy imports
+    httpServer.keepAliveTimeout = 65000;
+    httpServer.headersTimeout = 66000;
+
     httpServer.listen(PORT, HOST, () => {
       logger.info(`🚀 Server running at ${protocol}://${HOST}:${PORT}`);
     });
