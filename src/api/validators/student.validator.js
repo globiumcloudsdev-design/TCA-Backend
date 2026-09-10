@@ -6,7 +6,7 @@ import Joi from 'joi';
 
 export const createStudentSchema = Joi.object({
   first_name: Joi.string().min(2).max(100).required(),
-  last_name: Joi.string().min(2).max(100).required(),
+  last_name: Joi.string().max(100).allow('', null).optional(),
   class_id: Joi.string().uuid(),
   roll_number: Joi.string().max(50),
   gr_number: Joi.string().max(50),

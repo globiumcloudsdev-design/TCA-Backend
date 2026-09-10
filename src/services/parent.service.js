@@ -185,7 +185,7 @@ export const createParent = async (instituteId, data, createdBy, branchId = null
     role_id: role.id,
     user_type: 'PARENT',
     first_name: data.first_name,
-    last_name: data.last_name,
+    last_name: data.last_name || '',
     email: data.email || null,
     phone: data.phone || null,
     registration_no: data.registration_no || `PAR-${Date.now().toString().slice(-8)}`,

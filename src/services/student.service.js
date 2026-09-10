@@ -236,9 +236,6 @@ export const createStudent = async (data, options = {}) => {
     if (!firstName) {
       throw new Error('First name is required');
     }
-    if (!lastName) {
-      throw new Error('Last name is required');
-    }
     if (!data.institute_id) {
       throw new Error('Institute ID is required');
     }
@@ -444,7 +441,7 @@ export const createStudent = async (data, options = {}) => {
       role_id: studentRole.id,
       user_type: "STUDENT",
       first_name: data.first_name,
-      last_name: data.last_name,
+      last_name: data.last_name || '',
       email: data.email || null,
       phone: data.phone,
       password_hash: hashedPassword,

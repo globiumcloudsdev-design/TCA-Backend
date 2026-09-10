@@ -62,8 +62,8 @@ export const createParent = async (req, res) => {
       }
     }
 
-    if (!payload.first_name || !payload.last_name || !payload.phone) {
-      return sendError(res, 'first_name, last_name and phone are required.', 400);
+    if (!payload.first_name || !payload.phone) {
+      return sendError(res, 'first_name and phone are required.', 400);
     }
 
     const result = await parentService.createParent(instituteId, payload, req.user.id, branchId);

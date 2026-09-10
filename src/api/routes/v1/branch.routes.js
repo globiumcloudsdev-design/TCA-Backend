@@ -60,7 +60,7 @@ const createBranchSchema = Joi.object({
   }).optional(),
   head: Joi.object({
     first_name: Joi.string().required(),
-    last_name: Joi.string().required(),
+    last_name: Joi.string().optional().allow('', null),
     email: Joi.string().email().required(),
     phone: Joi.string().optional().allow('', null),
     password: Joi.string().min(6).optional().allow('', null),
@@ -88,7 +88,7 @@ const updateBranchSchema = Joi.object({
   }).optional(),
   head: Joi.object({
     first_name: Joi.string().min(2).optional(),
-    last_name: Joi.string().min(2).optional(),
+    last_name: Joi.string().optional().allow('', null),
     email: Joi.string().email().optional(),
     phone: Joi.string().optional().allow('', null),
     password: Joi.string().min(6).optional().allow('', null),
