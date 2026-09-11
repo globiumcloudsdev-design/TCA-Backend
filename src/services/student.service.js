@@ -808,7 +808,14 @@ export const getStudentById = async (id, instituteId) => {
       { model: Role, as: 'Role', attributes: ['id', 'name', 'permissions'] },
       { model: ExamResult, as: 'examResults', separate: true, order: [['created_at', 'DESC']] },
       { model: StudentAttendance, as: 'studentAttendances', separate: true, order: [['date', 'DESC']], limit: 100 },
-      { model: FeeVoucher, as: 'feeVouchers', separate: true, order: [['created_at', 'DESC']] },
+      { 
+        model: FeeVoucher, 
+        as: 'feeVouchers', 
+        separate: true, 
+        where: { archived: false, status: { [Op.ne]: 'cancelled' } }, 
+        required: false, 
+        order: [['created_at', 'DESC']] 
+      },
       { model: LeaveRequest, as: 'leaveRequests', separate: true, order: [['created_at', 'DESC']] }
     ]
   });

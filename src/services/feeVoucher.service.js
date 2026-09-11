@@ -892,7 +892,16 @@ export const deleteVoucher = async (voucherId, instituteId, options = {}) => {
         throw new AppError('Cannot delete paid voucher', 400);
     }
 
-    await voucher.update({ archived: true }, { transaction });
+    const paymentsCount = await FeePayment.count({
+        where: { voucher_id: voucherId },
+        transaction
+    });
+
+    if (paymentsCount === 0) {
+        await voucher.destroy({ transaction });
+    } else {
+        await voucher.update({ archived: true, status: 'cancelled' }, { transaction });
+    }
 
     return voucher;
 };
@@ -1310,20 +1319,14 @@ export const bulkDeleteVouchers = async (voucherIds, instituteId, options = {}) 
         throw new AppError(`Cannot delete paid vouchers: ${undeletable.map(v => v.voucher_number).join(', ')}`, 400);
     }
 
-    const updateWhere = {
-        id: { [Op.in]: voucherIds },
-        institute_id: instituteId,
-        status: { [Op.ne]: 'paid' }
-    };
-    if (branch_id) updateWhere.branch_id = branch_id;
-
-    await FeeVoucher.update(
-        { archived: true },
-        {
-            where: updateWhere,
-            transaction
+    for (const v of vouchers) {
+        const pCount = await FeePayment.count({ where: { voucher_id: v.id }, transaction });
+        if (pCount === 0) {
+            await v.destroy({ transaction });
+        } else {
+            await v.update({ archived: true, status: 'cancelled' }, { transaction });
         }
-    );
+    }
 
     return { deletedCount: vouchers.length };
 };
