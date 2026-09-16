@@ -1090,9 +1090,15 @@ export const getExamOptions = async (filters = {}) => {
   const where = { school_id: filters.institute_id };
 
   if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
-  if (filters.class_id) where['entity_ids.class_id'] = filters.class_id;
-  if (filters.section_id) where['entity_ids.section_id'] = filters.section_id;
-  if (filters.status) where.status = filters.status;
+  if (filters.class_id) where.class_id = filters.class_id;
+  if (filters.section_id) where.section_id = filters.section_id;
+  if (filters.status) {
+    if (filters.status === 'published') {
+      where[Op.or] = [{ status: 'results_published' }, { is_published: true }];
+    } else {
+      where.status = filters.status;
+    }
+  }
 
   const exams = await Exam.findAll({
     where,

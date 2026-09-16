@@ -68,7 +68,7 @@ const normalizeSettings = (settings) => {
 };
 
 // 🔥 FIXED: Return institute_type as STRING, not object
-const getCompleteInstituteData = async (instituteId) => {
+export const getCompleteInstituteData = async (instituteId) => {
   if (!instituteId) return null;
   
   try {
@@ -99,11 +99,48 @@ const getCompleteInstituteData = async (instituteId) => {
     if (!institute) return null;
     
     // Fetch active branches for institute
-    const branches = await Branch.findAll({
+    let branches = await Branch.findAll({
       where: { institute_id: instituteId, is_active: true },
       attributes: ['id', 'name', 'code', 'phone', 'email', 'address', 'city', 'is_main'],
       order: [['is_main', 'DESC'], ['name', 'ASC']]
     });
+
+    // Self-healing: If branches exist but none is marked as is_main, designate the first branch as main
+    if (branches.length > 0 && !branches.some(b => b.is_main === true)) {
+      await Branch.update({ is_main: true }, { where: { id: branches[0].id } });
+      branches[0].is_main = true;
+    } else if (branches.length === 0) {
+      // If institute has no branches at all, auto-create the initial main campus
+      try {
+        const branchCode = `${institute.institute_code}-MAIN`;
+        const autoBranch = await Branch.create({
+          institute_id: institute.id,
+          name: `${institute.institute_name} - Main Campus`,
+          code: branchCode,
+          phone: institute.institute_contact,
+          email: institute.institute_email,
+          address: institute.institute_address,
+          city: institute.institute_city,
+          is_active: true,
+          is_main: true,
+          settings: {
+            has_hostel: false,
+            has_transport: false,
+            has_library: true,
+            has_lab: true,
+            has_playground: false,
+            has_cafeteria: false,
+            has_mosque: false,
+            has_parking: false,
+          },
+          created_by: institute.principal_user_id || null,
+          updated_by: institute.principal_user_id || null
+        });
+        branches = [autoBranch];
+      } catch (branchCreateErr) {
+        logger.error('Failed to auto-create missing main branch:', branchCreateErr);
+      }
+    }
 
     // Fetch policies
     const policies = await Policy.findAll({
@@ -244,7 +281,7 @@ const getUserTypeIcon = (userType) => {
   return iconMap[userType] || '👤';
 };
 
-const getUserProfile = async (userId) => {
+export const getUserProfile = async (userId) => {
   const user = await User.findByPk(userId, {
     include: [
       { model: Role, as: 'Role' },
@@ -321,6 +358,11 @@ const getUserProfile = async (userId) => {
   );
 
   const effectiveBranch = branchData || (isGlobalAdmin && mainBranch ? (mainBranch.toJSON ? mainBranch.toJSON() : mainBranch) : null);
+
+  // Auto-link Super Admin user to the main branch if user.branch_id is missing in DB
+  if (isGlobalAdmin && mainBranch?.id && !user.branch_id) {
+    await user.update({ branch_id: mainBranch.id }).catch(() => {});
+  }
 
   return {
     id: user.id,

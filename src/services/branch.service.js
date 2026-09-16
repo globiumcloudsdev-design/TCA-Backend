@@ -197,8 +197,25 @@ export const createBranch = async (data) => {
       }
     }
 
+    // Check if institute already has an active main branch
+    const existingMain = await Branch.findOne({
+      where: {
+        institute_id: data.institute_id,
+        is_main: true
+      },
+      transaction
+    });
+
+    const branchCount = await Branch.count({
+      where: { institute_id: data.institute_id },
+      transaction
+    });
+
+    // Auto-designate as main branch if explicitly requested OR if no main branch exists yet OR if first branch
+    const isMain = data.is_main === true || !existingMain || branchCount === 0;
+
     // If this is main branch, unset any existing main branch
-    if (data.is_main) {
+    if (isMain) {
       await Branch.update(
         { is_main: false },
         {
@@ -257,7 +274,7 @@ export const createBranch = async (data) => {
       },
 
       is_active: data.is_active !== undefined ? data.is_active : true,
-      is_main: data.is_main || false,
+      is_main: isMain,
 
       created_by: data.created_by,
       updated_by: data.updated_by,
@@ -267,6 +284,17 @@ export const createBranch = async (data) => {
     };
 
     const branch = await Branch.create(branchData, { transaction });
+
+    // Link institute principal/super admin to this branch if they have no branch_id yet
+    if (isMain && data.institute_id) {
+      const institute = await models.Institute.findByPk(data.institute_id, { transaction });
+      if (institute?.principal_user_id) {
+        const principalUser = await User.findByPk(institute.principal_user_id, { transaction });
+        if (principalUser && !principalUser.branch_id) {
+          await principalUser.update({ branch_id: branch.id }, { transaction });
+        }
+      }
+    }
 
     // 2. CREATE / ASSIGN HEAD USER (if provided)
     if (data.head && data.head.first_name && data.head.email) {
@@ -470,13 +498,13 @@ export const deleteBranch = async (id, institute_id, deleted_by) => {
     }
 
     // Delete users created for/assigned to this branch (Branch Head & Branch Admin)
-    // Protect INSTITUTE_ADMIN, SUPER_ADMIN, MASTER_ADMIN
+    // Protect INSTITUTE_ADMIN, MASTER_ADMIN, SYSTEM_ADMIN
     await User.destroy({
       where: {
         branch_id: id,
         school_id: institute_id,
         user_type: {
-          [Op.notIn]: ['MASTER_ADMIN', 'SUPER_ADMIN', 'INSTITUTE_ADMIN']
+          [Op.notIn]: ['MASTER_ADMIN', 'INSTITUTE_ADMIN', 'SYSTEM_ADMIN']
         }
       },
       transaction

@@ -585,16 +585,13 @@ export const createInstitute = async (data, createdBy, file = null) => {
     // 🔥 STEP 2: Update institute with principal_user_id
     await inst.update({ principal_user_id: adminUser.id }, { transaction: t });
 
-    // 🔥 STEP 3: Create branch if hasBranches = true
-    let branch = null;
-    if (hasBranches) {
-      branch = await createAutoBranch(inst, adminUser, data, createdBy, t);
-      
-      // ✅ Update admin user's branch_id
-      if (branch) {
-        await adminUser.update({ branch_id: branch.id }, { transaction: t });
-        console.log(`✅ Updated admin user branch_id to ${branch.id}`);
-      }
+    // 🔥 STEP 3: Always create initial Main Branch for every institute
+    const branch = await createAutoBranch(inst, adminUser, data, createdBy, t);
+    
+    // ✅ Update admin user's branch_id to the Main Branch
+    if (branch && adminUser) {
+      await adminUser.update({ branch_id: branch.id }, { transaction: t });
+      console.log(`✅ Auto-assigned admin user branch_id to Main Branch ${branch.id}`);
     }
 
     // GENERATE FIRST INVOICE IF NOT IN TRIAL
@@ -751,20 +748,27 @@ export const updateInstitute = async (id, data, file = null, updatedBy = null) =
       await inst.update({ principal_user_id: adminUser.id }, { transaction: t });
     }
 
-    // 🔥 HANDLE BRANCH CREATION IF hasBranches CHANGED FROM false TO true
-    if (hasBranchesChanged && newHasBranches === true) {
-      const existingBranch = await Branch.findOne({
-        where: { institute_id: inst.id, is_main: true },
+    // 🔥 ENSURE MAIN BRANCH EXISTS FOR INSTITUTE
+    const existingBranch = await Branch.findOne({
+      where: { institute_id: inst.id, is_main: true },
+      transaction: t
+    });
+    
+    if (!existingBranch) {
+      const anyBranch = await Branch.findOne({
+        where: { institute_id: inst.id, is_active: true },
+        order: [['created_at', 'ASC']],
         transaction: t
       });
-      
-      if (!existingBranch) {
+      if (anyBranch) {
+        await anyBranch.update({ is_main: true }, { transaction: t });
+        if (adminUser && !adminUser.branch_id) {
+          await adminUser.update({ branch_id: anyBranch.id }, { transaction: t });
+        }
+      } else {
         const branch = await createAutoBranch(inst, adminUser, data, data.updated_by || inst.principal_user_id, t);
-        
-        // Update admin user's branch_id
-        if (branch && adminUser) {
+        if (branch && adminUser && !adminUser.branch_id) {
           await adminUser.update({ branch_id: branch.id }, { transaction: t });
-          console.log(`✅ Updated admin user branch_id to ${branch.id}`);
         }
       }
     }

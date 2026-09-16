@@ -481,7 +481,7 @@ export const getExamOptions = async (req, res) => {
       academic_year_id: req.query.academic_year_id,
       class_id: req.query.class_id,
       section_id: req.query.section_id,
-      status: req.query.status || 'published'
+      status: req.query.status || undefined
     };
 
     const exams = await examService.getExamOptions(filters);
