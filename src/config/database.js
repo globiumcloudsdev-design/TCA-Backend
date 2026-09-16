@@ -110,8 +110,14 @@ export const fixForeignKeys = async () => {
         ON DELETE SET NULL
         ON UPDATE CASCADE;
       `, { transaction: t });
+
+      // 3. Ensure academic_years has description column
+      await sequelize.query(`
+        ALTER TABLE academic_years
+        ADD COLUMN IF NOT EXISTS description TEXT;
+      `, { transaction: t });
     });
-    logger.info('✅ FK migration: users.school_id → institutes.id');
+    logger.info('✅ FK and schema migration: users.school_id → institutes.id, academic_years.description');
   } catch (error) {
     // If constraint already correct Postgres will error on re-add — ignore
     if (error.message?.includes('already exists')) {

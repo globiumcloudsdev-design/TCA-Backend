@@ -63,6 +63,11 @@ const AcademicYear = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: true,
     },
+
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
   },
   {
     tableName: 'academic_years',

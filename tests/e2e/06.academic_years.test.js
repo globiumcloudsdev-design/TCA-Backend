@@ -22,11 +22,13 @@ describe('E2E: Academic Year Module (/api/v1/academic-years)', () => {
           end_date: '2026-12-31',
           is_current: false,
           is_active: true,
+          description: 'Initial academic year description',
         });
 
       expect([200, 201]).toContain(res.status);
       expect(res.body).toHaveProperty('success', true);
       expect(res.body.data).toHaveProperty('id');
+      expect(res.body.data.description).toBe('Initial academic year description');
       createdYearId = res.body.data.id;
     });
 
@@ -104,6 +106,7 @@ describe('E2E: Academic Year Module (/api/v1/academic-years)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('success', true);
+      expect(res.body.data.description).toBe('Updated academic year description');
     });
   });
 
