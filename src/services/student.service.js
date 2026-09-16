@@ -17,8 +17,23 @@ import { sendWelcomeEmailWithCredentials } from "./email.service.js";
 import { parse, format } from 'date-fns';
 import { deleteFromCloudinary } from "../config/cloudinary.js";
 
-const { User, Role, Institute, Class, Section, AcademicYear } = models;
+const { User, Role, Institute, Class, Section, AcademicYear, Branch } = models;
 const { ExamResult, StudentAttendance, FeeVoucher, LeaveRequest, Exam, Assignment, AssignmentSubmission } = models;
+
+const resolveBranchFilter = async (branchId) => {
+  if (!branchId || branchId === 'all') return null;
+  try {
+    if (Branch) {
+      const branch = await Branch.findByPk(branchId, { attributes: ['id', 'is_main'] });
+      if (branch?.is_main) {
+        return { [Op.or]: [branchId, null] };
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+  return branchId;
+};
 
 /**
  * Robust date parser for imports (returns YYYY-MM-DD string)
@@ -698,8 +713,9 @@ export const getAllStudents = async (filters = {}, pagination = {}) => {
     user_type: "STUDENT",
   };
 
-  if (filters.branch_id) {
-    where.branch_id = filters.branch_id;
+  const resolvedBranchId = await resolveBranchFilter(filters.branch_id);
+  if (resolvedBranchId) {
+    where.branch_id = resolvedBranchId;
   }
 
   if (filters.search) {
@@ -1483,8 +1499,9 @@ export const getStudentsByClass = async (classId, instituteId, branchId = null) 
       `"User"."details"->'studentDetails'->>'class_id' = '${classId}'`,
     ),
   };
-  if (branchId && branchId !== 'all') {
-    where.branch_id = branchId;
+  const resolvedBranchId = await resolveBranchFilter(branchId);
+  if (resolvedBranchId) {
+    where.branch_id = resolvedBranchId;
   }
   return await User.findAll({
     where,
@@ -1504,7 +1521,8 @@ export const getStudentsBySection = async (sectionId, instituteId, branchId = nu
       `"User"."details"->'studentDetails'->>'section_id' = '${sectionId}'`,
     ),
   };
-  if (branchId) where.branch_id = branchId;
+  const resolvedBranchId = await resolveBranchFilter(branchId);
+  if (resolvedBranchId) where.branch_id = resolvedBranchId;
 
   return await User.findAll({
     where,
@@ -1517,7 +1535,8 @@ export const getStudentsBySection = async (sectionId, instituteId, branchId = nu
  */
 export const getStudentStats = async (instituteId, filters = {}) => {
   const where = { school_id: instituteId, user_type: "STUDENT" };
-  if (filters.branch_id) where.branch_id = filters.branch_id;
+  const resolvedBranchId = await resolveBranchFilter(filters.branch_id);
+  if (resolvedBranchId) where.branch_id = resolvedBranchId;
   
   if (filters.academicYearId) {
     where[Op.and] = where[Op.and] || [];
@@ -1547,7 +1566,7 @@ export const getStudentStats = async (instituteId, filters = {}) => {
     user_type: "STUDENT",
     "details.studentDetails.gender": "male",
   };
-  if (filters.branch_id) maleWhere.branch_id = filters.branch_id;
+  if (resolvedBranchId) maleWhere.branch_id = resolvedBranchId;
 
   // Get gender distribution
   const maleCount = await User.count({
@@ -1559,7 +1578,7 @@ export const getStudentStats = async (instituteId, filters = {}) => {
     user_type: "STUDENT",
     "details.studentDetails.gender": "female",
   };
-  if (filters.branch_id) femaleWhere.branch_id = filters.branch_id;
+  if (resolvedBranchId) femaleWhere.branch_id = resolvedBranchId;
 
   const femaleCount = await User.count({
     where: femaleWhere,
@@ -1649,7 +1668,17 @@ export const bulkImportStudents = async (
 
     // ========== STEP 2: CREATE/FIND ACADEMIC YEARS ==========
     const yearMap = new Map();
-    const importBranchId = options.branch_id || null;
+    let importBranchId = options.branch_id || null;
+    if (!importBranchId) {
+      const mainB = await Branch.findOne({
+        where: { institute_id: instituteId, is_main: true },
+        attributes: ['id'],
+        transaction
+      }).catch(() => null);
+      if (mainB?.id) {
+        importBranchId = mainB.id;
+      }
+    }
     for (const name of uniqueYearNames) {
       // First try to find an academic year scoped to this branch
       const yearWhere = { institute_id: instituteId, name: String(name).trim() };
@@ -2012,7 +2041,7 @@ export const bulkImportStudents = async (
         usersToCreate.push({
           id: uuidv4(),
           school_id: instituteId,
-          branch_id: options.branch_id || s.branch_id || null,
+          branch_id: importBranchId || s.branch_id || null,
           role_id: studentRole.id,
           user_type: "STUDENT",
           first_name: firstName,
@@ -2424,8 +2453,9 @@ export const searchStudents = async (instituteId, searchQuery, limit = 20, branc
     [Op.or]: orConditions
   };
 
-  if (branchId && branchId !== 'all') {
-    where.branch_id = branchId;
+  const resolvedBranchId = await resolveBranchFilter(branchId);
+  if (resolvedBranchId) {
+    where.branch_id = resolvedBranchId;
   }
 
   const students = await User.findAll({

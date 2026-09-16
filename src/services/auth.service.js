@@ -142,6 +142,28 @@ export const getCompleteInstituteData = async (instituteId) => {
       }
     }
 
+    // Auto-link unassigned classes, students, and academic years to the main campus
+    const resolvedMain = branches.find(b => b.is_main === true) || branches[0];
+    if (resolvedMain?.id) {
+      const { Class, AcademicYear } = sequelize.models;
+      if (Class) {
+        await Class.update(
+          { branch_id: resolvedMain.id },
+          { where: { school_id: instituteId, branch_id: null } }
+        ).catch(() => {});
+      }
+      await User.update(
+        { branch_id: resolvedMain.id },
+        { where: { school_id: instituteId, branch_id: null, user_type: 'STUDENT' } }
+      ).catch(() => {});
+      if (AcademicYear) {
+        await AcademicYear.update(
+          { branch_id: resolvedMain.id },
+          { where: { institute_id: instituteId, branch_id: null } }
+        ).catch(() => {});
+      }
+    }
+
     // Fetch policies
     const policies = await Policy.findAll({
       where: { institute_id: instituteId, is_active: true },
@@ -351,6 +373,15 @@ export const getUserProfile = async (userId) => {
   ].includes(String(user.user_type || '').toUpperCase()) ||
     user.staff_type === 'Branch Head';
 
+  // Auto-link Super Admin / Institute Admin user to the main branch if user.branch_id is missing or invalid/deleted
+  if (isGlobalAdmin && mainBranch?.id && (!branchData || user.branch_id !== mainBranch.id)) {
+    await user.update({ branch_id: mainBranch.id }).catch(() => {});
+    user.branch_id = mainBranch.id;
+    if (!branchData) {
+      branchData = mainBranch.toJSON ? mainBranch.toJSON() : mainBranch;
+    }
+  }
+
   const isMainBranchResolved = !isExplicitBranchAdminUser && (
     branchData
       ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN') || String(branchData.name || '').toLowerCase().includes('main'))
@@ -358,11 +389,6 @@ export const getUserProfile = async (userId) => {
   );
 
   const effectiveBranch = branchData || (isGlobalAdmin && mainBranch ? (mainBranch.toJSON ? mainBranch.toJSON() : mainBranch) : null);
-
-  // Auto-link Super Admin user to the main branch if user.branch_id is missing in DB
-  if (isGlobalAdmin && mainBranch?.id && !user.branch_id) {
-    await user.update({ branch_id: mainBranch.id }).catch(() => {});
-  }
 
   return {
     id: user.id,
@@ -500,17 +526,17 @@ export const loginService = async (loginId, password) => {
     const user = users.find(u => u.id === validAccounts[0].id);
     await user.update({ last_login_at: new Date() });
     
+    const userProfile = await getUserProfile(user.id);
+
     const tokenPayload = {
       userId: user.id,
       schoolId: user.school_id,
       userType: user.user_type,
-      branchId: user.branch_id,
+      branchId: userProfile?.branch_id || user.branch_id,
     };
     
     const accessToken = signAccessToken(tokenPayload);
     const refreshToken = signRefreshToken({ userId: user.id });
-    
-    const userProfile = await getUserProfile(user.id);
     
     return {
       accessToken,
@@ -545,16 +571,17 @@ export const selectAccountService = async (accountId, email, registrationNo) => 
   
   await user.update({ last_login_at: new Date() });
   
+  const userProfile = await getUserProfile(user.id);
+
   const tokenPayload = {
     userId: user.id,
     schoolId: user.school_id,
     userType: user.user_type,
-    branchId: user.branch_id,
+    branchId: userProfile?.branch_id || user.branch_id,
   };
   
   const accessToken = signAccessToken(tokenPayload);
   const refreshToken = signRefreshToken({ userId: user.id });
-  const userProfile = await getUserProfile(user.id);
   
   return { accessToken, refreshToken, user: userProfile };
 };
@@ -584,16 +611,17 @@ export const refreshTokenService = async (refreshToken) => {
     throw new AppError('Your institute account is currently inactive.', 403);
   }
 
+  const userProfile = await getUserProfile(user.id);
+
   const tokenPayload = {
     userId: user.id,
     schoolId: user.school_id,
     userType: user.user_type,
-    branchId: user.branch_id,
+    branchId: userProfile?.branch_id || user.branch_id,
   };
 
   const accessToken = signAccessToken(tokenPayload);
   const newRefreshToken = signRefreshToken({ userId: user.id });
-  const userProfile = await getUserProfile(user.id);
 
   return {
     accessToken,
@@ -682,15 +710,15 @@ export const loginWithAccountService = async (accountId, password) => {
   const isMatch = await comparePassword(password, user.password_hash);
   if (!isMatch) throw new AppError('Invalid password.', 401);
   await user.update({ last_login_at: new Date() });
+  const userProfile = await getUserProfile(user.id);
   const tokenPayload = {
     userId: user.id,
     schoolId: user.school_id,
     userType: user.user_type,
-    branchId: user.branch_id,
+    branchId: userProfile?.branch_id || user.branch_id,
   };
   const accessToken = signAccessToken(tokenPayload);
   const refreshToken = signRefreshToken({ userId: user.id });
-  const userProfile = await getUserProfile(user.id);
   return { accessToken, refreshToken, user: userProfile };
 };
 export const getInstituteDataService = async (instituteId) => {

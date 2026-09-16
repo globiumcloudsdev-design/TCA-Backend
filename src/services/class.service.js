@@ -4,7 +4,22 @@ import { Op } from 'sequelize';
 import models from '../models/postgres/index.js';
 import { v4 as uuidv4 } from 'uuid';
 
-const { Class, User } = models;
+const { Class, User, Branch } = models;
+
+const resolveBranchFilter = async (branchId) => {
+  if (!branchId || branchId === 'all') return null;
+  try {
+    if (Branch) {
+      const branch = await Branch.findByPk(branchId, { attributes: ['id', 'is_main'] });
+      if (branch?.is_main) {
+        return { [Op.or]: [branchId, null] };
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+  return branchId;
+};
 
 /**
  * CREATE Complete Class
@@ -230,8 +245,9 @@ export const attachStudentCountsToClasses = async (classes, { instituteId, branc
     user_type: 'STUDENT',
     is_active: true,
   };
-  if (branchId) {
-    studentWhere.branch_id = branchId;
+  const resolvedBranchId = await resolveBranchFilter(branchId);
+  if (resolvedBranchId) {
+    studentWhere.branch_id = resolvedBranchId;
   }
 
   // Efficient single-query fetch of active student metadata
@@ -343,7 +359,8 @@ export const getAllClasses = async (filters = {}, pagination = {}) => {
   const offset = (page - 1) * limit;
 
   const where = { school_id: filters.institute_id };
-  if (filters.branch_id) where.branch_id = filters.branch_id;
+  const resolvedBranchId = await resolveBranchFilter(filters.branch_id);
+  if (resolvedBranchId) where.branch_id = resolvedBranchId;
   if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
   
   if (filters.search) {
@@ -386,8 +403,9 @@ export const getClassOptions = async (instituteId, academicYearId, branchId = nu
     is_active: true
   };
 
-  if (branchId) {
-    where.branch_id = branchId;
+  const resolvedBranchId = await resolveBranchFilter(branchId);
+  if (resolvedBranchId) {
+    where.branch_id = resolvedBranchId;
   }
 
   if (academicYearId) {
@@ -417,7 +435,8 @@ export const getClassOptions = async (instituteId, academicYearId, branchId = nu
 
 export const getClassById = async (id, instituteId, branchId = null) => {
   const where = { id, school_id: instituteId };
-  if (branchId) where.branch_id = branchId;
+  const resolvedBranchId = await resolveBranchFilter(branchId);
+  if (resolvedBranchId) where.branch_id = resolvedBranchId;
   const classData = await Class.findOne({ where });
   if (!classData) return null;
 

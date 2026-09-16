@@ -520,6 +520,19 @@ export const deleteBranch = async (id, institute_id, deleted_by) => {
       transaction
     });
 
+    // Reassign any remaining institute users pointing to this deleted branch to the main branch
+    const mainBranch = await Branch.findOne({
+      where: { institute_id, is_main: true, id: { [Op.ne]: id } },
+      transaction
+    });
+    await User.update(
+      { branch_id: mainBranch ? mainBranch.id : null },
+      {
+        where: { school_id: institute_id, branch_id: id },
+        transaction
+      }
+    );
+
     // Soft delete branch
     await branch.destroy({ transaction });
 
