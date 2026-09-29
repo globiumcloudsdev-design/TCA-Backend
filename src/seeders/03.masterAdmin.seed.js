@@ -16,6 +16,10 @@ export const seedMasterAdmin = async (models) => {
   const password = config.superAdmin.password;
   const saltRounds = config.bcrypt.saltRounds;
 
+  if (!email || !password) {
+    throw new Error('SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must be configured in environment variables (.env)');
+  }
+
   // Resolve MASTER_ADMIN template role
   const masterRole = await Role.findOne({ where: { code: 'MASTER_ADMIN', school_id: null }, paranoid: false });
   if (!masterRole) {
@@ -58,7 +62,7 @@ export const seedMasterAdmin = async (models) => {
     console.log('─'.repeat(55));
     console.log('  🔐  MASTER ADMIN LOGIN CREDENTIALS');
     console.log(`  Email    : ${email}`);
-    console.log(`  Password : ${password}`);
+    console.log(`  Password : [CONFIGURED IN .ENV]`);
     console.log('─'.repeat(55));
   }
 };

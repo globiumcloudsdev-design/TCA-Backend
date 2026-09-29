@@ -121,8 +121,8 @@ const config = {
 
   // Super Admin
   superAdmin: {
-    email: process.env.SUPER_ADMIN_EMAIL || 'admin@thecloudsacademy.com',
-    password: process.env.SUPER_ADMIN_PASSWORD || 'Admin@123',
+    email: process.env.SUPER_ADMIN_EMAIL,
+    password: process.env.SUPER_ADMIN_PASSWORD,
   },
 };
 
