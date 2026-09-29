@@ -196,30 +196,25 @@ export const createTeacher = async (data, options = {}) => {
     
     const user = await User.create(userData, { transaction });
     
-    // 8. Generate and upload QR Code to Cloudinary (fail-safe)
-    let qrCodeUrl = null;
-    let qrCodePublicId = null;
-    try {
-      const qrCodeResult = await generateAndUploadQRCode(
-        user, 
-        data.institute_id
-      );
-      if (qrCodeResult) {
-        user.qr_code_url = qrCodeResult.url;
-        user.qr_code_public_id = qrCodeResult.public_id;
-        await user.save({ transaction });
-        qrCodeUrl = qrCodeResult.url;
-        qrCodePublicId = qrCodeResult.public_id;
-      }
-    } catch (qrErr) {
-      console.warn('⚠️ QR Code generation failed for teacher:', qrErr.message);
-    }
-    
-    // 9. Send welcome email asynchronously outside the request/response path (never block HTTP response)
-    if (user.email && data.send_email !== false) {
-      const instituteName = (await Institute.findByPk(data.institute_id).catch(() => null))?.name || 'The Clouds Academy';
-      setTimeout(async () => {
+    // 8. Generate QR Code and Send Welcome Email asynchronously in background (zero latency for response)
+    setTimeout(async () => {
+      try {
+        let qrCodeUrl = null;
         try {
+          const qrCodeResult = await generateAndUploadQRCode(user, data.institute_id);
+          if (qrCodeResult) {
+            await User.update(
+              { qr_code_url: qrCodeResult.url, qr_code_public_id: qrCodeResult.public_id },
+              { where: { id: user.id } }
+            );
+            qrCodeUrl = qrCodeResult.url;
+          }
+        } catch (qrErr) {
+          console.warn('⚠️ Background QR Code generation failed for teacher:', qrErr.message);
+        }
+
+        if (user.email && data.send_email !== false) {
+          const instituteName = (await Institute.findByPk(data.institute_id).catch(() => null))?.name || 'The Clouds Academy';
           await sendWelcomeEmailWithCredentials(
             user, 
             password, 
@@ -228,11 +223,11 @@ export const createTeacher = async (data, options = {}) => {
             teacherRole?.name || 'Teacher'
           );
           console.log(`📧 Welcome email sent to ${user.email}`);
-        } catch (err) {
-          console.error('❌ Teacher welcome email failed:', err.message);
         }
-      }, 50);
-    }
+      } catch (bgErr) {
+        console.error('❌ Background teacher post-processing error:', bgErr.message);
+      }
+    }, 20);
     
     return {
       user,
