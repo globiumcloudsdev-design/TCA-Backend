@@ -196,29 +196,42 @@ export const createTeacher = async (data, options = {}) => {
     
     const user = await User.create(userData, { transaction });
     
-    // 8. Generate and upload QR Code to Cloudinary
-    const institute = await Institute.findByPk(data.institute_id);
-        
-    const qrCodeResult = await generateAndUploadQRCode(
-      user, 
-      data.institute_id
-      // No oldPublicId for new teacher
-    );
-    
-    // 9. Update user with QR code URL and public_id
-    user.qr_code_url = qrCodeResult.url;
-    user.qr_code_public_id = qrCodeResult.public_id; // Add this field to User model if not exists
-    await user.save({ transaction });
-    
-    // 10. Send welcome email
-    if (user.email && data.send_email !== false) {
-      await sendWelcomeEmailWithCredentials(
+    // 8. Generate and upload QR Code to Cloudinary (fail-safe)
+    let qrCodeUrl = null;
+    let qrCodePublicId = null;
+    try {
+      const qrCodeResult = await generateAndUploadQRCode(
         user, 
-        password, 
-        institute?.name || 'The Clouds Academy',
-        qrCodeResult.url,
-        teacherRole.name
-      ).catch(err => console.error('Email sending failed:', err));
+        data.institute_id
+      );
+      if (qrCodeResult) {
+        user.qr_code_url = qrCodeResult.url;
+        user.qr_code_public_id = qrCodeResult.public_id;
+        await user.save({ transaction });
+        qrCodeUrl = qrCodeResult.url;
+        qrCodePublicId = qrCodeResult.public_id;
+      }
+    } catch (qrErr) {
+      console.warn('⚠️ QR Code generation failed for teacher:', qrErr.message);
+    }
+    
+    // 9. Send welcome email asynchronously outside the request/response path (never block HTTP response)
+    if (user.email && data.send_email !== false) {
+      const instituteName = (await Institute.findByPk(data.institute_id).catch(() => null))?.name || 'The Clouds Academy';
+      setTimeout(async () => {
+        try {
+          await sendWelcomeEmailWithCredentials(
+            user, 
+            password, 
+            instituteName,
+            qrCodeUrl,
+            teacherRole?.name || 'Teacher'
+          );
+          console.log(`📧 Welcome email sent to ${user.email}`);
+        } catch (err) {
+          console.error('❌ Teacher welcome email failed:', err.message);
+        }
+      }, 50);
     }
     
     return {

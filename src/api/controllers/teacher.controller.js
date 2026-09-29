@@ -126,9 +126,10 @@ export const createTeacher = async (req, res) => {
     }
     
     // Upload documents if any
-    if (req.files?.length) {
+    const docFiles = req.files?.documents || (Array.isArray(req.files) ? req.files : []);
+    if (docFiles.length > 0) {
       const tempId = `temp_${Date.now()}`;
-      const uploadedDocs = await uploadDocuments(req.files, instituteId, tempId);
+      const uploadedDocs = await uploadDocuments(docFiles, instituteId, tempId);
       
       body.documents = [...(body.documents || []), ...uploadedDocs.map(doc => ({
         type: 'other',
@@ -137,7 +138,6 @@ export const createTeacher = async (req, res) => {
         file_url: doc.file_url,
         verified: false
       }))];
-      
     }
     
     // Prepare data for service
