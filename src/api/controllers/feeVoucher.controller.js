@@ -153,6 +153,26 @@ export const getFeeVouchers = catchAsync(async (req, res) => {
  * Delete/Archive voucher
  * DELETE /api/fee-vouchers/:voucherId
  */
+
+/**
+ * Get single fee voucher by ID
+ * GET /api/fee-vouchers/:voucherId
+ */
+export const getFeeVoucherById = catchAsync(async (req, res) => {
+  const { voucherId } = req.params;
+  const instituteId = getInstituteId(req);
+  const branchId = getBranchId(req);
+
+  const voucher = await feeVoucherService.getFeeVoucherById(voucherId, instituteId, {
+    branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId
+  });
+
+  res.status(200).json({
+    success: true,
+    data: voucher
+  });
+});
+
 export const deleteVoucher = catchAsync(async (req, res) => {
   const { voucherId } = req.params;
   const instituteId = getInstituteId(req);
@@ -366,6 +386,7 @@ export default {
   generateVouchersForClass,
   generateVouchersForInstitute,
   getFeeVouchers,
+  getFeeVoucherById,
   deleteVoucher,
   updateVoucherStatus,
   recordPayment,

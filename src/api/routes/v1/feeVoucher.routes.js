@@ -69,6 +69,14 @@ router.get(
 );
 
 // Delete/Archive voucher
+
+// Get single voucher by ID
+router.get(
+  '/:voucherId',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'TEACHER', 'STAFF', 'PARENT', 'STUDENT'),
+  feeVoucherController.getFeeVoucherById
+);
+
 router.delete(
   '/:voucherId',
   restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),

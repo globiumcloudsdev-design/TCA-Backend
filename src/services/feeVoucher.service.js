@@ -7,6 +7,8 @@ import FeeVoucher from '../models/postgres/FeeVoucher.model.js';
 import User from '../models/postgres/User.model.js';
 import Institute from '../models/postgres/Institute.model.js';
 import FeeTemplate from '../models/postgres/FeeTemplate.model.js';
+import Class from '../models/postgres/Class.model.js';
+import Section from '../models/postgres/Section.model.js';
 import { Op } from 'sequelize';
 import { default as sequelize } from '../config/database.js';
 import generateVoucherNumber from '../utils/fee/generateVoucherNumber.js';
@@ -769,6 +771,101 @@ export const generateVouchersForInstitute = async (
 /**
  * Get all fee vouchers for institute with filters
  */
+
+/**
+ * Helper: Resolve active class & section names as well as father names for vouchers
+ */
+const resolveVouchersClassAndSection = async (vouchers = []) => {
+    if (!vouchers || !vouchers.length) return vouchers;
+
+    const classIds = new Set();
+    const sectionIds = new Set();
+
+    vouchers.forEach(v => {
+        const student = v.Student || {};
+        const details = student.details || {};
+        const studentDetails = details.studentDetails || {};
+        const activeSession = details.active_session || studentDetails.active_session || (Array.isArray(details.academic_history) && details.academic_history[0]) || {};
+        const breakdown = v.fee_breakdown || {};
+
+        const cId = v.class_id || breakdown.class_id || activeSession.class_id || studentDetails.class_id || details.class_id;
+        const sId = v.section_id || breakdown.section_id || activeSession.section_id || studentDetails.section_id || details.section_id;
+
+        if (cId) classIds.add(String(cId));
+        if (sId) sectionIds.add(String(sId));
+    });
+
+    const [classes, sections] = await Promise.all([
+        classIds.size
+            ? Class.findAll({
+                where: { id: { [Op.in]: Array.from(classIds) } },
+                attributes: ['id', 'name', 'sections']
+            })
+            : Promise.resolve([]),
+        sectionIds.size
+            ? Section.findAll({
+                where: { id: { [Op.in]: Array.from(sectionIds) } },
+                attributes: ['id', 'name']
+            })
+            : Promise.resolve([])
+    ]);
+
+    const classNameMap = new Map();
+    const sectionNameMap = new Map();
+
+    classes.forEach(c => {
+        classNameMap.set(String(c.id), c.name);
+        if (Array.isArray(c.sections)) {
+            c.sections.forEach(s => {
+                if (s.id && s.name) sectionNameMap.set(String(s.id), s.name);
+            });
+        }
+    });
+
+    sections.forEach(s => {
+        sectionNameMap.set(String(s.id), s.name);
+    });
+
+    vouchers.forEach(v => {
+        const student = v.Student || {};
+        const details = student.details || {};
+        const studentDetails = details.studentDetails || {};
+        const activeSession = details.active_session || studentDetails.active_session || (Array.isArray(details.academic_history) && details.academic_history[0]) || {};
+        const breakdown = v.fee_breakdown || {};
+
+        const cId = String(v.class_id || breakdown.class_id || activeSession.class_id || studentDetails.class_id || details.class_id || '');
+        const sId = String(v.section_id || breakdown.section_id || activeSession.section_id || studentDetails.section_id || details.section_id || '');
+
+        const resolvedClassName = (cId ? classNameMap.get(cId) : null) || activeSession.class_name || studentDetails.class_name || breakdown.class_name || v.class_name || null;
+        const resolvedSectionName = (sId ? sectionNameMap.get(sId) : null) || activeSession.section_name || studentDetails.section_name || breakdown.section_name || v.section_name || null;
+        const fatherName = studentDetails.father_name || details.father_name || student.father_name || null;
+
+        v.className = resolvedClassName;
+        v.class_name = resolvedClassName;
+        v.sectionName = resolvedSectionName;
+        v.section_name = resolvedSectionName;
+        v.father_name = fatherName;
+        v.fatherName = fatherName;
+
+        if (v.Student) {
+            v.Student.className = resolvedClassName;
+            v.Student.class_name = resolvedClassName;
+            v.Student.sectionName = resolvedSectionName;
+            v.Student.section_name = resolvedSectionName;
+            v.Student.father_name = fatherName;
+            v.Student.fatherName = fatherName;
+            if (v.Student.details) {
+                if (!v.Student.details.studentDetails) v.Student.details.studentDetails = {};
+                v.Student.details.studentDetails.class_name = resolvedClassName;
+                v.Student.details.studentDetails.section_name = resolvedSectionName;
+                v.Student.details.studentDetails.father_name = fatherName;
+            }
+        }
+    });
+
+    return vouchers;
+};
+
 export const getFeeVouchers = async (instituteId, filters = {}, pagination = {}) => {
     const { page = 1, limit = 20 } = pagination;
     const offset = (page - 1) * limit;
@@ -859,6 +956,8 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
             FeePayments: payments // Compatibility for frontend
         };
     });
+
+    await resolveVouchersClassAndSection(enrichedRows);
 
     return {
         vouchers: enrichedRows,
@@ -1566,11 +1665,96 @@ export const warnFeeDefaulter = async (instituteId, studentId) => {
     };
 };
 
+
+/**
+ * Get single fee voucher by ID with student enrollment and payment history
+ */
+export const getFeeVoucherById = async (voucherId, instituteId = null, options = {}) => {
+    const where = { id: voucherId };
+    if (instituteId) {
+        where.institute_id = instituteId;
+    }
+    if (options.branch_id) {
+        where.branch_id = options.branch_id;
+    }
+
+    const voucherRecord = await FeeVoucher.findOne({
+        where,
+        attributes: [
+            'id',
+            'institute_id',
+            'branch_id',
+            'academic_year_id',
+            'student_id',
+            'voucher_number',
+            'month',
+            'year',
+            'issued_date',
+            'due_date',
+            'amount',
+            'discount',
+            'fine',
+            'net_amount',
+            'currency',
+            'status',
+            'fee_breakdown',
+            'notes',
+            'archived',
+            'created_by',
+            'created_at',
+            'updated_at'
+        ],
+        include: [
+            {
+                model: User,
+                as: 'Student',
+                attributes: ['id', 'first_name', 'last_name', 'registration_no', 'email', 'details']
+            },
+            {
+                model: FeePayment,
+                as: 'payments',
+                attributes: ['id', 'amount_paid', 'payment_method', 'payment_date', 'transaction_id', 'receipt_number']
+            },
+            {
+                model: Institute,
+                as: 'institute',
+                attributes: ['id', 'name', 'code', 'logo_url', 'settings', 'phone', 'address']
+            }
+        ]
+    });
+
+    if (!voucherRecord) {
+        throw new AppError('Fee voucher not found', 404);
+    }
+
+    const voucher = voucherRecord.toJSON();
+    const payments = voucher.payments || [];
+    const paidAmount = payments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+    const netAmt = Number(voucher.net_amount || 0);
+    const pendingAmt = Math.max(netAmt - paidAmount, 0);
+
+    const enriched = {
+        ...voucher,
+        netAmount: netAmt,
+        paid_amount: Number(paidAmount.toFixed(2)),
+        paidAmount: Number(paidAmount.toFixed(2)),
+        amount_paid: Number(paidAmount.toFixed(2)),
+        pending_amount: Number(pendingAmt.toFixed(2)),
+        pendingAmount: Number(pendingAmt.toFixed(2)),
+        FeePayments: payments,
+        payments
+    };
+
+    await resolveVouchersClassAndSection([enriched]);
+    return enriched;
+};
+
 export default {
     generateSingleVoucher,
     generateVouchersForClass,
     generateVouchersForInstitute,
     getFeeVouchers,
+    getFeeVoucherById,
     deleteVoucher,
     updateVoucherStatus,
     recordPayment,
