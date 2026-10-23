@@ -360,7 +360,7 @@ export const getUserProfile = async (userId) => {
     'SUPER ADMIN'
   ].includes(String(user.user_type || '').toUpperCase());
 
-  const isExplicitBranchAdminUser = [
+  const isBranchRestrictedUser = [
     'BRANCH_ADMIN',
     'CAMPUS_ADMIN',
     'BRANCH ADMIN',
@@ -373,6 +373,14 @@ export const getUserProfile = async (userId) => {
   ].includes(String(user.user_type || '').toUpperCase()) ||
     user.staff_type === 'Branch Head';
 
+  const isActualBranchAdmin = [
+    'BRANCH_ADMIN',
+    'CAMPUS_ADMIN',
+    'BRANCH ADMIN',
+    'CAMPUS ADMIN',
+  ].includes(String(user.user_type || '').toUpperCase()) ||
+    user.staff_type === 'Branch Head';
+
   // Auto-link Super Admin / Institute Admin user to the main branch if user.branch_id is missing or invalid/deleted
   if (isGlobalAdmin && mainBranch?.id && (!branchData || user.branch_id !== mainBranch.id)) {
     await user.update({ branch_id: mainBranch.id }).catch(() => {});
@@ -382,7 +390,7 @@ export const getUserProfile = async (userId) => {
     }
   }
 
-  const isMainBranchResolved = !isExplicitBranchAdminUser && (
+  const isMainBranchResolved = !isBranchRestrictedUser && (
     branchData
       ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN') || String(branchData.name || '').toLowerCase().includes('main'))
       : (isGlobalAdmin && Boolean(mainBranch))
@@ -411,7 +419,8 @@ export const getUserProfile = async (userId) => {
     branch: effectiveBranch,
     main_branch: mainBranch ? (mainBranch.toJSON ? mainBranch.toJSON() : mainBranch) : null,
     is_main_branch: isMainBranchResolved,
-    is_branch_admin: isExplicitBranchAdminUser,
+    is_branch_admin: isActualBranchAdmin,
+    is_branch_restricted: isBranchRestrictedUser,
     phone: user.phone,
     is_active: user.is_active,
     has_branch: !!user.branch_id || Boolean(effectiveBranch),

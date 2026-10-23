@@ -37,14 +37,21 @@ const resolveUserPermissions = async (req) => {
   const user = req.user;
   if (!user) return [];
 
-  // 🔥 FIX 1: First check direct permissions from user object
-  // This is important for branch admins, staff with custom permissions
+  // Institute Admins and Branch Admins have full access within their scope.
+  // Grant them the special 'ALL' sentinel so every hasMatchingPermission check passes.
+  const adminTypes = ['INSTITUTE_ADMIN', 'SUPER_ADMIN', 'BRANCH_ADMIN', 'CAMPUS_ADMIN'];
+  if (adminTypes.includes(String(user.user_type || '').toUpperCase())) {
+    req.userPermissions = ['ALL'];
+    return ['ALL'];
+  }
+
+  // For Staff / Teachers: prefer direct permissions assigned on the user record
   if (user.permissions && Array.isArray(user.permissions) && user.permissions.length > 0) {
     req.userPermissions = user.permissions;
     return user.permissions;
   }
 
-  // 🔥 FIX 2: If no direct permissions, try role-based permissions
+  // Fall back to role-based permissions
   const roleId = user.role_id;
   if (!roleId) return [];
 
@@ -54,7 +61,7 @@ const resolveUserPermissions = async (req) => {
   // Get the correct permission key based on user_type
   const typeKey = USER_TYPE_TO_KEY[user.user_type] ?? 'instituteAdmin';
   const perms = role.permissions?.[typeKey] ?? [];
-  
+
   req.userPermissions = perms;
   return perms;
 };
@@ -126,6 +133,10 @@ export const hasPermission = (requiredPermission) =>
     // Master Admin bypass
     if (req.user?.user_type === 'MASTER_ADMIN') return next();
 
+    // Institute Admin & Branch Admin have full access within their scope
+    const adminTypes = ['INSTITUTE_ADMIN', 'SUPER_ADMIN', 'BRANCH_ADMIN', 'CAMPUS_ADMIN'];
+    if (adminTypes.includes(String(req.user?.user_type || '').toUpperCase())) return next();
+
     if (!req.user?.id) throw new AppError('Unauthorized', 401);
 
     const perms = await resolveUserPermissions(req);
@@ -145,6 +156,10 @@ export const hasAnyPermission = (permissions = []) =>
   catchAsync(async (req, res, next) => {
     // Master Admin bypass
     if (req.user?.user_type === 'MASTER_ADMIN') return next();
+
+    // Institute Admin & Branch Admin have full access within their scope
+    const adminTypes = ['INSTITUTE_ADMIN', 'SUPER_ADMIN', 'BRANCH_ADMIN', 'CAMPUS_ADMIN'];
+    if (adminTypes.includes(String(req.user?.user_type || '').toUpperCase())) return next();
 
     if (!req.user?.id) throw new AppError('Unauthorized', 401);
 

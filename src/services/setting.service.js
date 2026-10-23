@@ -96,6 +96,25 @@ export const updateGeneralSettings = async (instituteId, data, userId) => {
             instituteUpdates.institute_country = data.country;
         }
 
+        // Handle print settings and voucher layout updates
+        if (data.voucher_format !== undefined || data.print_settings !== undefined || data.page_size !== undefined || data.printer_type !== undefined || data.orientation !== undefined) {
+            const currentSettings = institute.settings || {};
+            const currentPrintSettings = currentSettings.print_settings || {};
+            const updatedPrintSettings = {
+                ...currentPrintSettings,
+                ...(data.print_settings || {}),
+                ...(data.page_size !== undefined ? { page_size: data.page_size } : {}),
+                ...(data.printer_type !== undefined ? { printer_type: data.printer_type } : {}),
+                ...(data.orientation !== undefined ? { orientation: data.orientation } : {}),
+                ...(data.voucher_format !== undefined ? { voucher_format: data.voucher_format } : {}),
+            };
+            instituteUpdates.settings = {
+                ...currentSettings,
+                voucher_format: data.voucher_format || currentSettings.voucher_format || updatedPrintSettings.voucher_format,
+                print_settings: updatedPrintSettings,
+            };
+        }
+
         if (Object.keys(instituteUpdates).length > 0) {
             await institute.update(instituteUpdates, { transaction: t });
             logger.info(`✅ Institute updated: ${Object.keys(instituteUpdates).join(', ')}`);
