@@ -6,7 +6,7 @@
 
 import { Router } from 'express';
 import { protect, restrictTo } from '../../middlewares/auth.middleware.js';
-import { hasPermission } from '../../middlewares/permission.middleware.js';
+import { hasPermission, hasAnyPermission } from '../../middlewares/permission.middleware.js';
 import * as reportController from '../../controllers/report.controller.js';
 
 const router = Router();
@@ -59,7 +59,7 @@ router.get(
  */
 router.get(
   '/student',
-  hasPermission('reports.student'),
+  hasAnyPermission(['reports.student', 'reports.read', 'students.read', 'student.read', 'students.report']),
   reportController.getStudentReport
 );
 

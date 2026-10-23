@@ -2,7 +2,7 @@
 
 import { Router } from 'express';
 import { protect } from '../../middlewares/auth.middleware.js';
-import { hasPermission } from '../../middlewares/permission.middleware.js';
+import { hasPermission, hasAnyPermission } from '../../middlewares/permission.middleware.js';
 import * as classController from '../../controllers/classes.controllers.js';
 import { uploadMultiple } from '../../middlewares/upload.middleware.js';
 
@@ -36,7 +36,7 @@ router.post(
  */
 router.get(
   '/',
-  hasPermission('classes.read'),
+  hasAnyPermission(['classes.read', 'students.read', 'fees.read', 'attendance.read', 'timetable.read', 'timetable.view', 'reports.read']),
   classController.getAllClasses
 );
 
@@ -46,7 +46,7 @@ router.get(
  */
 router.get(
   '/options',
-  hasPermission('classes.read'),
+  hasAnyPermission(['classes.read', 'students.read', 'fees.read', 'attendance.read', 'timetable.read', 'timetable.view', 'reports.read']),
   classController.getClassOptions
 );
 
@@ -56,7 +56,7 @@ router.get(
  */
 router.get(
   '/:id',
-  hasPermission('classes.read'),
+  hasAnyPermission(['classes.read', 'students.read', 'fees.read', 'attendance.read', 'timetable.read', 'timetable.view', 'reports.read']),
   classController.getClassById
 );
 

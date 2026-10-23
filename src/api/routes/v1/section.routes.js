@@ -16,7 +16,7 @@ import { protect } from '../../middlewares/auth.middleware.js';
 import { schoolContext } from '../../middlewares/schoolContext.middleware.js';
 import { checkSubscription } from '../../middlewares/subscription.middleware.js';
 import { validate } from '../../middlewares/validation.middleware.js';
-import { hasPermission } from '../../middlewares/permission.middleware.js';
+import { hasPermission, hasAnyPermission } from '../../middlewares/permission.middleware.js';
 import {
   createSection,
   getSections,
@@ -36,12 +36,12 @@ router.use(protect, schoolContext, checkSubscription);
 
 router
   .route('/')
-  .get(hasPermission('section.read'), getSections)
+  .get(hasAnyPermission(['section.read', 'sections.read', 'classes.read', 'students.read', 'fees.read', 'attendance.read']), getSections)
   .post(hasPermission('section.create'), validate(createSectionSchema), createSection);
 
 router
   .route('/:id')
-  .get(hasPermission('section.read'), getSection)
+  .get(hasAnyPermission(['section.read', 'sections.read', 'classes.read', 'students.read', 'fees.read', 'attendance.read']), getSection)
   .put(hasPermission('section.update'), validate(updateSectionSchema), updateSection)
   .delete(hasPermission('section.delete'), deleteSection);
 
