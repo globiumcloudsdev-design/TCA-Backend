@@ -4,17 +4,32 @@
 
 import config from './index.js';
 
+const envFrontendUrls = config.frontendUrl
+  ? config.frontendUrl.split(',').map((url) => url.trim())
+  : [];
+
 const allowedOrigins = [
-  config.frontendUrl,
+  ...envFrontendUrls,
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173', // Vite dev
-  'https://tca-frontend-five.vercel.app'
+  'https://tca-frontend-five.vercel.app',
+  'https://tca-hpss.vercel.app'
 ];
 
 export const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+    const isAllowed = allowedOrigins.some((allowed) => {
+      if (!allowed) return false;
+      return allowed.replace(/\/+$/, '') === normalizedOrigin;
+    });
+
+    if (isAllowed) {
       callback(null, true);
     } else {
       callback(new Error(`CORS blocked: ${origin}`));
