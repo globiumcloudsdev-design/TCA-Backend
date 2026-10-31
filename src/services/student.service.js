@@ -640,7 +640,7 @@ const resolveStudentRelations = async (students = []) => {
     classIds.size
       ? Class.findAll({
         where: { id: { [Op.in]: Array.from(classIds) } },
-        attributes: ["id", "name"],
+        attributes: ["id", "name", "sections"],
       })
       : Promise.resolve([]),
     sectionIds.size
@@ -656,6 +656,20 @@ const resolveStudentRelations = async (students = []) => {
     sections.map((section) => [section.id, section.name]),
   );
 
+  // Extract sections from Class.sections JSONB column
+  classes.forEach((cls) => {
+    if (Array.isArray(cls.sections)) {
+      cls.sections.forEach((s) => {
+        const sid = String(s?.id || s?.section_id || '');
+        const sName = s?.name || s?.section_name;
+        if (sid && sName) {
+          sectionNameMap.set(sid, sName);
+          sectionNameMap.set(`${cls.id}_${sid}`, sName);
+        }
+      });
+    }
+  });
+
   students.forEach((student) => {
     const details = student?.details || {};
     const studentDetails = details?.studentDetails || {};
@@ -669,12 +683,36 @@ const resolveStudentRelations = async (students = []) => {
       studentDetails.class_name ||
       null
       : activeSession?.class_name || studentDetails.class_name;
-    const resolvedSectionName = sectionId
-      ? sectionNameMap.get(sectionId) ||
-      activeSession?.section_name ||
-      studentDetails.section_name ||
-      null
-      : activeSession?.section_name || studentDetails.section_name;
+
+    let resolvedSectionName = sectionId
+      ? sectionNameMap.get(String(sectionId)) ||
+        sectionNameMap.get(`${classId}_${sectionId}`) ||
+        null
+      : null;
+
+    if (!resolvedSectionName && classId) {
+      const cls = classes.find(c => String(c.id) === String(classId));
+      if (cls && Array.isArray(cls.sections) && cls.sections.length > 0) {
+        const matched = cls.sections.find(s => String(s.id || s.section_id) === String(sectionId));
+        if (matched) {
+          resolvedSectionName = matched.name || matched.section_name;
+        } else {
+          const legacySec = activeSession?.section_name || studentDetails.section_name;
+          const hasAorB = cls.sections.some(s => ['a', 'b'].includes(String(s.name || '').trim().toLowerCase()));
+          if (!hasAorB && typeof legacySec === 'string') {
+            if (legacySec.trim().toUpperCase() === 'A' && cls.sections[0]) {
+              resolvedSectionName = cls.sections[0].name || cls.sections[0].section_name;
+            } else if (legacySec.trim().toUpperCase() === 'B' && cls.sections[1]) {
+              resolvedSectionName = cls.sections[1].name || cls.sections[1].section_name;
+            }
+          }
+        }
+      }
+    }
+
+    if (!resolvedSectionName) {
+      resolvedSectionName = activeSession?.section_name || studentDetails.section_name || null;
+    }
 
     if (!details.studentDetails) {
       details.studentDetails = {};
@@ -878,6 +916,8 @@ export const getStudentById = async (id, instituteId) => {
       student.dataValues.assignmentSubmissions = [];
     }
   }
+
+  await resolveStudentRelations([student]);
 
   return student;
 };
