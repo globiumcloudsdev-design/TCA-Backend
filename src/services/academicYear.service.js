@@ -69,12 +69,28 @@ export const getAllAcademicYears = async (filters = {}, pagination = {}) => {
     where.is_active = filters.is_active;
   }
 
-  const { count, rows } = await AcademicYear.findAndCountAll({
+  let { count, rows } = await AcademicYear.findAndCountAll({
     where,
     order: [[sortBy, sortOrder]],
     limit,
     offset,
   });
+
+  if (count === 0 && filters.branch_id) {
+    const fallbackWhere = { institute_id: filters.institute_id };
+    if (filters.is_current !== undefined) fallbackWhere.is_current = filters.is_current;
+    if (filters.is_active !== undefined) fallbackWhere.is_active = filters.is_active;
+    const fallbackRes = await AcademicYear.findAndCountAll({
+      where: fallbackWhere,
+      order: [[sortBy, sortOrder]],
+      limit,
+      offset,
+    });
+    if (fallbackRes.count > 0) {
+      count = fallbackRes.count;
+      rows = fallbackRes.rows;
+    }
+  }
 
   return {
     data: rows,
@@ -221,9 +237,33 @@ export const getCurrentAcademicYear = async (instituteId, branchId = null) => {
     where.branch_id = branchId;
   }
 
-  const academicYear = await AcademicYear.findOne({
+  let academicYear = await AcademicYear.findOne({
     where
   });
+
+  if (!academicYear && branchId && AcademicYear.rawAttributes?.branch_id) {
+    // Fallback 1: Institute-wide current academic year
+    academicYear = await AcademicYear.findOne({
+      where: {
+        institute_id: instituteId,
+        is_current: true,
+        is_active: true,
+        branch_id: null,
+      }
+    });
+
+    // Fallback 2: Any active current academic year of this institute
+    if (!academicYear) {
+      academicYear = await AcademicYear.findOne({
+        where: {
+          institute_id: instituteId,
+          is_current: true,
+          is_active: true,
+        }
+      });
+    }
+  }
+
   return academicYear;
 };
 
@@ -239,14 +279,28 @@ export const getAcademicYearOptions = async (instituteId, onlyActive = true, bra
   }
 
   if (branchId && AcademicYear.rawAttributes?.branch_id) {
-    where.branch_id = branchId;
+    where[Op.or] = [
+      { branch_id: branchId },
+      { branch_id: null }
+    ];
   }
 
-  const academicYears = await AcademicYear.findAll({
+  let academicYears = await AcademicYear.findAll({
     where,
     attributes: ['id', 'name', 'start_date', 'end_date', 'is_current', 'is_active'],
     order: [['start_date', 'DESC']],
   });
+
+  // Fallback: if no branch-specific or institute-wide options found, get any active academic years of this institute
+  if (academicYears.length === 0 && branchId) {
+    const fallbackWhere = { institute_id: instituteId };
+    if (onlyActive) fallbackWhere.is_active = true;
+    academicYears = await AcademicYear.findAll({
+      where: fallbackWhere,
+      attributes: ['id', 'name', 'start_date', 'end_date', 'is_current', 'is_active'],
+      order: [['start_date', 'DESC']],
+    });
+  }
 
   // Format for dropdown: { value: id, label: name }
   const options = academicYears.map(year => ({

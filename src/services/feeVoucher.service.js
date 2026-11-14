@@ -58,7 +58,7 @@ const getPreviousBalance = async (studentId, instituteId, feeType, currentYear) 
       where: {
         student_id: studentId,
         institute_id: instituteId,
-        fee_type: feeType,
+        fee_type: (feeType === 'monthly' || feeType === 'fee_template') ? { [Op.in]: ['monthly', 'fee_template'] } : feeType,
         year: currentYear,
         status: { [Op.in]: ['pending', 'partial', 'overdue'] },
         archived: false,
@@ -97,11 +97,11 @@ const voucherExists = async (studentId, instituteId, month, year, feeType) => {
       institute_id: instituteId,
       month,
       year,
-      fee_type: feeType,
+      fee_type: (feeType === 'monthly' || feeType === 'fee_template') ? { [Op.in]: ['monthly', 'fee_template'] } : feeType,
       archived: false,
     },
   });
-  return !!existing;
+  return existing;
 };
 
 /**
@@ -195,13 +195,31 @@ export const generateSingleVoucher = async (
         resolvedFeeType = 'fee_template';
     }
 
-    // Check if voucher already exists for this student, month, and specific fee type
+    // Check if voucher already exists for this student, month, and fee type
+    let existingVoucher = null;
     if (options.existingVoucherSet) {
-        if (options.existingVoucherSet.has(`${studentId}-${resolvedFeeType}`)) {
-            throw new AppError(`${resolvedFeeType.toUpperCase()} voucher already exists for this student in ${month}/${year}`, 400);
+        const isMonthlyType = resolvedFeeType === 'monthly' || resolvedFeeType === 'fee_template';
+        const hasExisting = options.existingVoucherSet.has(`${studentId}-${resolvedFeeType}`) ||
+            (isMonthlyType && (options.existingVoucherSet.has(`${studentId}-monthly`) || options.existingVoucherSet.has(`${studentId}-fee_template`)));
+        if (hasExisting) {
+            throw new AppError(`Fee voucher already exists for this student for billing month ${month}/${year}. Duplicate voucher cannot be generated.`, 400);
         }
-    } else if (await voucherExists(studentId, instituteId, month, year, resolvedFeeType)) {
-        throw new AppError(`${resolvedFeeType.toUpperCase()} voucher already exists for this student in ${month}/${year}`, 400);
+    } else {
+        existingVoucher = await voucherExists(studentId, instituteId, month, year, resolvedFeeType);
+        if (existingVoucher) {
+            const studentRecord = options.student || (await User.findOne({
+                where: { id: studentId, school_id: instituteId },
+                attributes: ['first_name', 'last_name', 'registration_no'],
+                transaction
+            }));
+            const studentName = studentRecord ? `${studentRecord.first_name || ''} ${studentRecord.last_name || ''}`.trim() : 'Student';
+            const regNo = studentRecord?.registration_no ? ` (Reg: ${studentRecord.registration_no})` : '';
+            const vNo = existingVoucher?.voucher_number ? ` (Voucher #${existingVoucher.voucher_number})` : '';
+            throw new AppError(
+                `Fee voucher already exists for ${studentName}${regNo} for billing month ${month}/${year}${vNo}. Duplicate voucher cannot be generated.`,
+                400
+            );
+        }
     }
 
     // Get student with details (use preloaded student if provided in bulk mode)
@@ -569,14 +587,20 @@ export const generateVouchersForClass = async (
         attributes: ['student_id', 'fee_type'],
         transaction
     });
-    const existingVoucherSet = new Set(
-        existingVouchers.map(v => `${v.student_id}-${v.fee_type}`)
-    );
+    const existingVoucherSet = new Set();
+    existingVouchers.forEach(v => {
+        existingVoucherSet.add(`${v.student_id}-${v.fee_type}`);
+        if (v.fee_type === 'monthly' || v.fee_type === 'fee_template') {
+            existingVoucherSet.add(`${v.student_id}-monthly`);
+            existingVoucherSet.add(`${v.student_id}-fee_template`);
+        }
+    });
 
     // Fetch starting sequence number once
     let currentSeq = await getNextSequence(instituteCode, year, month);
 
     const vouchers = [];
+    const skipped = [];
     const failed = [];
 
     for (const student of classStudents) {
@@ -611,7 +635,14 @@ export const generateVouchersForClass = async (
                 vouchers.push(voucher);
                 existingVoucherSet.add(`${student.id}-${targetFeeType}`);
             } catch (error) {
-                if (!error.message.includes('already exists')) {
+                if (error.message && error.message.includes('already exists')) {
+                    skipped.push({
+                        studentId: student.id,
+                        studentName: `${student.first_name} ${student.last_name}`,
+                        feeType: feeTypeItem,
+                        reason: error.message
+                    });
+                } else {
                     console.error(`Failed to generate ${feeTypeItem} voucher for student ${student.id}:`, error);
                     failed.push({
                         studentId: student.id,
@@ -627,6 +658,8 @@ export const generateVouchersForClass = async (
     return {
         total: classStudents.length * feesToGenerate.length,
         generated: vouchers.length,
+        skipped: skipped.length,
+        skippedDetails: skipped,
         failed: failed.length,
         failedDetails: failed,
         vouchers
@@ -704,14 +737,20 @@ export const generateVouchersForInstitute = async (
         attributes: ['student_id', 'fee_type'],
         transaction
     });
-    const existingVoucherSet = new Set(
-        existingVouchers.map(v => `${v.student_id}-${v.fee_type}`)
-    );
+    const existingVoucherSet = new Set();
+    existingVouchers.forEach(v => {
+        existingVoucherSet.add(`${v.student_id}-${v.fee_type}`);
+        if (v.fee_type === 'monthly' || v.fee_type === 'fee_template') {
+            existingVoucherSet.add(`${v.student_id}-monthly`);
+            existingVoucherSet.add(`${v.student_id}-fee_template`);
+        }
+    });
 
     // Fetch starting sequence number once
     let currentSeq = await getNextSequence(instituteCode, year, month);
 
     const vouchers = [];
+    const skipped = [];
     const failed = [];
 
     for (const student of students) {
@@ -746,7 +785,14 @@ export const generateVouchersForInstitute = async (
                 vouchers.push(voucher);
                 existingVoucherSet.add(`${student.id}-${targetFeeType}`);
             } catch (error) {
-                if (!error.message.includes('already exists')) {
+                if (error.message && error.message.includes('already exists')) {
+                    skipped.push({
+                        studentId: student.id,
+                        studentName: `${student.first_name} ${student.last_name}`,
+                        feeType: feeTypeItem,
+                        reason: error.message
+                    });
+                } else {
                     console.error(`Failed to generate ${feeTypeItem} voucher for student ${student.id}:`, error);
                     failed.push({
                         studentId: student.id,
@@ -762,6 +808,8 @@ export const generateVouchersForInstitute = async (
     return {
         total: students.length * feesToGenerate.length,
         generated: vouchers.length,
+        skipped: skipped.length,
+        skippedDetails: skipped,
         failed: failed.length,
         failedDetails: failed,
         vouchers

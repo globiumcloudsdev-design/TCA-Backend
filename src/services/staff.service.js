@@ -19,7 +19,7 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { generateRandomPassword, generateNumericPassword } from '../utils/passwordGenerator.js';
 
-const { User, Role, Institute, StaffAttendance, Payslip, LeaveRequest } = models;
+const { User, Role, Institute, StaffAttendance, Payslip, LeaveRequest, Branch } = models;
 
 // Staff Types (from User model enum)
 export const STAFF_TYPES = ['Accountant', 'Clerk', 'Librarian', 'Peon', 'Other', 'GateKeeper'];
@@ -129,6 +129,14 @@ export const getAllStaff = async (instituteId, query = {}) => {
   const { count, rows } = await User.findAndCountAll({
     where,
     attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_expires'] },
+    include: [
+      {
+        model: Branch,
+        as: 'branch',
+        attributes: ['id', 'name', 'code', 'is_main'],
+        required: false
+      }
+    ],
     order: [['created_at', 'DESC']],
     limit,
     offset,
@@ -157,6 +165,12 @@ export const getStaffById = async (id, instituteId) => {
         model: Role,
         as: 'Role',
         attributes: ['id', 'name', 'code', 'permissions']
+      },
+      {
+        model: Branch,
+        as: 'branch',
+        attributes: ['id', 'name', 'code', 'is_main'],
+        required: false
       },
       {
         model: StaffAttendance,
@@ -542,6 +556,9 @@ export const updateStaff = async (id, instituteId, data, updatedBy, file = null,
   }
 
   const updates = { ...data };
+  if (data.branch_id !== undefined) {
+    updates.branch_id = data.branch_id || null;
+  }
 
   // Handle email uniqueness
   if (data.email && data.email.toLowerCase() !== staff.email) {

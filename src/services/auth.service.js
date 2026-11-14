@@ -360,18 +360,24 @@ export const getUserProfile = async (userId) => {
     'SUPER ADMIN'
   ].includes(String(user.user_type || '').toUpperCase());
 
-  const isBranchRestrictedUser = [
-    'BRANCH_ADMIN',
-    'CAMPUS_ADMIN',
-    'BRANCH ADMIN',
-    'CAMPUS ADMIN',
-    'BRANCH_STAFF',
-    'STAFF',
-    'TEACHER',
-    'STUDENT',
-    'PARENT'
-  ].includes(String(user.user_type || '').toUpperCase()) ||
-    user.staff_type === 'Branch Head';
+  const isMainBranchAssigned = branchData
+    ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN') || String(branchData.name || '').toLowerCase().includes('main'))
+    : false;
+
+  const isBranchRestrictedUser = (
+    [
+      'BRANCH_ADMIN',
+      'CAMPUS_ADMIN',
+      'BRANCH ADMIN',
+      'CAMPUS ADMIN',
+      'BRANCH_STAFF',
+      'TEACHER',
+      'STUDENT',
+      'PARENT'
+    ].includes(String(user.user_type || '').toUpperCase()) ||
+    (String(user.user_type || '').toUpperCase() === 'STAFF' && !isMainBranchAssigned) ||
+    user.staff_type === 'Branch Head'
+  );
 
   const isActualBranchAdmin = [
     'BRANCH_ADMIN',
@@ -390,11 +396,9 @@ export const getUserProfile = async (userId) => {
     }
   }
 
-  const isMainBranchResolved = !isBranchRestrictedUser && (
-    branchData
-      ? (branchData.is_main === true || String(branchData.code || '').toUpperCase().endsWith('-MAIN') || String(branchData.name || '').toLowerCase().includes('main'))
-      : (isGlobalAdmin && Boolean(mainBranch))
-  );
+  const isMainBranchResolved = isMainBranchAssigned || (!isBranchRestrictedUser && (
+    branchData ? branchData.is_main === true : (isGlobalAdmin && Boolean(mainBranch))
+  ));
 
   const effectiveBranch = branchData || (isGlobalAdmin && mainBranch ? (mainBranch.toJSON ? mainBranch.toJSON() : mainBranch) : null);
 
@@ -784,6 +788,7 @@ export const getInstitutePoliciesService = async (instituteId, policyType = null
 };
 
 export default { 
+  getUserProfile,
   loginService, 
   refreshTokenService, 
   forgotPasswordService, 

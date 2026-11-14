@@ -8,6 +8,21 @@ import catchAsync from '../../utils/lib/catchAsync.js';
 import { AppError } from '../../utils/lib/AppError.js';
 import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
+// Helper to resolve target branch for staff and admins
+const resolveTargetBranchId = (req) => {
+  let branchId = getBranchId(req);
+  if (!req.isBranchRestricted) {
+    const requested = req.body?.branch_id || req.body?.branchId || req.query?.branch_id;
+    if (requested && requested !== 'all' && requested !== 'null' && requested !== 'undefined') {
+      branchId = requested;
+    } else if (requested === 'all' || requested === 'null') {
+      branchId = null;
+    }
+  }
+  return branchId;
+};
+
+
 /**
  * Generate voucher for single student
  * POST /api/fee-vouchers/generate-single
@@ -21,7 +36,7 @@ export const generateSingleVoucher = catchAsync(async (req, res) => {
   const feeType = req.body.feeType || req.body.fee_type;
   const feeTemplateId = req.body.feeTemplateId || req.body.fee_template_id;
   const instituteId = getInstituteId(req);
-  const branchId = getBranchId(req);
+  const branchId = resolveTargetBranchId(req);
   const createdBy = req.user.id;
 
   if (!studentId || !month || !year) {
@@ -65,7 +80,7 @@ export const generateVouchersForClass = catchAsync(async (req, res) => {
   const feeType = req.body.feeType || req.body.fee_type;
   const feeTemplateId = req.body.feeTemplateId || req.body.fee_template_id;
   const instituteId = getInstituteId(req);
-  const branchId = getBranchId(req);
+  const branchId = resolveTargetBranchId(req);
   const createdBy = req.user.id;
 
   if (!classId || !month || !year) {
@@ -95,7 +110,7 @@ export const generateVouchersForClass = catchAsync(async (req, res) => {
 export const generateVouchersForInstitute = catchAsync(async (req, res) => {
   const { month, year, dueDate, academicYearId, feeType, feeTemplateId } = req.body;
   const instituteId = getInstituteId(req);
-  const branchId = getBranchId(req);
+  const branchId = resolveTargetBranchId(req);
   const createdBy = req.user.id;
 
   if (!month || !year) {

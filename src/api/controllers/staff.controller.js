@@ -73,7 +73,7 @@ export const createStaff = catchAsync(async (req, res) => {
   
   const result = await staffService.createStaff(
     instituteId,
-    { ...req.body, branch_id: req.isBranchRestricted ? req.allowedBranchId : (branchId || req.body.branch_id || null) },
+    { ...req.body, branch_id: req.isBranchRestricted ? req.allowedBranchId : (req.body.branch_id || branchId || null) },
     req.user.id,
     avatarFile,
     documentFiles
@@ -102,7 +102,7 @@ export const updateStaff = catchAsync(async (req, res) => {
   const staff = await staffService.updateStaff(
     req.params.id,
     instituteId,
-    { ...req.body, branch_id: branchId || req.body.branch_id },
+    { ...req.body, branch_id: req.isBranchRestricted ? req.allowedBranchId : (req.body.branch_id !== undefined ? req.body.branch_id : branchId) },
     req.user.id,
     avatarFile,
     documentFiles

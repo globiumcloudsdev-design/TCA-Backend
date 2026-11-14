@@ -24,12 +24,19 @@ export const getBranchId = (req) => {
   }
 
   const userType = String(req.user?.user_type || '').toUpperCase();
+  const isMainBranch = req.user?.is_main_branch === true ||
+    req.user?.is_main === true ||
+    req.user?.branch?.is_main === true ||
+    String(req.user?.branch?.code || '').toUpperCase().endsWith('-MAIN') ||
+    String(req.user?.branch?.name || '').toLowerCase().includes('main');
+
   const isSuperAdmin =
     userType === 'INSTITUTE_ADMIN' ||
     userType === 'SUPER_ADMIN' ||
     userType === 'MASTER_ADMIN' ||
     userType === 'SYSTEM_ADMIN' ||
-    userType === 'SUPPORT_STAFF';
+    userType === 'SUPPORT_STAFF' ||
+    isMainBranch;
 
   // Branch Admin is strictly locked to their assigned branch
   if (!isSuperAdmin && (userType === 'BRANCH_ADMIN' || req.user?.staff_type === 'Branch Head')) {
@@ -67,12 +74,19 @@ export const getBranchFilter = (req, fieldName = 'branch_id') => {
 export const isBranchRestricted = (req) => {
   if (req?.isBranchRestricted !== undefined) return Boolean(req.isBranchRestricted);
   const userType = String(req.user?.user_type || '').toUpperCase();
+  const isMainBranch = req.user?.is_main_branch === true ||
+    req.user?.is_main === true ||
+    req.user?.branch?.is_main === true ||
+    String(req.user?.branch?.code || '').toUpperCase().endsWith('-MAIN') ||
+    String(req.user?.branch?.name || '').toLowerCase().includes('main');
+
   const isSuperAdmin =
     userType === 'INSTITUTE_ADMIN' ||
     userType === 'SUPER_ADMIN' ||
     userType === 'MASTER_ADMIN' ||
     userType === 'SYSTEM_ADMIN' ||
-    userType === 'SUPPORT_STAFF';
+    userType === 'SUPPORT_STAFF' ||
+    isMainBranch;
   return !isSuperAdmin && (userType === 'BRANCH_ADMIN' || req.user?.staff_type === 'Branch Head');
 };
 

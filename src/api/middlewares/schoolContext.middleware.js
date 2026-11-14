@@ -47,9 +47,47 @@ export const schoolContext = catchAsync(async (req, res, next) => {
 
   // ── Branch context (enforces security isolation) ────────────────────────
   const hasBranches = institute.settings?.has_branches ?? institute.has_branches ?? false;
-  const userType = req.user?.user_type;
+  const userType = String(req.user?.user_type || '').toUpperCase();
   const userBranchId = req.user?.branch_id;
-  const isBranchScoped = userType === 'BRANCH_ADMIN' || (Boolean(userBranchId) && userType !== 'INSTITUTE_ADMIN');
+
+  // Check if assigned branch is the Main Branch
+  const isMainBranch = req.user?.is_main_branch === true ||
+    req.user?.is_main === true ||
+    req.user?.branch?.is_main === true ||
+    String(req.user?.branch?.code || '').toUpperCase().endsWith('-MAIN') ||
+    String(req.user?.branch?.name || '').toLowerCase().includes('main');
+
+  const isExplicitBranchAdmin = (
+    [
+      'BRANCH_ADMIN',
+      'CAMPUS_ADMIN',
+      'BRANCH ADMIN',
+      'CAMPUS ADMIN',
+      'BRANCH_STAFF',
+      'TEACHER',
+      'STUDENT',
+      'PARENT'
+    ].includes(userType) ||
+    (userType === 'STAFF' && !isMainBranch) ||
+    req.user?.staff_type === 'Branch Head' ||
+    req.user?.role_code === 'BRANCH_ADMIN'
+  );
+
+  const isGlobalSuperAdmin = !isExplicitBranchAdmin && (
+    [
+      'MASTER_ADMIN',
+      'SYSTEM_ADMIN',
+      'SUPPORT_STAFF',
+      'INSTITUTE_ADMIN',
+      'SUPER_ADMIN',
+      'SUPER ADMIN'
+    ].includes(userType) || isMainBranch
+  );
+
+  const isBranchScoped = !isGlobalSuperAdmin && (
+    isExplicitBranchAdmin ||
+    Boolean(userBranchId)
+  );
 
   if (isBranchScoped && userBranchId) {
     // Master lock for Branch Admin / Branch-scoped staff

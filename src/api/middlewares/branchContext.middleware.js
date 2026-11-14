@@ -10,26 +10,31 @@ export const branchIsolation = (req, res, next) => {
   const userBranchId = req.user.branch_id;
 
   // Check if assigned branch is the Main Branch
-  const isMainBranch = req.user.branch?.is_main === true ||
+  const isMainBranch = req.user.is_main_branch === true ||
+    req.user.is_main === true ||
+    req.user.branch?.is_main === true ||
     String(req.user.branch?.code || '').toUpperCase().endsWith('-MAIN') ||
     String(req.user.branch?.name || '').toLowerCase().includes('main');
 
   // Explicit branch admin / branch restricted role check
-  const isExplicitBranchAdmin = [
-    'BRANCH_ADMIN',
-    'CAMPUS_ADMIN',
-    'BRANCH ADMIN',
-    'CAMPUS ADMIN',
-    'BRANCH_STAFF',
-    'STAFF',
-    'TEACHER',
-    'STUDENT',
-    'PARENT'
-  ].includes(userType) ||
+  // Note: Main branch staff (e.g. Accountant at Main Branch) gets global multi-branch capabilities
+  const isExplicitBranchAdmin = (
+    [
+      'BRANCH_ADMIN',
+      'CAMPUS_ADMIN',
+      'BRANCH ADMIN',
+      'CAMPUS ADMIN',
+      'BRANCH_STAFF',
+      'TEACHER',
+      'STUDENT',
+      'PARENT'
+    ].includes(userType) ||
+    (userType === 'STAFF' && !isMainBranch) ||
     req.user.staff_type === 'Branch Head' ||
-    req.user.role_code === 'BRANCH_ADMIN';
+    req.user.role_code === 'BRANCH_ADMIN'
+  );
 
-  // Platform and Institute Admins (Super Admins) have global multi-branch view capabilities
+  // Platform and Institute Admins (Super Admins) and Main Branch Staff have global multi-branch capabilities
   const isGlobalSuperAdmin = !isExplicitBranchAdmin && (
     [
       'MASTER_ADMIN',

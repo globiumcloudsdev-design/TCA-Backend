@@ -188,7 +188,8 @@ export const resetPassword = catchAsync(async (req, res) => {
 });
 
 export const getMe = catchAsync(async (req, res) => {
-  sendSuccess(res, req.user, 'User profile');
+  const userProfile = req.user?.id ? await authService.getUserProfile(req.user.id) : null;
+  sendSuccess(res, userProfile || req.user, 'User profile');
 });
 
 // backend/src/controllers/auth.controller.js (ADD THESE)

@@ -4,7 +4,7 @@ import { Op } from 'sequelize';
 import models from '../models/postgres/index.js';
 import { v4 as uuidv4 } from 'uuid';
 
-const { Class, User, Branch } = models;
+const { Class, User, Branch, AcademicYear } = models;
 
 const resolveBranchFilter = async (branchId) => {
   if (!branchId || branchId === 'all') return null;
@@ -259,6 +259,9 @@ export const attachStudentCountsToClasses = async (classes, { instituteId, branc
 
   const enriched = classList.map((cls) => {
     const classObj = typeof cls?.toJSON === 'function' ? cls.toJSON() : { ...cls };
+    if (!classObj.academic_year && classObj.AcademicYear) {
+      classObj.academic_year = classObj.AcademicYear;
+    }
     const classId = String(classObj.id || '');
     const classAyId = classObj.academic_year_id ? String(classObj.academic_year_id) : null;
     const targetAyId = academicYearId ? String(academicYearId) : classAyId;
@@ -375,6 +378,13 @@ export const getAllClasses = async (filters = {}, pagination = {}) => {
 
   const { count, rows } = await Class.findAndCountAll({
     where,
+    include: AcademicYear ? [
+      {
+        model: AcademicYear,
+        as: 'AcademicYear',
+        attributes: ['id', 'name', 'start_date', 'end_date', 'is_current']
+      }
+    ] : [],
     order: [['created_at', 'DESC']],
     limit,
     offset
