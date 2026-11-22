@@ -16,27 +16,51 @@ import { AppError } from '../utils/lib/AppError.js';
 import logger from '../config/logger.js';
 import { broadcastNotification, createNotification } from './notification.service.js';
 import FeePayment from '../models/postgres/FeePayment.model.js';
+import { v4 as uuidv4 } from 'uuid';
+
+const PAYMENT_METHODS = ['cash', 'cheque', 'bank_transfer', 'jazzcash', 'easypaisa', 'stripe', 'other'];
+const newReceiptNumber = () => `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+/** Run fn(transaction) inside the caller's transaction, or open (and commit/rollback) our own. */
+const withTransaction = async (existing, fn) => {
+  if (existing) return fn(existing);
+  const t = await sequelize.transaction();
+  try {
+    const result = await fn(t);
+    await t.commit();
+    return result;
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
+};
 
 /**
  * Get next sequence number for voucher numbering per institute & month
  * Format: [INSTITUTE_CODE]-[YYYYMM]-[SEQ]
  * Uses database to maintain sequence atomically
  */
-const getNextSequence = async (instituteCode, year, month) => {
+const getNextSequence = async (instituteCode, year, month, transaction = null) => {
   try {
+    const prefix = `${instituteCode}-${year}${String(month).padStart(2, '0')}-`;
+    // Serialize numbering per institute+month inside a transaction (released on commit)
+    if (transaction) {
+      await sequelize.query('SELECT pg_advisory_xact_lock(hashtext($1))', { bind: [prefix], transaction });
+    }
     // Query to get current max sequence for this institute & month
     // Format: [CODE]-[YYYYMM]-[SEQUENCE]
     // Use SPLIT_PART to extract the sequence number from the 3rd segment
     const result = await sequelize.query(`
       SELECT COALESCE(MAX(
-        CAST(SPLIT_PART(voucher_number, '-', 3) AS INTEGER)
+        CAST(REGEXP_REPLACE(voucher_number, '^.*-', '') AS INTEGER)
       ), 0) + 1 as next_seq
       FROM fee_vouchers
-      WHERE voucher_number LIKE $1
-      AND status != 'cancelled'
+      WHERE LEFT(voucher_number, LENGTH($1)) = $1
+      AND voucher_number ~ '-[0-9]+$'
     `, {
-      bind: [`${instituteCode}-${year}${String(month).padStart(2, '0')}-%`],
-      type: sequelize.QueryTypes.SELECT
+      bind: [prefix],
+      type: sequelize.QueryTypes.SELECT,
+      transaction
     });
 
     return result[0]?.next_seq || 1;
@@ -163,7 +187,14 @@ const prepareFeeBreakdown = (student, studentDetails, feeType, previousBalance =
  * Generate single fee voucher for a student
  * Supports: monthly, annual, lab fees
  */
-export const generateSingleVoucher = async (
+export const generateSingleVoucher = async (studentId, instituteId, month, year, createdBy, options = {}) =>
+    // Own transaction when none supplied: archiving carried-forward vouchers and
+    // creating the new voucher must succeed or fail together.
+    withTransaction(options.transaction, (transaction) =>
+        generateSingleVoucherInner(studentId, instituteId, month, year, createdBy, { ...options, transaction })
+    );
+
+const generateSingleVoucherInner = async (
     studentId,
     instituteId,
     month,
@@ -297,13 +328,13 @@ export const generateSingleVoucher = async (
     }
 
     // Get institute code (optimized to avoid N+1 query)
-    const instituteCode = options.instituteCode || (await Institute.findByPk(instituteId, { transaction }))?.code || 'TCA';
+    const instituteCode = options.instituteCode || (await Institute.findByPk(instituteId, { transaction }))?.institute_code || 'TCA';
 
-    // Generate voucher number
+    // Generate voucher number (per institute + month, serialized by advisory lock)
     const voucherNumber = options.voucherNumber || (await generateVoucherNumber(
         instituteCode,
         new Date(year, month - 1, 1),
-        getNextSequence
+        (code, y, m) => getNextSequence(code, y, m, transaction)
     ));
 
     // Prepare voucher data
@@ -527,7 +558,7 @@ export const generateVouchersForClass = async (
 
     // Preload institute code & all parents once to completely optimize N+1 queries
     const institute = await Institute.findByPk(instituteId, { transaction });
-    const instituteCode = institute?.code || 'TCA';
+    const instituteCode = institute?.institute_code || 'TCA';
 
     const { User: UserModel } = sequelize.models;
     const allParents = await UserModel.findAll({
@@ -930,7 +961,7 @@ export const getFeeVouchers = async (instituteId, filters = {}, pagination = {})
     if (filters.month) where.month = filters.month;
     if (filters.year) where.year = filters.year;
     if (filters.status) where.status = filters.status;
-    if (filters.student_id) where.student_id = filters.student_id;
+    if (filters.student_id) where.student_id = Array.isArray(filters.student_id) ? { [Op.in]: filters.student_id } : filters.student_id;
     if (filters.academic_year_id) where.academic_year_id = filters.academic_year_id;
 
     if (filters.search) {
@@ -1103,7 +1134,7 @@ export const updateVoucherStatus = async (voucherId, instituteId, newStatus, par
                     transaction_id: `AUTO-${Date.now()}`,
                     payment_date: new Date(),
                     collected_by: updatedBy || voucher.created_by,
-                    receipt_number: `RCP-${Date.now()}`
+                    receipt_number: newReceiptNumber()
                 },
                 { transaction }
             );
@@ -1147,16 +1178,27 @@ export const updateVoucherStatus = async (voucherId, instituteId, newStatus, par
  * Record a payment/collection against a fee voucher
  * Tracks partial payments and updates voucher status accordingly
  */
-export const recordPayment = async (voucherId, instituteId, paymentData, options = {}) => {
+export const recordPayment = async (voucherId, instituteId, paymentData, options = {}) =>
+    withTransaction(options.transaction, (transaction) =>
+        recordPaymentInner(voucherId, instituteId, paymentData, { ...options, transaction })
+    );
+
+const recordPaymentInner = async (voucherId, instituteId, paymentData, options = {}) => {
     const { transaction, branch_id } = options;
-    const { amount, paymentMethod, reference, paidDate = new Date(), collectedBy } = paymentData;
+    const { paymentMethod, reference, paidDate = new Date(), collectedBy } = paymentData;
+    const amount = Number(paymentData.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+        throw new AppError('Payment amount must be a positive number', 400);
+    }
 
     const where = { id: voucherId, institute_id: instituteId };
     if (branch_id) where.branch_id = branch_id;
 
+    // Row lock: concurrent payments on the same voucher are serialized so they cannot overpay
     const voucher = await FeeVoucher.findOne({
         where,
-        transaction
+        transaction,
+        lock: transaction.LOCK.UPDATE
     });
 
     if (!voucher) {
@@ -1165,6 +1207,9 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
 
     if (voucher.archived) {
         throw new AppError('Cannot record payment against archived voucher', 400);
+    }
+    if (voucher.status === 'cancelled') {
+        throw new AppError('Cannot record payment against a cancelled voucher', 400);
     }
 
     // Import FeePayment model
@@ -1189,12 +1234,15 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
         {
             school_id: instituteId,
             voucher_id: voucherId,
-            amount_paid: amount,
-            payment_method: (paymentMethod || 'cash').toLowerCase(),
+            branch_id: voucher.branch_id || null,
+            amount_paid: payAmount,
+            payment_method: PAYMENT_METHODS.includes(String(paymentMethod || 'cash').toLowerCase())
+                ? String(paymentMethod || 'cash').toLowerCase()
+                : 'other',
             transaction_id: reference || null,
             payment_date: paidDate,
             collected_by: collectedBy,
-            receipt_number: `RCP-${Date.now()}`
+            receipt_number: newReceiptNumber()
         },
         { transaction }
     );
@@ -1218,12 +1266,12 @@ export const recordPayment = async (voucherId, instituteId, paymentData, options
             institute_id: instituteId,
             user_id: voucher.student_id,
             title: '💳 Payment Received',
-            body: `Payment of PKR ${amount.toFixed(2)} received for voucher #${voucher.voucher_number}`,
+            body: `Payment of PKR ${payAmount.toFixed(2)} received for voucher #${voucher.voucher_number}`,
             type: 'fee',
             channel: 'in_app',
             data: {
                 voucherId,
-                amount,
+                amount: payAmount,
                 remainingBalance,
                 status: newStatus
             }
@@ -1725,6 +1773,10 @@ export const getFeeVoucherById = async (voucherId, instituteId = null, options =
     if (options.branch_id) {
         where.branch_id = options.branch_id;
     }
+    // Students/parents: only their own / their children's vouchers (404, not 403, so IDs can't be probed)
+    if (Array.isArray(options.student_ids)) {
+        where.student_id = { [Op.in]: options.student_ids };
+    }
 
     const voucherRecord = await FeeVoucher.findOne({
         where,
@@ -1776,6 +1828,13 @@ export const getFeeVoucherById = async (voucherId, instituteId = null, options =
     }
 
     const voucher = voucherRecord.toJSON();
+    // Pending payment requests live in fee_breakdown._payment_requests; expose them separately
+    const paymentRequests = voucher.fee_breakdown?._payment_requests || [];
+    if (voucher.fee_breakdown && '_payment_requests' in voucher.fee_breakdown) {
+        const { _payment_requests, ...cleanBreakdown } = voucher.fee_breakdown;
+        voucher.fee_breakdown = cleanBreakdown;
+    }
+    voucher.payment_requests = paymentRequests;
     const payments = voucher.payments || [];
     const paidAmount = payments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
     const netAmt = Number(voucher.net_amount || 0);
@@ -1797,8 +1856,193 @@ export const getFeeVoucherById = async (voucherId, instituteId = null, options =
     return enriched;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYMENT REQUESTS (parent/student "I paid" -> admin confirms)
+// Stored in fee_breakdown._payment_requests (JSONB) so no schema change is needed.
+// A request never changes the voucher status; only confirmPaymentRequest does,
+// through recordPayment (which locks the voucher and prevents overpayment).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sumPayments = async (voucherId, transaction) => {
+    const payments = await FeePayment.findAll({ where: { voucher_id: voucherId }, transaction });
+    return payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0);
+};
+
+export const createPaymentRequest = async (voucherId, instituteId, requester, data = {}, options = {}) =>
+    withTransaction(options.transaction, async (transaction) => {
+        const voucher = await FeeVoucher.findOne({
+            where: { id: voucherId, institute_id: instituteId },
+            transaction,
+            lock: transaction.LOCK.UPDATE
+        });
+        if (!voucher) throw new AppError('Voucher not found', 404);
+        if (Array.isArray(options.student_ids) && !options.student_ids.includes(voucher.student_id)) {
+            throw new AppError('Voucher not found', 404);
+        }
+        if (voucher.archived || voucher.status === 'cancelled') throw new AppError('This voucher cannot be paid', 400);
+        if (voucher.status === 'paid') throw new AppError('This voucher is already paid', 400);
+
+        const paidSoFar = await sumPayments(voucher.id, transaction);
+        const outstanding = Number(Math.max(Number(voucher.net_amount || 0) - paidSoFar, 0).toFixed(2));
+        if (outstanding <= 0) throw new AppError('This voucher has no outstanding balance', 400);
+
+        const amount = data.amount === undefined || data.amount === '' ? outstanding : Number(data.amount);
+        if (!Number.isFinite(amount) || amount <= 0) throw new AppError('Payment amount must be a positive number', 400);
+        if (amount > outstanding + 0.01) {
+            throw new AppError(`Payment amount PKR ${amount} exceeds outstanding balance PKR ${outstanding}`, 400);
+        }
+
+        const breakdown = { ...(voucher.fee_breakdown || {}) };
+        const requests = Array.isArray(breakdown._payment_requests) ? [...breakdown._payment_requests] : [];
+        if (requests.filter((r) => r.status === 'pending' && r.requested_by === requester.id).length >= 3) {
+            throw new AppError('You already have pending payment requests for this voucher. Please wait for the school to review them.', 429);
+        }
+
+        const method = String(data.payment_method || data.paymentMethod || 'other').toLowerCase();
+        const request = {
+            id: uuidv4(),
+            status: 'pending',
+            amount: Number(amount.toFixed(2)),
+            payment_method: PAYMENT_METHODS.includes(method) ? method : 'other',
+            transaction_id: data.transaction_id || data.reference || null,
+            note: data.note || data.notes || null,
+            proof_url: data.proof_url || null,
+            requested_by: requester.id,
+            requested_by_name: requester.name || null,
+            created_at: new Date().toISOString()
+        };
+        requests.push(request);
+        breakdown._payment_requests = requests;
+        voucher.fee_breakdown = breakdown;
+        voucher.changed('fee_breakdown', true);
+        await voucher.save({ transaction });
+
+        try {
+            await broadcastNotification({
+                institute_id: instituteId,
+                branch_id: voucher.branch_id || undefined,
+                recipient_type: 'ALL_ADMINS',
+                title: '💳 Fee payment awaiting confirmation',
+                body: `${requester.name || 'A parent'} reported a payment of PKR ${request.amount} for voucher #${voucher.voucher_number}.`,
+                type: 'fee',
+                channel: 'in_app',
+                data: { voucherId: voucher.id, requestId: request.id, studentId: voucher.student_id }
+            }, true);
+        } catch (err) {
+            logger.error(`Failed to notify admins of payment request: ${err.message}`);
+        }
+
+        return { request, voucher: { id: voucher.id, voucher_number: voucher.voucher_number, status: voucher.status, net_amount: Number(voucher.net_amount || 0), outstanding } };
+    });
+
+export const getPaymentRequests = async (instituteId, filters = {}) => {
+    const where = {
+        institute_id: instituteId,
+        archived: false,
+        [Op.and]: [sequelize.where(sequelize.fn('jsonb_exists', sequelize.col('fee_breakdown'), '_payment_requests'), true)]
+    };
+    if (filters.branch_id) where.branch_id = filters.branch_id;
+    if (filters.voucherId) where.id = filters.voucherId;
+    const vouchers = await FeeVoucher.findAll({
+        where,
+        attributes: ['id', 'voucher_number', 'student_id', 'branch_id', 'net_amount', 'status', 'fee_breakdown'],
+        include: [{ model: User, as: 'Student', attributes: ['id', 'first_name', 'last_name', 'registration_no'] }],
+        order: [['updated_at', 'DESC']],
+        limit: 500
+    });
+    const rows = [];
+    for (const v of vouchers) {
+        for (const r of v.fee_breakdown?._payment_requests || []) {
+            if (filters.status && r.status !== filters.status) continue;
+            rows.push({
+                ...r,
+                voucher_id: v.id,
+                voucher_number: v.voucher_number,
+                voucher_status: v.status,
+                net_amount: Number(v.net_amount || 0),
+                student: v.Student ? { id: v.Student.id, name: `${v.Student.first_name} ${v.Student.last_name}`.trim(), registration_no: v.Student.registration_no } : null
+            });
+        }
+    }
+    rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return rows;
+};
+
+/** Student/parent view of their own requests for a voucher */
+export const getOwnPaymentRequests = async (voucherId, instituteId, studentIds) => {
+    const voucher = await FeeVoucher.findOne({
+        where: { id: voucherId, institute_id: instituteId, student_id: { [Op.in]: studentIds } },
+        attributes: ['id', 'fee_breakdown']
+    });
+    return voucher?.fee_breakdown?._payment_requests || [];
+};
+
+export const reviewPaymentRequest = async (voucherId, requestId, instituteId, reviewer, decision, data = {}, options = {}) => {
+    if (!['confirm', 'reject'].includes(decision)) throw new AppError("action must be 'confirm' or 'reject'", 400);
+    return withTransaction(options.transaction, async (transaction) => {
+        const where = { id: voucherId, institute_id: instituteId };
+        if (options.branch_id) where.branch_id = options.branch_id;
+        const voucher = await FeeVoucher.findOne({ where, transaction, lock: transaction.LOCK.UPDATE });
+        if (!voucher) throw new AppError('Voucher not found', 404);
+
+        const breakdown = { ...(voucher.fee_breakdown || {}) };
+        const requests = Array.isArray(breakdown._payment_requests) ? breakdown._payment_requests.map((r) => ({ ...r })) : [];
+        const request = requests.find((r) => r.id === requestId);
+        if (!request) throw new AppError('Payment request not found', 404);
+        if (request.status !== 'pending') throw new AppError(`This request was already ${request.status}`, 409);
+
+        let payment = null;
+        if (decision === 'confirm') {
+            payment = await recordPaymentInner(voucherId, instituteId, {
+                amount: data.amount !== undefined ? data.amount : request.amount,
+                paymentMethod: request.payment_method,
+                reference: request.transaction_id,
+                collectedBy: reviewer.id
+            }, { transaction, branch_id: options.branch_id });
+            request.status = 'confirmed';
+            request.payment_id = payment.id;
+            request.receipt_number = payment.receipt_number;
+        } else {
+            request.status = 'rejected';
+            request.reject_reason = data.reason || null;
+        }
+        request.reviewed_by = reviewer.id;
+        request.reviewed_at = new Date().toISOString();
+
+        // recordPayment may have updated the voucher row; reload before writing JSON back
+        await voucher.reload({ transaction });
+        const fresh = { ...(voucher.fee_breakdown || {}) };
+        fresh._payment_requests = requests;
+        voucher.fee_breakdown = fresh;
+        voucher.changed('fee_breakdown', true);
+        await voucher.save({ transaction });
+
+        try {
+            await createNotification({
+                institute_id: instituteId,
+                user_id: request.requested_by,
+                title: decision === 'confirm' ? '✅ Payment confirmed' : '❌ Payment request rejected',
+                body: decision === 'confirm'
+                    ? `Your payment of PKR ${request.amount} for voucher #${voucher.voucher_number} was confirmed.`
+                    : `Your payment request for voucher #${voucher.voucher_number} was rejected${request.reject_reason ? ': ' + request.reject_reason : '.'}`,
+                type: 'fee',
+                channel: 'in_app',
+                data: { voucherId: voucher.id, requestId: request.id, status: request.status }
+            }, true);
+        } catch (err) {
+            logger.error(`Failed to notify payment request outcome: ${err.message}`);
+        }
+
+        return { request, payment, voucher_status: voucher.status };
+    });
+};
+
 export default {
     generateSingleVoucher,
+    createPaymentRequest,
+    getPaymentRequests,
+    getOwnPaymentRequests,
+    reviewPaymentRequest,
     generateVouchersForClass,
     generateVouchersForInstitute,
     getFeeVouchers,

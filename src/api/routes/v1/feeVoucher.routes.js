@@ -61,6 +61,20 @@ router.post(
   feeVoucherController.warnFeeDefaulter
 );
 
+// Payment requests reported by parents/students (must be before /:voucherId)
+router.get(
+  '/payment-requests',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),
+  feeVoucherController.getPaymentRequests
+);
+
+// Confirm / reject a payment request
+router.patch(
+  '/:voucherId/payment-requests/:requestId',
+  restrictTo('INSTITUTE_ADMIN', 'BRANCH_ADMIN', 'STAFF'),
+  feeVoucherController.reviewPaymentRequest
+);
+
 // Get all vouchers
 router.get(
   '/',
