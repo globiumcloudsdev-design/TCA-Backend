@@ -7,6 +7,7 @@
 
 import { AppError } from '../../utils/lib/AppError.js';
 import logger from '../../config/logger.js';
+import { errorStatus } from '../../utils/helpers/response.helper.js';
 
 /**
  * Handle Sequelize unique constraint violations
@@ -82,7 +83,9 @@ export const errorHandler = (err, req, res, next) => {
 
   // Not an AppError — wrap it
   if (!(error instanceof AppError)) {
-    error = new AppError(error.message || 'Server error', error.statusCode || 500, false);
+    const status = errorStatus(error, error.statusCode || 500);
+    // 4xx mapped from a plain Error message is safe to show (operational); 5xx stays generic
+    error = new AppError(error.message || 'Server error', status, status < 500);
   }
 
   if (process.env.NODE_ENV === 'development') {

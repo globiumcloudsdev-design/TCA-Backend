@@ -27,7 +27,7 @@ export const getDashboard = async (req, res) => {
     return sendSuccess(res, dashboard, 'Dashboard fetched successfully');
   } catch (error) {
     console.error('Dashboard error:', error);
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -40,7 +40,7 @@ export const getProfile = async (req, res) => {
     const profile = await studentService.getStudentProfile(req.user.id, instituteId);
     return sendSuccess(res, profile, 'Profile fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -68,7 +68,7 @@ export const getMyClasses = async (req, res) => {
     const classes = await studentService.getMyClasses(req.user.id, instituteId);
     return sendSuccess(res, classes, 'Classes fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -79,7 +79,7 @@ export const getMyTimetable = async (req, res) => {
     const timetable = await studentService.getMyTimetable(req.user.id, instituteId, week);
     return sendSuccess(res, timetable, 'Timetable fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -89,7 +89,7 @@ export const getTodayClasses = async (req, res) => {
     const classes = await studentService.getTodayClasses(req.user.id, instituteId);
     return sendSuccess(res, classes, 'Today\'s classes fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -109,7 +109,7 @@ export const getMyAttendance = async (req, res) => {
     const attendance = await studentService.getMyAttendance(req.user.id, instituteId, filters);
     return sendSuccess(res, attendance, 'Attendance fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -138,7 +138,7 @@ export const getMyAssignments = async (req, res) => {
     
     return sendPaginated(res, result.data, result.pagination, 'Assignments fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -155,7 +155,7 @@ export const getUpcomingAssignments = async (req, res) => {
     
     return sendSuccess(res, assignments, 'Upcoming assignments fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -188,7 +188,7 @@ export const getMyExamSchedule = async (req, res) => {
     return sendSuccess(res, schedule, 'Exam schedule fetched successfully');
   } catch (error) {
     console.error('Exam schedule error:', error);
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -203,7 +203,7 @@ export const getMyResults = async (req, res) => {
     const results = await studentService.getMyResults(req.user.id, instituteId, filters);
     return sendSuccess(res, results, 'Results fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -220,7 +220,7 @@ export const getRecentResults = async (req, res) => {
     
     return sendSuccess(res, results, 'Recent results fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -237,7 +237,7 @@ export const getMyFees = async (req, res) => {
     const fees = await studentService.getMyFees(req.user.id, instituteId, filters);
     return sendSuccess(res, fees, 'Fees fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -247,7 +247,7 @@ export const getFeeSummary = async (req, res) => {
     const summary = await studentService.getFeeSummary(req.user.id, instituteId);
     return sendSuccess(res, summary, 'Fee summary fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -269,7 +269,7 @@ export const getNotices = async (req, res) => {
     const result = await studentService.getNotices(req.user.id, instituteId, filters, pagination);
     return sendPaginated(res, result.data, result.pagination, 'Notices fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -281,7 +281,7 @@ export const getRecentNotices = async (req, res) => {
     const notices = await studentService.getRecentNotices(req.user.id, instituteId, parseInt(limit));
     return sendSuccess(res, notices, 'Recent notices fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -294,6 +294,6 @@ export const getLibraryData = async (req, res) => {
     const libraryData = await studentService.getLibraryData(req.user.id, instituteId);
     return sendSuccess(res, libraryData, 'Library data fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };

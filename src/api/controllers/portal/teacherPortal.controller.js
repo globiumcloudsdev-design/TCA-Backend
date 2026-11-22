@@ -38,7 +38,7 @@ export const getDashboard = async (req, res) => {
     return sendSuccess(res, dashboard, 'Dashboard fetched successfully');
   } catch (error) {
     console.error('Dashboard error:', error);
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -51,7 +51,7 @@ export const getProfile = async (req, res) => {
     const profile = await teacherService.getTeacherProfile(req.user.id, instituteId);
     return sendSuccess(res, profile, 'Profile fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -79,7 +79,7 @@ export const getMyClasses = async (req, res) => {
     const classes = await teacherService.getMyClasses(req.user.id, instituteId);
     return sendSuccess(res, classes, 'Classes fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -93,7 +93,7 @@ export const getClassDetails = async (req, res) => {
     if (error.message.includes('not found')) {
       return sendNotFound(res, error.message);
     }
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -121,7 +121,7 @@ export const getMyStudents = async (req, res) => {
     
     return sendPaginated(res, result.data, result.pagination, 'Students fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -135,7 +135,7 @@ export const getStudentDetails = async (req, res) => {
     if (error.message.includes('not found') || error.message.includes('do not teach')) {
       return sendNotFound(res, error.message);
     }
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -181,7 +181,7 @@ export const getMyAssignments = async (req, res) => {
     
     return sendPaginated(res, result.data, result.pagination, 'Assignments fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -199,7 +199,7 @@ export const getAssignmentDetails = async (req, res) => {
     if (error.message.includes('not found')) {
       return sendNotFound(res, error.message);
     }
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -253,7 +253,7 @@ export const getAssignmentSubmissions = async (req, res) => {
     );
     return sendSuccess(res, assignment.submissions || [], 'Submissions fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -302,7 +302,7 @@ export const getClassAttendance = async (req, res) => {
     );
     return sendSuccess(res, attendance, 'Attendance fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -336,7 +336,7 @@ export const getMyTimetable = async (req, res) => {
     );
     return sendSuccess(res, timetable, 'Timetable fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -351,7 +351,7 @@ export const getNotices = async (req, res) => {
     const notices = await teacherService.getNotices(req.user.id, instituteId, parseInt(limit));
     return sendSuccess(res, notices, 'Notices fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -370,7 +370,7 @@ export const getAssignments = async (req, res) => {
     
     return sendSuccess(res, assignments, 'Teacher assignments fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -437,7 +437,7 @@ export const getExams = async (req, res) => {
     
     return sendSuccess(res, result, 'Teacher exams fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -462,7 +462,7 @@ export const getExamDetails = async (req, res) => {
     
     return sendSuccess(res, result, 'Exam details fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -496,7 +496,7 @@ export const getExamResults = async (req, res) => {
     
     return sendSuccess(res, result, 'Exam results fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -578,7 +578,7 @@ export const getExamEntryStudents = async (req, res) => {
     if (error.message.includes('not found')) {
       return sendNotFound(res, error.message);
     }
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
