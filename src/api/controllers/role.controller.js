@@ -74,23 +74,23 @@ export const getRolesController = catchAsync(async (req, res) => {
 });
 
 export const getRoleByIdController = catchAsync(async (req, res) => {
-  const role = await getRoleById(req.params.id);
+  const role = await getRoleById(req.params.id, req.school?.id);
   sendSuccess(res, role, 'Role details');
 });
 
 export const updateRoleController = catchAsync(async (req, res) => {
-  const role = await updateRole(req.params.id, req.body);
+  const role = await updateRole(req.params.id, req.body, req.school?.id);
   sendSuccess(res, role, 'Role updated');
 });
 
 export const deleteRoleController = catchAsync(async (req, res) => {
-  await deleteRole(req.params.id);
+  await deleteRole(req.params.id, req.school?.id);
   sendNoContent(res);
 });
 
 export const assignRoleController = catchAsync(async (req, res) => {
   const { userId, roleId } = req.body;
-  const user = await assignRoleToUser(userId, roleId, req.user.id);
+  const user = await assignRoleToUser(userId, roleId, req.user.id, req.school?.id);
   sendSuccess(res, user, 'Role assigned successfully');
 });
 

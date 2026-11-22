@@ -30,7 +30,11 @@ export const createFeeVoucher = async (schoolId, data, createdBy) => {
 };
 
 export const getFeeVouchers = async (schoolId, query = {}) => {
-  const features = new APIFeatures({ institute_id: schoolId }, query).filter().sort().paginate();
+  const features = new APIFeatures({ institute_id: schoolId }, query)
+    .filter(['status', 'student_id', 'branch_id', 'class_id', 'section_id', 'month', 'year', 'academic_year_id', 'voucher_number'])
+    .allowSort(['created_at', 'due_date', 'net_amount', 'status', 'voucher_number'])
+    .sort()
+    .paginate();
   const opts = features.build();
   const { count, rows } = await FeeVoucher.findAndCountAll({
     ...opts,

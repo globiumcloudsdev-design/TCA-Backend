@@ -36,7 +36,8 @@ export const createRole = async (schoolId, { name, code, description, permission
 // ─── List roles for a school ──────────────────────────────────────────────────
 export const getSchoolRoles = async (schoolId, query = {}) => {
   const features = new APIFeatures({ school_id: schoolId }, query)
-    .filter()
+    .filter(['name', 'code', 'is_active'])
+    .allowSort(['name', 'code', 'created_at'])
     .sort()
     .paginate();
 
@@ -47,15 +48,15 @@ export const getSchoolRoles = async (schoolId, query = {}) => {
 };
 
 // ─── Get role by ID ───────────────────────────────────────────────────────────
-export const getRoleById = async (roleId) => {
-  const role = await Role.findByPk(roleId);
+export const getRoleById = async (roleId, schoolId) => {
+  const role = await Role.findOne({ where: { id: roleId, ...(schoolId ? { school_id: schoolId } : {}) } });
   if (!role) throw new AppError('Role not found.', 404);
   return role;
 };
 
 // ─── Update role ──────────────────────────────────────────────────────────────
-export const updateRole = async (roleId, { name, description, permissions }) => {
-  const role = await Role.findByPk(roleId);
+export const updateRole = async (roleId, { name, description, permissions }, schoolId) => {
+  const role = await Role.findOne({ where: { id: roleId, ...(schoolId ? { school_id: schoolId } : {}) } });
   if (!role) throw new AppError('Role not found.', 404);
   if (role.is_template) throw new AppError('Platform template roles cannot be edited here.', 400);
 
@@ -69,13 +70,13 @@ export const updateRole = async (roleId, { name, description, permissions }) => 
 };
 
 // ─── Delete role ──────────────────────────────────────────────────────────────
-export const deleteRole = async (roleId) => {
-  const role = await Role.findByPk(roleId);
+export const deleteRole = async (roleId, schoolId) => {
+  const role = await Role.findOne({ where: { id: roleId, ...(schoolId ? { school_id: schoolId } : {}) } });
   if (!role) throw new AppError('Role not found.', 404);
   if (role.is_template) throw new AppError('Platform template roles cannot be deleted.', 400);
 
   // Prevent deletion if users are still assigned
-  const usersCount = await User.count({ where: { role_id: roleId, is_active: true } });
+  const usersCount = await User.count({ where: { role_id: roleId, is_active: true, ...(schoolId ? { school_id: schoolId } : {}) } });
   if (usersCount > 0) {
     throw new AppError(`Cannot delete role. ${usersCount} active user(s) are assigned this role.`, 400);
   }
@@ -85,12 +86,15 @@ export const deleteRole = async (roleId) => {
 };
 
 // ─── Assign role to user (sets user.role_id) ─────────────────────────────────
-export const assignRoleToUser = async (userId, roleId, assignedBy) => {
-  const user = await User.findByPk(userId);
+export const assignRoleToUser = async (userId, roleId, assignedBy, schoolId) => {
+  const user = await User.findOne({ where: { id: userId, ...(schoolId ? { school_id: schoolId } : {}) } });
   if (!user) throw new AppError('User not found.', 404);
+  if (['MASTER_ADMIN', 'SYSTEM_ADMIN', 'SUPPORT_STAFF'].includes(user.user_type) && schoolId) {
+    throw new AppError('Platform users cannot be modified here.', 403);
+  }
 
   if (roleId) {
-    const role = await Role.findByPk(roleId);
+    const role = await Role.findOne({ where: { id: roleId, ...(schoolId ? { school_id: schoolId } : {}) } });
     if (!role) throw new AppError('Role not found.', 404);
   }
 

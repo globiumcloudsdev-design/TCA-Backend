@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { protect } from '../../middlewares/auth.middleware.js';
 import { validate } from '../../middlewares/validation.middleware.js';
+import { hasPermission } from '../../middlewares/permission.middleware.js';
 import * as vendorController from '../../controllers/vendor.controller.js';
 import {
   createVendorSchema,
@@ -14,19 +15,19 @@ const router = Router();
 router.use(protect);
 
 // Options routes (for dropdown/creatable select)
-router.get('/options', vendorController.getVendorOptions);
-router.get('/types', vendorController.getVendorTypes);
+router.get('/options', hasPermission('vendor.read'), vendorController.getVendorOptions);
+router.get('/types', hasPermission('vendor.read'), vendorController.getVendorTypes);
 
 router.route('/')
-  .get(vendorController.getAllVendors)
-  .post(validate(createVendorSchema), vendorController.createVendor);
+  .get(hasPermission('vendor.read'), vendorController.getAllVendors)
+  .post(hasPermission('vendor.create'), validate(createVendorSchema), vendorController.createVendor);
 
 router.route('/:id')
-  .get(vendorController.getVendorById)
-  .put(validate(updateVendorSchema), vendorController.updateVendor)
-  .delete(vendorController.deleteVendor);
+  .get(hasPermission('vendor.read'), vendorController.getVendorById)
+  .put(hasPermission('vendor.update'), validate(updateVendorSchema), vendorController.updateVendor)
+  .delete(hasPermission('vendor.delete'), vendorController.deleteVendor);
 
 // Assign students to vendor
-router.patch('/:id/assign-students', validate(assignStudentsSchema), vendorController.assignStudentsToVendor);
+router.patch('/:id/assign-students', hasPermission('vendor.update'), validate(assignStudentsSchema), vendorController.assignStudentsToVendor);
 
 export default router;

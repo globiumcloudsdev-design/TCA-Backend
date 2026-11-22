@@ -3,6 +3,7 @@
  * ES6 Module syntax
  */
 
+import './utils/lib/asyncErrors.js';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';

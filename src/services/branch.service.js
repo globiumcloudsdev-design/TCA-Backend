@@ -307,23 +307,18 @@ export const createBranch = async (data) => {
       });
 
       if (existingUser) {
-        // If user already belongs to this institute, assign them to this branch as Branch Head
-        if (existingUser.school_id === data.institute_id) {
+        // SECURITY: never overwrite an existing user's password, role, name or
+        // permissions from branch creation. Only an unassigned BRANCH_ADMIN/STAFF
+        // of this same institute may be linked to the new branch (branch_id only).
+        const linkable =
+          existingUser.school_id === data.institute_id &&
+          ['BRANCH_ADMIN', 'STAFF'].includes(existingUser.user_type) &&
+          !existingUser.branch_id;
+        if (linkable) {
           existingUser.branch_id = branch.id;
-          existingUser.staff_type = 'Branch Head';
-          if (!['MASTER_ADMIN', 'SUPER_ADMIN', 'INSTITUTE_ADMIN'].includes(existingUser.user_type)) {
-            existingUser.user_type = 'BRANCH_ADMIN';
-          }
-          if (Array.isArray(data.head.permissions) && data.head.permissions.length > 0) {
-            existingUser.permissions = data.head.permissions;
-          }
-          if (data.head.first_name) existingUser.first_name = data.head.first_name;
-          if (data.head.last_name) existingUser.last_name = data.head.last_name;
-          if (data.head.phone) existingUser.phone = data.head.phone;
-          if (data.head.password) {
-            existingUser.password_hash = await bcrypt.hash(data.head.password, 10);
-          }
           await existingUser.save({ transaction });
+        } else if (existingUser.school_id === data.institute_id) {
+          throw new AppError('A user with this email already exists and cannot be assigned as branch head. Use a different email.', 409);
         } else {
           // User belongs to a different institute: email conflict
           throw new AppError('User with this email already exists in another organization. Please use a unique email address.', 400);

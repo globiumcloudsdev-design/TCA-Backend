@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { protect } from '../../middlewares/auth.middleware.js';
 import { validate } from '../../middlewares/validation.middleware.js';
+import { hasPermission } from '../../middlewares/permission.middleware.js';
 import * as academicYearController from '../../controllers/academicYear.controller.js';
 import { createAcademicYearSchema, updateAcademicYearSchema } from '../../validators/academicYear.validator.js';
 
@@ -21,13 +22,13 @@ router.get('/options', academicYearController.getAcademicYearOptions);
 
 router.route('/')
   .get(academicYearController.getAllAcademicYears)
-  .post(validate(createAcademicYearSchema), academicYearController.createAcademicYear);
+  .post(hasPermission('academic_year.create'), validate(createAcademicYearSchema), academicYearController.createAcademicYear);
 
 router.route('/:id')
   .get(academicYearController.getAcademicYearById)
-  .put(validate(updateAcademicYearSchema), academicYearController.updateAcademicYear)
-  .delete(academicYearController.deleteAcademicYear);
+  .put(hasPermission('academic_year.update'), validate(updateAcademicYearSchema), academicYearController.updateAcademicYear)
+  .delete(hasPermission('academic_year.delete'), academicYearController.deleteAcademicYear);
 
-router.patch('/:id/set-current', academicYearController.setCurrentAcademicYear);
+router.patch('/:id/set-current', hasPermission('academic_year.update'), academicYearController.setCurrentAcademicYear);
 
 export default router;

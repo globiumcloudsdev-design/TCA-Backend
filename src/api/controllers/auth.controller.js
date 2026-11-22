@@ -23,6 +23,30 @@ const setRefreshTokenCookie = (res, token) => {
   res.cookie('refresh_token', token, cookieOptions);
 };
 
+
+/**
+ * Send the result of loginService. When the password matched several accounts
+ * no token is issued: the client gets the selection response and must call
+ * POST /auth/login-with-account { accountId, password } for the chosen one.
+ */
+const sendLoginResult = (res, result) => {
+  if (result.hasMultipleAccounts || !result.accessToken) {
+    return sendSuccess(res, {
+      requiresSelection: true,
+      accounts: result.accounts,
+      message: 'Select an account to continue'
+    }, 'Account selection required');
+  }
+  setRefreshTokenCookie(res, result.refreshToken);
+  return sendSuccess(res, {
+    accessToken: result.accessToken,
+    access_token: result.accessToken,
+    refreshToken: result.refreshToken,
+    refresh_token: result.refreshToken,
+    user: result.user
+  }, 'Login successful');
+};
+
 /**
  * Login - Modified to handle both scenarios
  */
@@ -40,14 +64,7 @@ export const login = catchAsync(async (req, res) => {
       throw new AppError('Password is required', 400);
     }
     const result = await authService.loginService(loginId, password);
-    setRefreshTokenCookie(res, result.refreshToken);
-    return sendSuccess(res, {
-      accessToken: result.accessToken,
-      access_token: result.accessToken,
-      refreshToken: result.refreshToken,
-      refresh_token: result.refreshToken,
-      user: result.user
-    }, 'Login successful');
+    return sendLoginResult(res, result);
   }
   
   // For email - check if password provided
@@ -55,14 +72,7 @@ export const login = catchAsync(async (req, res) => {
     // If password is provided, try direct login with that specific account
     if (password) {
       const result = await authService.loginService(email, password);
-      setRefreshTokenCookie(res, result.refreshToken);
-      return sendSuccess(res, {
-        accessToken: result.accessToken,
-        access_token: result.accessToken,
-        refreshToken: result.refreshToken,
-        refresh_token: result.refreshToken,
-        user: result.user
-      }, 'Login successful');
+      return sendLoginResult(res, result);
     }
     
     // No password - just get accounts list
@@ -126,29 +136,6 @@ export const loginWithAccount = catchAsync(async (req, res) => {
     refresh_token: result.refreshToken,
     user: result.user
   }, 'Login successful');
-});
-
-/**
- * Select account after multiple account detection (legacy)
- */
-export const selectAccount = catchAsync(async (req, res) => {
-  const { accountId } = req.body;
-  const { userId } = req.user;
-  
-  if (!accountId) {
-    throw new AppError('Account ID is required', 400);
-  }
-  
-  const result = await authService.selectAccountService(accountId, null, null);
-  setRefreshTokenCookie(res, result.refreshToken);
-  
-  sendSuccess(res, {
-    accessToken: result.accessToken,
-    access_token: result.accessToken,
-    refreshToken: result.refreshToken,
-    refresh_token: result.refreshToken,
-    user: result.user
-  }, 'Account selected successfully');
 });
 
 export const logout = catchAsync(async (req, res) => {
@@ -287,7 +274,6 @@ export default {
   getMe,
   getAccountsByEmail,
   loginWithAccount,
-  selectAccount,
   getMyInstitute,
   getMyInstitutePolicies,
   getInstitutePolicyByType,

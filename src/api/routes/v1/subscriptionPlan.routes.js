@@ -8,7 +8,7 @@
  */
 
 import { Router } from 'express';
-import { protect } from '../../middlewares/auth.middleware.js';
+import { protect, isMasterAdmin } from '../../middlewares/auth.middleware.js';
 import { hasPermission } from '../../middlewares/permission.middleware.js';
 import {
   getAllPlansController,
@@ -33,6 +33,7 @@ router.get('/public', getPublicPlansController);
 router.get(
   '/',
   protect,
+  isMasterAdmin,
   hasPermission('sub_template.read'),
   getAllPlansController
 );
@@ -40,6 +41,7 @@ router.get(
 router.get(
   '/:id',
   protect,
+  isMasterAdmin,
   hasPermission('sub_template.read'),
   getPlanByIdController
 );
@@ -47,6 +49,7 @@ router.get(
 router.post(
   '/',
   protect,
+  isMasterAdmin,
   hasPermission('sub_template.create'),
   createPlanController
 );
@@ -54,6 +57,7 @@ router.post(
 router.put(
   '/:id',
   protect,
+  isMasterAdmin,
   hasPermission('sub_template.update'),
   updatePlanController
 );
@@ -61,6 +65,7 @@ router.put(
 router.delete(
   '/:id',
   protect,
+  isMasterAdmin,
   hasPermission('sub_template.delete'),
   deletePlanController
 );
@@ -70,6 +75,7 @@ router.delete(
 router.patch(
   '/:id/toggle-publish',
   protect,
+  isMasterAdmin,
   hasPermission('sub_template.update'),
   togglePublishedController
 );
@@ -77,6 +83,7 @@ router.patch(
 router.patch(
   '/:id/toggle-popular',
   protect,
+  isMasterAdmin,
   hasPermission('sub_template.update'),
   togglePopularController
 );
@@ -84,6 +91,7 @@ router.patch(
 router.patch(
   '/:id/toggle-active',
   protect,
+  isMasterAdmin,
   hasPermission('sub_template.update'),
   toggleActiveController
 );
