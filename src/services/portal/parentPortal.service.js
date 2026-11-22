@@ -19,6 +19,26 @@ import { v4 as uuidv4 } from 'uuid';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 import { unlink } from 'fs/promises';
 import logger from '../../config/logger.js';
+import { assertParentOwnsChild, getParentChildIds } from './parentOwnership.js';
+import { countAttendance, attendancePercentage, emptyCounts } from '../../utils/helpers/attendance.helper.js';
+import { getStudentAcademicInfo } from '../../utils/helpers/student.helper.js';
+import { fetchNotices } from './notices.helper.js';
+import { AppError } from '../../utils/lib/AppError.js';
+import { createPaymentRequest } from '../feeVoucher.service.js';
+import { pktParts } from '../../utils/helpers/date.helper.js';
+
+const ymd = (d) => format(d, 'yyyy-MM-dd');
+/** fee_breakdown holds pending payment requests under _payment_requests; keep them out of the fee items */
+const splitBreakdown = (fb) => {
+  let breakdown = fb;
+  if (typeof breakdown === 'string') { try { breakdown = JSON.parse(breakdown); } catch (e) { breakdown = {}; } }
+  if (!breakdown || typeof breakdown !== 'object') return { breakdown: {}, requests: [] };
+  const { _payment_requests, ...rest } = breakdown;
+  return { breakdown: rest, requests: Array.isArray(_payment_requests) ? _payment_requests : [] };
+};
+
+// Single ownership check used by every :childId parent endpoint (B8)
+export { assertParentOwnsChild };
 
 
 const {
@@ -28,6 +48,7 @@ const {
   AssignmentSubmission,
   StudentAttendance: Attendance,
   FeeVoucher,
+  FeePayment,
   ExamResult,
   Exam,
   Class,
@@ -83,7 +104,7 @@ export const getParentDashboard = async (parentId, instituteId) => {
     );
 
     // Get recent notices for parent (with error handling)
-    const notices = await getParentNotices(instituteId, 5).catch(err => {
+    const notices = await getParentNotices(parentId, instituteId, 5).catch(err => {
       logger.error('Error fetching notices:', err);
       return [];
     });
@@ -206,7 +227,7 @@ export const updateParentProfile = async (parentId, instituteId, updateData, fil
   // Update details
   if (updateData.details) {
     const allowedDetails = ['occupation', 'cnic', 'address', 'city', 'relation'];
-    const currentDetails = parent.details || {};
+    const currentDetails = { ...(parent.details || {}) };
 
     allowedDetails.forEach(field => {
       if (updateData.details[field] !== undefined) {
@@ -215,6 +236,7 @@ export const updateParentProfile = async (parentId, instituteId, updateData, fil
     });
 
     parent.details = currentDetails;
+    parent.changed('details', true);
   }
 
   if (avatarUrl) {
@@ -251,13 +273,7 @@ export const getMyChildren = async (parentId, instituteId) => {
   logger.debug('Parent details.parentDetails.student_ids:', parent.details?.parentDetails?.student_ids);
 
   // Check for children IDs - student_ids are stored in details.parentDetails.student_ids
-  let childrenIds =
-    parent.details?.parentDetails?.student_ids ||  // ✅ PRIMARY: Correct location from parent.service.js
-    parent.student_ids ||                           // Fallback: Direct field (shouldn't exist)
-    parent.dataValues?.student_ids ||              // Fallback: Raw Sequelize data
-    parent.details?.student_ids ||                 // Fallback: Directly in details
-    parent.details?.children_ids ||                // Fallback: Legacy naming
-    [];
+  let childrenIds = getParentChildIds(parent);
 
   // Ensure it's an array
   if (!Array.isArray(childrenIds)) {
@@ -365,28 +381,16 @@ export const getMyChildren = async (parentId, instituteId) => {
  * Get specific child details
  */
 export const getChildDetails = async (childId, parentId, instituteId) => {
-  // Verify parent owns this child
-  const parent = await User.findByPk(parentId);
-  if (!parent) throw new Error('Parent not found');
-
-  // Check for children IDs in multiple places (stored in details.parentDetails.student_ids)
-  const childrenIds =
-    parent.details?.parentDetails?.student_ids ||
-    parent.student_ids ||
-    parent.details?.student_ids ||
-    parent.details?.children_ids ||
-    [];
-
-  if (!Array.isArray(childrenIds) || !childrenIds.includes(childId)) {
-    throw new Error('You are not authorized to view this child\'s data');
-  }
+  await assertParentOwnsChild(parentId, childId, instituteId);
 
   const child = await User.findOne({
     where: { id: childId, school_id: instituteId, user_type: 'STUDENT' },
     attributes: ['id', 'first_name', 'last_name', 'registration_no', 'avatar_url', 'details']
   });
 
-  if (!child) throw new Error('Child not found');
+  if (!child) throw new AppError('Child not found', 404);
+
+  const academic = getStudentAcademicInfo(child);
 
   // Get comprehensive child data
   const [attendance, results, fees, assignments, timetable] = await Promise.all([
@@ -403,11 +407,11 @@ export const getChildDetails = async (childId, parentId, instituteId) => {
       name: `${child.first_name} ${child.last_name}`,
       registration_no: child.registration_no,
       avatar: child.avatar_url,
-      class: child.details?.class_name,
-      section: child.details?.section_name,
-      roll_number: child.details?.roll_number,
-      date_of_birth: child.details?.date_of_birth,
-      blood_group: child.details?.blood_group
+      class: academic.class_name,
+      section: academic.section_name,
+      roll_number: academic.roll_no,
+      date_of_birth: child.details?.studentDetails?.date_of_birth || child.details?.date_of_birth,
+      blood_group: child.details?.studentDetails?.blood_group || child.details?.blood_group
     },
     attendance,
     results,
@@ -440,23 +444,16 @@ export const getChildFullAttendance = async (childId, instituteId, filters = {})
     student_id: childId
   };
 
-  // Date filtering
+  // Date filtering (DATEONLY column -> compare as yyyy-MM-dd strings; default = current month in PKT)
   if (from_date && to_date) {
-    where.date = { [Op.between]: [new Date(from_date), new Date(to_date)] };
+    where.date = { [Op.between]: [String(from_date).slice(0, 10), String(to_date).slice(0, 10)] };
   } else if (month && year) {
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
-    where.date = { [Op.between]: [startDate, endDate] };
+    where.date = { [Op.between]: [ymd(new Date(year, month - 1, 1)), ymd(new Date(year, month, 0))] };
   } else if (year) {
-    const startDate = new Date(year, 0, 1);
-    const endDate = new Date(year, 11, 31);
-    where.date = { [Op.between]: [startDate, endDate] };
+    where.date = { [Op.between]: [ymd(new Date(year, 0, 1)), ymd(new Date(year, 11, 31))] };
   } else {
-    // Default to current month
-    const today = new Date();
-    const startDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    where.date = { [Op.between]: [startDate, endDate] };
+    const { year: py, month: pm } = pktParts();
+    where.date = { [Op.between]: [ymd(new Date(py, pm - 1, 1)), ymd(new Date(py, pm, 0))] };
   }
 
   const attendance = await Attendance.findAll({
@@ -474,6 +471,7 @@ export const getChildFullAttendance = async (childId, instituteId, filters = {})
   const late = attendance.filter(a => a.status === 'late').length;
   const halfDay = attendance.filter(a => a.status === 'half_day').length;
   const holiday = attendance.filter(a => a.status === 'holiday').length;
+  const leave = attendance.filter(a => a.status === 'leave').length;
 
   // Since StudentAttendance tracks attendance by day and not by subject,
   // we do not return subjectStats here.
@@ -517,7 +515,7 @@ export const getChildFullAttendance = async (childId, instituteId, filters = {})
     absent: stats.absent,
     late: stats.late,
     half_day: stats.half_day,
-    percentage: stats.total ? Math.round(((stats.present + stats.half_day * 0.5) / stats.total) * 100) : 0
+    percentage: attendancePercentage(stats)
   }));
 
   // Monthly breakdown
@@ -532,19 +530,16 @@ export const getChildFullAttendance = async (childId, instituteId, filters = {})
           month: monthName,
           month_key: monthKey,
           total: 0,
-          present: 0,
-          absent: 0,
-          late: 0,
-          half_day: 0
+          ...emptyCounts()
         };
       }
       monthlyStats[monthKey].total++;
-      monthlyStats[monthKey][a.status]++;
+      monthlyStats[monthKey][a.status] = (monthlyStats[monthKey][a.status] || 0) + 1;
     });
 
     monthly = Object.values(monthlyStats).map(stat => ({
       ...stat,
-      percentage: stat.total ? Math.round(((stat.present + stat.half_day * 0.5) / stat.total) * 100) : 0
+      percentage: attendancePercentage(stat)
     })).sort((a, b) => b.month_key.localeCompare(a.month_key));
   }
 
@@ -591,7 +586,8 @@ export const getChildFullAttendance = async (childId, instituteId, filters = {})
       late,
       half_day: halfDay,
       holiday,
-      percentage: total ? Math.round(((present + halfDay * 0.5) / total) * 100) : 0,
+      leave,
+      percentage: attendancePercentage({ present, late, half_day: halfDay, absent }),
       perfect_days: attendance.filter(a => a.status === 'present' && !a.late_arrival).length
     },
     subject_wise: subjectStats,
@@ -619,16 +615,16 @@ const getChildAttendanceSummary = async (childId, instituteId, month = null, yea
     startDate = new Date(year, month, 1);
     endDate = new Date(year, month + 1, 0);
   } else {
-    const today = new Date();
-    startDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const { year: py, month: pm } = pktParts();
+    startDate = new Date(py, pm - 1, 1);
+    endDate = new Date(py, pm, 0);
   }
 
   const attendance = await Attendance.findAll({
     where: {
       school_id: instituteId,
       student_id: childId,
-      date: { [Op.between]: [startDate, endDate] }
+      date: { [Op.between]: [ymd(startDate), ymd(endDate)] }
     },
     order: [['date', 'DESC']]
   });
@@ -638,6 +634,7 @@ const getChildAttendanceSummary = async (childId, instituteId, month = null, yea
   const absent = attendance.filter(a => a.status === 'absent').length;
   const late = attendance.filter(a => a.status === 'late').length;
   const halfDay = attendance.filter(a => a.status === 'half_day').length;
+  const leave = attendance.filter(a => a.status === 'leave').length;
 
   // Subject-wise breakdown
   const subjectWise = {};
@@ -647,7 +644,7 @@ const getChildAttendanceSummary = async (childId, instituteId, month = null, yea
       subjectWise[subjectName] = { total: 0, present: 0 };
     }
     subjectWise[subjectName].total++;
-    if (a.status === 'present') subjectWise[subjectName].present++;
+    if (a.status === 'present' || a.status === 'late') subjectWise[subjectName].present++;
   });
 
   const subjectStats = Object.entries(subjectWise).map(([subject, stats]) => ({
@@ -662,7 +659,8 @@ const getChildAttendanceSummary = async (childId, instituteId, month = null, yea
     absent,
     late,
     half_day: halfDay,
-    percentage: total ? Math.round(((present + halfDay * 0.5) / total) * 100) : 0,
+    leave,
+    percentage: attendancePercentage({ present, late, half_day: halfDay, absent }),
     subject_wise: subjectStats,
     recent: attendance.slice(0, 5).map(a => ({
       date: format(new Date(a.date), 'dd MMM'),
@@ -781,7 +779,7 @@ export const getChildFullResults = async (childId, instituteId, filters = {}) =>
         model: Exam,
         as: 'exam',
         attributes: ['id', 'name', 'type', 'start_date', 'end_date', 'total_marks', 'pass_marks', 'pass_percentage', 'academic_year_id'],
-        where: { school_id: instituteId },
+        where: { school_id: instituteId, [Op.or]: [{ status: 'results_published' }, { is_published: true }] },
         required: true
       }
     ]
@@ -1031,7 +1029,7 @@ export const getExamResultDetails = async (resultId, parentId, instituteId) => {
       {
         model: Exam,
         as: 'exam',
-        attributes: ['id', 'name', 'type', 'start_date', 'end_date', 'total_marks', 'pass_marks', 'pass_percentage', 'academic_year_id', 'description']
+        attributes: ['id', 'name', 'type', 'start_date', 'end_date', 'total_marks', 'pass_marks', 'pass_percentage', 'academic_year_id', 'description', 'status', 'is_published']
       },
       {
         model: User,
@@ -1041,15 +1039,12 @@ export const getExamResultDetails = async (resultId, parentId, instituteId) => {
     ]
   });
 
-  if (!result) throw new Error('Result not found');
+  if (!result) throw new AppError('Result not found', 404);
 
-  // Verify parent owns this child
-  const parent = await User.findByPk(parentId);
-  if (!parent) throw new Error('Parent not found');
-
-  const childrenIds = parent.details?.parentDetails?.student_ids || [];
-  if (!childrenIds.includes(result.student_id)) {
-    throw new Error('You are not authorized to view this result');
+  // Parent must own the child, and the result's exam must be published
+  await assertParentOwnsChild(parentId, result.student_id, instituteId);
+  if (!(result.exam?.status === 'results_published' || result.exam?.is_published)) {
+    throw new AppError('Result not found', 404);
   }
 
   // Parse subject marks
@@ -1121,7 +1116,7 @@ export const getChildRecentResults = async (childId, instituteId, limit = 2) => 
         model: Exam,
         as: 'exam',
         attributes: ['id', 'name', 'type', 'start_date'],
-        where: { school_id: instituteId },
+        where: { school_id: instituteId, [Op.or]: [{ status: 'results_published' }, { is_published: true }] },
         required: true
       }
     ]
@@ -1182,13 +1177,19 @@ const getChildFeeSummary = async (childId, instituteId) => {
   const vouchers = await FeeVoucher.findAll({
     where: {
       institute_id: instituteId,
-      student_id: childId
+      student_id: childId,
+      archived: false
     },
     order: [['due_date', 'ASC']]
   });
 
-  const due = vouchers.filter(v => v.status === 'pending' || v.status === 'overdue');
-  const totalDue = due.reduce((sum, v) => sum + (parseFloat(v.net_amount) || 0), 0);
+  const due = vouchers.filter(v => ['pending', 'overdue', 'partial'].includes(v.status));
+  const paidRows = due.length
+    ? await FeePayment.findAll({ where: { voucher_id: { [Op.in]: due.map(v => v.id) } }, attributes: ['voucher_id', 'amount_paid'] })
+    : [];
+  const paidMap = {};
+  paidRows.forEach(p => { paidMap[p.voucher_id] = (paidMap[p.voucher_id] || 0) + (parseFloat(p.amount_paid) || 0); });
+  const totalDue = due.reduce((sum, v) => sum + Math.max((parseFloat(v.net_amount) || 0) - (paidMap[v.id] || 0), 0), 0);
   const nextDue = due[0];
 
   return {
@@ -1223,7 +1224,8 @@ export const getChildFullFees = async (childId, instituteId, filters = {}) => {
   // Build where clause
   const where = {
     institute_id: instituteId,
-    student_id: childId
+    student_id: childId,
+    archived: false // carried-forward / deleted vouchers must not be counted twice
   };
 
   // Status filtering
@@ -1233,6 +1235,7 @@ export const getChildFullFees = async (childId, instituteId, filters = {}) => {
     const statusConditions = [];
     if (include_paid) statusConditions.push('paid');
     if (include_pending) statusConditions.push('pending');
+    if (include_pending) statusConditions.push('partial');
     if (include_overdue) statusConditions.push('overdue');
     if (statusConditions.length > 0) {
       where.status = { [Op.in]: statusConditions };
@@ -1259,6 +1262,13 @@ export const getChildFullFees = async (childId, instituteId, filters = {}) => {
       }
     ]
   });
+
+  // Recorded payments per voucher (partial payments count towards paid)
+  const payRows = vouchers.length
+    ? await FeePayment.findAll({ where: { voucher_id: { [Op.in]: vouchers.map(v => v.id) } }, attributes: ['voucher_id', 'amount_paid'] })
+    : [];
+  const paidByVoucher = {};
+  payRows.forEach(p => { paidByVoucher[p.voucher_id] = (paidByVoucher[p.voucher_id] || 0) + (parseFloat(p.amount_paid) || 0); });
 
   // Get child details
   const child = await User.findByPk(childId);
@@ -1287,19 +1297,17 @@ export const getChildFullFees = async (childId, instituteId, filters = {}) => {
     summary.total_discount += discount;
     summary.total_fine += fine;
 
-    if (v.status === 'paid') {
-      summary.total_paid += netAmount;
-      summary.paid_count++;
-    } else if (v.status === 'overdue') {
-      summary.total_due += netAmount;
-      summary.overdue_count++;
-    } else if (v.status === 'pending') {
-      summary.total_due += netAmount;
-      summary.pending_count++;
-    } else if (v.status === 'partial') {
-      summary.total_due += netAmount;
-      summary.partial_count++;
-    }
+    // Legacy vouchers marked paid without payment rows count as fully paid
+    const recorded = paidByVoucher[v.id] || 0;
+    const paidAmount = v.status === 'paid' ? Math.max(recorded, netAmount) : Math.min(recorded, netAmount);
+    const dueAmount = (v.status === 'paid' || v.status === 'cancelled') ? 0 : Math.max(netAmount - paidAmount, 0);
+    summary.total_paid += paidAmount;
+    summary.total_due += dueAmount;
+    if (v.status === 'paid') summary.paid_count++;
+    else if (v.status === 'overdue') summary.overdue_count++;
+    else if (v.status === 'pending') summary.pending_count++;
+    else if (v.status === 'partial') summary.partial_count++;
+    const split = splitBreakdown(v.fee_breakdown);
 
     // Get active academic session for student
     const studentActiveSession = v.Student?.details?.studentDetails?.academicSessions?.find(s => s.status === 'active');
@@ -1314,11 +1322,14 @@ export const getChildFullFees = async (childId, instituteId, filters = {}) => {
       discount: discount,
       fine: fine,
       net_amount: netAmount,
+      paid_amount: Number(paidAmount.toFixed(2)),
+      due_amount: Number(dueAmount.toFixed(2)),
       due_date: v.due_date,
       status: v.status,
       issued_date: v.issued_date,
       notes: v.notes,
-      fee_breakdown: v.fee_breakdown,
+      fee_breakdown: split.breakdown,
+      payment_requests: split.requests,
       created_at: v.created_at,
       student: v.Student ? {
         id: v.Student.id,
@@ -1334,7 +1345,7 @@ export const getChildFullFees = async (childId, instituteId, filters = {}) => {
   });
 
   // Get payment history across all vouchers
-  const paymentHistory = await getPaymentHistory(childId, instituteId);
+  const paymentHistory = await getChildPaymentHistory(childId, instituteId);
 
   // Get upcoming dues
   const upcomingDues = voucherList
@@ -1381,10 +1392,105 @@ export const getChildFullFees = async (childId, instituteId, filters = {}) => {
 /**
  * Get payment history for a child
  */
-const getPaymentHistory = async (childId, instituteId, limit = 50) => {
-  // Payment history is tracked in FeePayment model, not in FeeVoucher
-  // For now, return empty array
-  return [];
+const getChildPaymentHistory = async (childId, instituteId, limit = 50) => {
+  const vouchers = await FeeVoucher.findAll({
+    where: { institute_id: instituteId, student_id: childId },
+    attributes: ['id', 'voucher_number', 'month', 'year']
+  });
+  if (!vouchers.length) return [];
+  const byId = Object.fromEntries(vouchers.map(v => [v.id, v]));
+  const payments = await FeePayment.findAll({
+    where: { voucher_id: { [Op.in]: vouchers.map(v => v.id) } },
+    order: [['payment_date', 'DESC'], ['created_at', 'DESC']],
+    limit
+  });
+  return payments.map(p => ({
+    id: p.id,
+    voucher_id: p.voucher_id,
+    voucher_number: byId[p.voucher_id]?.voucher_number,
+    month: byId[p.voucher_id]?.month,
+    year: byId[p.voucher_id]?.year,
+    amount: parseFloat(p.amount_paid) || 0,
+    payment_method: p.payment_method,
+    transaction_id: p.transaction_id,
+    receipt_number: p.receipt_number,
+    payment_date: p.payment_date,
+    status: 'confirmed'
+  }));
+};
+
+/**
+ * Payment history across all of a parent's children (confirmed payments +
+ * pending/rejected payment requests). GET /portal/parent/payments/history
+ */
+export const getPaymentHistory = async (parentId, instituteId, filters = {}) => {
+  const children = await getMyChildren(parentId, instituteId);
+  const limit = Math.min(parseInt(filters.limit, 10) || 50, 200);
+  const rows = [];
+  for (const child of children) {
+    const confirmed = await getChildPaymentHistory(child.id, instituteId, limit);
+    confirmed.forEach(p => rows.push({ ...p, child_id: child.id, child_name: child.name }));
+
+    const vouchers = await FeeVoucher.findAll({
+      where: { institute_id: instituteId, student_id: child.id, archived: false },
+      attributes: ['id', 'voucher_number', 'fee_breakdown']
+    });
+    vouchers.forEach(v => {
+      splitBreakdown(v.fee_breakdown).requests
+        .filter(r => r.status !== 'confirmed') // confirmed ones already appear as real payments
+        .forEach(r => rows.push({
+          id: r.id,
+          voucher_id: v.id,
+          voucher_number: v.voucher_number,
+          amount: r.amount,
+          payment_method: r.payment_method,
+          transaction_id: r.transaction_id,
+          receipt_number: null,
+          payment_date: r.created_at,
+          status: r.status,
+          child_id: child.id,
+          child_name: child.name
+        }));
+    });
+  }
+  let out = rows;
+  if (filters.from_date) out = out.filter(r => new Date(r.payment_date) >= new Date(filters.from_date));
+  if (filters.to_date) out = out.filter(r => new Date(r.payment_date) <= new Date(filters.to_date + 'T23:59:59'));
+  out.sort((a, b) => new Date(b.payment_date) - new Date(a.payment_date));
+  return out.slice(0, limit);
+};
+
+/**
+ * Months that have attendance records for a child (for the month picker).
+ * GET /portal/parent/children/:childId/attendance/months
+ */
+export const getAttendanceMonths = async (childId, instituteId) => {
+  const records = await Attendance.findAll({
+    where: { school_id: instituteId, student_id: childId },
+    attributes: ['date', 'status'],
+    order: [['date', 'DESC']],
+    raw: true
+  });
+  const months = {};
+  records.forEach(r => {
+    const key = String(r.date).slice(0, 7);
+    if (!months[key]) months[key] = { total_days: 0, ...emptyCounts() };
+    months[key].total_days++;
+    if (r.status in months[key]) months[key][r.status]++;
+  });
+  return Object.entries(months)
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([key, stats]) => {
+      const [y, m] = key.split('-').map(Number);
+      return {
+        month_key: key,
+        year: y,
+        month: m,
+        label: format(new Date(y, m - 1, 1), 'MMMM yyyy'),
+        ...stats,
+        percentage: attendancePercentage(stats)
+      };
+    });
 };
 
 /**
@@ -1402,28 +1508,16 @@ export const getFeeVoucherById = async (voucherId, parentId, instituteId) => {
     ]
   });
 
-  if (!voucher) throw new Error('Voucher not found');
+  if (!voucher) throw new AppError('Voucher not found', 404);
 
-  // Verify parent owns this child
-  const parent = await User.findByPk(parentId);
-  if (!parent) throw new Error('Parent not found');
+  await assertParentOwnsChild(parentId, voucher.student_id, instituteId);
 
-  const childrenIds = parent.details?.parentDetails?.student_ids || [];
-  if (!childrenIds.includes(voucher.student_id)) {
-    throw new Error('You are not authorized to view this voucher');
-  }
+  const paymentHistory = (await getChildPaymentHistory(voucher.student_id, instituteId, 200))
+    .filter(p => p.voucher_id === voucher.id);
+  const paidAmount = paymentHistory.reduce((s, p) => s + p.amount, 0);
 
-  let paymentHistory = [];
-
-  // Parse fee_breakdown (this contains the actual fee items)
-  let feeBreakdown = voucher.fee_breakdown;
-  if (typeof feeBreakdown === 'string') {
-    try {
-      feeBreakdown = JSON.parse(feeBreakdown);
-    } catch (e) {
-      feeBreakdown = {};
-    }
-  }
+  // fee_breakdown holds the fee items; pending payment requests are exposed separately
+  const { breakdown: feeBreakdown, requests: paymentRequests } = splitBreakdown(voucher.fee_breakdown);
 
   return {
     id: voucher.id,
@@ -1439,6 +1533,9 @@ export const getFeeVoucherById = async (voucherId, parentId, instituteId) => {
     status: voucher.status,
     notes: voucher.notes,
     fee_breakdown: feeBreakdown,
+    paid_amount: Number(paidAmount.toFixed(2)),
+    payment_history: paymentHistory,
+    payment_requests: paymentRequests,
     student: voucher.Student ? {
       id: voucher.Student.id,
       name: `${voucher.Student.first_name} ${voucher.Student.last_name}`,
@@ -1468,7 +1565,7 @@ export const getChildAssignments = async (childId, instituteId, filters = {}, pa
     return { data: [], pagination: { total: 0, page, limit, totalPages: 0 } };
   }
 
-  const childClass = child.details?.class_id;
+  const childClass = getStudentAcademicInfo(child).class_id;
 
   const where = {
     institute_id: instituteId,
@@ -1558,7 +1655,7 @@ const getChildUpcomingAssignments = async (childId, instituteId, limit = 3) => {
 
   if (!child) return [];
 
-  const childClass = child.details?.class_id;
+  const childClass = getStudentAcademicInfo(child).class_id;
   const today = new Date();
 
   const assignments = await Assignment.findAll({
@@ -1622,7 +1719,7 @@ export const getChildTimetable = async (childId, instituteId) => {
     return emptySchedule;
   }
 
-  const childClass = child.details?.class_id;
+  const childClass = getStudentAcademicInfo(child).class_id;
   if (!childClass) {
     const emptySchedule = {};
     ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].forEach(day => {
@@ -1672,102 +1769,41 @@ export const getChildTimetable = async (childId, instituteId) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Get notices for parent
- * Note: Notice model not yet implemented, returns empty array
- * Will be implemented when Notice model is created in models/postgres/Notice.model.js
+ * Notices for a parent: notifications addressed to the parent or any of their
+ * children plus institute broadcasts (Notification model, scoped by institute).
  */
-export const getParentNotices = async (instituteId, limit = 10) => {
+export const getParentNotices = async (parentId, instituteId, limit = 10) => {
   try {
-    // TODO: Implement when Notice model is available
-    // For now, return empty array to prevent dashboard from crashing
-    logger.info('Parent Notices not yet implemented (Notice model pending)');
-    return [];
+    const parent = await User.findByPk(parentId, { attributes: ['id', 'branch_id', 'details'] });
+    if (!parent) return [];
+    const { data } = await fetchNotices({
+      instituteId,
+      branchId: parent.branch_id,
+      userIds: [parentId, ...getParentChildIds(parent)],
+      limit
+    });
+    return data;
   } catch (error) {
     logger.error('Error fetching parent notices:', error);
-    // Return empty array instead of crashing dashboard
     return [];
   }
 };
+
 /**
- * Get notices/announcements for a specific child
- * Uses existing Notification model (no extra columns)
+ * Notices for one child (addressed to the child or parent, plus broadcasts).
  */
 export const getNoticesForChild = async (childId, parentId, instituteId, filters = {}) => {
-  try {
-    // Verify parent owns this child
-    const parent = await User.findByPk(parentId);
-    if (!parent) return { data: [], pagination: { total: 0, page: 1, limit: 10, totalPages: 0 } };
-
-    const childrenIds =
-      parent.details?.parentDetails?.student_ids ||
-      parent.student_ids ||
-      parent.details?.student_ids ||
-      parent.details?.children_ids ||
-      [];
-    if (!childrenIds.includes(childId)) {
-      throw new Error('Not authorized');
-    }
-
-    // Build where clause for notifications
-    const whereClause = {
-      institute_id: instituteId,
-      [Op.or]: [
-        // 1. Direct notification to the child (student)
-        { user_id: childId },
-        // 2. Notification to the parent (applies to all children)
-        { user_id: parentId },
-        // 3. System broadcast (user_id = null)
-        { user_id: null }
-      ]
-    };
-
-    // Optional: filter by type (fee, exam, general, etc.)
-    if (filters.type && filters.type !== 'all') {
-      whereClause.type = filters.type;
-    }
-
-    // Optional: filter by read status
-    if (filters.is_read !== undefined) {
-      whereClause.is_read = filters.is_read;
-    }
-
-    const limit = filters.limit ? parseInt(filters.limit) : 50;
-    const offset = filters.page ? (parseInt(filters.page) - 1) * limit : 0;
-
-    const { count, rows } = await Notification.findAndCountAll({
-      where: whereClause,
-      order: [['created_at', 'DESC']],
-      limit,
-      offset
-    });
-
-    // Format notifications for frontend
-    const formatted = rows.map(notif => ({
-      id: notif.id,
-      title: notif.title,
-      body: notif.body,
-      type: notif.type,
-      category: notif.type === 'fee' ? 'Fee' : notif.type === 'exam' ? 'Exam' : 'General',
-      priority: notif.data?.priority || (notif.type === 'alert' ? 'high' : 'medium'),
-      date: format(notif.created_at, 'dd MMM yyyy'),
-      author: notif.data?.author || 'School Administration',
-      is_read: notif.is_read,
-      created_at: notif.created_at
-    }));
-
-    return {
-      data: formatted,
-      pagination: {
-        total: count,
-        page: filters.page ? parseInt(filters.page) : 1,
-        limit,
-        totalPages: Math.ceil(count / limit)
-      }
-    };
-  } catch (error) {
-    logger.error('Error fetching notices for child:', error);
-    return { data: [], pagination: { total: 0, page: 1, limit: 10, totalPages: 0 } };
-  }
+  await assertParentOwnsChild(parentId, childId, instituteId);
+  const parent = await User.findByPk(parentId, { attributes: ['id', 'branch_id'] });
+  return fetchNotices({
+    instituteId,
+    branchId: parent?.branch_id,
+    userIds: [childId, parentId],
+    type: filters.type,
+    is_read: filters.is_read,
+    limit: filters.limit || 20,
+    page: filters.page || 1
+  });
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1775,57 +1811,57 @@ export const getNoticesForChild = async (childId, parentId, instituteId, filters
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Pay fee for a child
+ * "Pay" a fee for a child.
+ *
+ * SECURITY: this NEVER marks a voucher paid. There is no payment gateway, so it
+ * records a PENDING payment request (optionally with proof of payment) that a
+ * school admin must confirm (PATCH /fee-vouchers/:voucherId/payment-requests/:requestId).
  */
-export const payChildFee = async (voucherId, parentId, instituteId, paymentData) => {
-  const transaction = await sequelize.transaction();
-
-  try {
-    const voucher = await FeeVoucher.findOne({
-      where: { id: voucherId, institute_id: instituteId },
-      include: [
-        { model: User, as: 'Student', attributes: ['id', 'first_name', 'last_name', 'details'] }
-      ]
-    });
-
-    if (!voucher) throw new Error('Voucher not found');
-
-    // Verify parent owns this child
-    const parent = await User.findByPk(parentId);
-    if (!parent) throw new Error('Parent not found');
-
-    const childrenIds =
-      parent.details?.parentDetails?.student_ids ||
-      parent.student_ids ||
-      parent.details?.student_ids ||
-      parent.details?.children_ids ||
-      [];
-
-    if (!Array.isArray(childrenIds) || !childrenIds.includes(voucher.student_id)) {
-      throw new Error('You are not authorized to pay for this student');
-    }
-
-    if (voucher.status === 'paid') {
-      throw new Error('This voucher is already paid');
-    }
-
-    // Update voucher status to paid
-    voucher.status = 'paid';
-    await voucher.save({ transaction });
-
-    await transaction.commit();
-
-    return {
-      id: voucher.id,
-      voucher_number: voucher.voucher_number,
-      amount: parseFloat(voucher.net_amount) || 0,
-      status: 'paid',
-      message: 'Payment successful'
-    };
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
+export const payChildFee = async (voucherId, parentId, instituteId, paymentData = {}, file = null) => {
+  const voucher = await FeeVoucher.findOne({
+    where: { id: voucherId, institute_id: instituteId },
+    attributes: ['id', 'student_id']
+  });
+  if (!voucher) {
+    if (file?.path) await unlink(file.path).catch(() => {});
+    throw new AppError('Voucher not found', 404);
   }
+  try {
+    await assertParentOwnsChild(parentId, voucher.student_id, instituteId);
+  } catch (err) {
+    if (file?.path) await unlink(file.path).catch(() => {});
+    throw err;
+  }
+
+  const parent = await User.findByPk(parentId, { attributes: ['id', 'first_name', 'last_name'] });
+
+  let proofUrl = null;
+  if (file) {
+    try {
+      const uploaded = await uploadToCloudinary(file.path, `the-clouds-academy/${instituteId}/fee-proofs`);
+      proofUrl = uploaded.url;
+    } finally {
+      await unlink(file.path).catch(() => {});
+    }
+  }
+
+  const { request, voucher: v } = await createPaymentRequest(
+    voucherId,
+    instituteId,
+    { id: parentId, name: parent ? `${parent.first_name} ${parent.last_name}`.trim() : null },
+    { ...paymentData, proof_url: proofUrl },
+    { student_ids: [voucher.student_id] }
+  );
+
+  return {
+    id: v.id,
+    voucher_number: v.voucher_number,
+    amount: request.amount,
+    status: v.status, // voucher status is unchanged until the school confirms
+    payment_status: 'pending_confirmation',
+    payment_request: request,
+    message: 'Payment request submitted. The school will confirm it once the payment is verified.'
+  };
 };
 
 
@@ -1840,19 +1876,14 @@ export const getChildrenTeachers = async (parentId, instituteId) => {
   const parent = await User.findByPk(parentId);
   if (!parent) return [];
 
-  const childrenIds =
-    parent.details?.parentDetails?.student_ids ||
-    parent.student_ids ||
-    parent.details?.student_ids ||
-    parent.details?.children_ids ||
-    [];
+  const childrenIds = getParentChildIds(parent);
 
   const children = await User.findAll({
-    where: { id: { [Op.in]: childrenIds } },
+    where: { id: { [Op.in]: childrenIds }, school_id: instituteId, user_type: 'STUDENT' },
     attributes: ['id', 'details']
   });
 
-  const classIds = children.map(c => c.details?.class_id).filter(Boolean);
+  const classIds = [...new Set(children.map(c => getStudentAcademicInfo(c).class_id).filter(Boolean))];
 
   if (classIds.length === 0) return [];
 
@@ -1951,37 +1982,48 @@ const getChildAlerts = (child, data) => {
   return alerts;
 };
 
-export const updateChildProfile = async (childId, parentId, instituteId, updateData, file) => {
-  // Verify parent owns this child
-  const parent = await User.findByPk(parentId);
-  if (!parent) throw new Error('Parent not found');
-  const childrenIds = parent.details?.parentDetails?.student_ids || [];
-  if (!childrenIds.includes(childId)) throw new Error('Not authorized');
+export const updateChildProfile = async (childId, parentId, instituteId, updateData = {}, file) => {
+  try {
+    await assertParentOwnsChild(parentId, childId, instituteId);
+  } catch (err) {
+    if (file?.path) await unlink(file.path).catch(() => {});
+    throw err;
+  }
 
-  const child = await User.findByPk(childId);
-  if (!child) throw new Error('Child not found');
+  const child = await User.findOne({ where: { id: childId, school_id: instituteId, user_type: 'STUDENT' } });
+  if (!child) {
+    if (file?.path) await unlink(file.path).catch(() => {});
+    throw new AppError('Child not found', 404);
+  }
 
   // Upload avatar if provided
   let avatarUrl = child.avatar_url;
   let avatarPublicId = child.avatar_public_id;
   if (file) {
-    const folder = `the-clouds-academy/${instituteId}/students/avatars`;
-    const result = await uploadToCloudinary(file.path, folder, { transformation: [{ width: 300, height: 300, crop: 'thumb' }] });
-    avatarUrl = result.url;
-    if (child.avatar_public_id) await deleteFromCloudinary(child.avatar_public_id).catch(() => { });
-    avatarPublicId = result.public_id;
+    try {
+      const folder = `the-clouds-academy/${instituteId}/students/avatars`;
+      const result = await uploadToCloudinary(file.path, folder, { transformation: [{ width: 300, height: 300, crop: 'thumb' }] });
+      avatarUrl = result.url;
+      if (child.avatar_public_id) await deleteFromCloudinary(child.avatar_public_id).catch(() => { });
+      avatarPublicId = result.public_id;
+    } finally {
+      await unlink(file.path).catch(() => {});
+    }
   }
 
-  // Update basic fields (only safe ones)
-  const allowed = ['first_name', 'last_name', 'phone', 'email'];
-  allowed.forEach(f => { if (updateData[f] !== undefined) child[f] = updateData[f]; });
+  // Only contact-type fields; never email/registration/fees/class
+  ['first_name', 'last_name', 'phone'].forEach(f => { if (updateData[f] !== undefined) child[f] = updateData[f]; });
 
-  // Update student details (limited fields parent can edit)
-  if (updateData.details) {
-    const safeDetails = {};
+  // Limited studentDetails fields a parent may edit
+  let incoming = updateData.details;
+  if (typeof incoming === 'string') { try { incoming = JSON.parse(incoming); } catch { incoming = null; } }
+  if (incoming && typeof incoming === 'object') {
     const editable = ['present_address', 'permanent_address', 'city', 'emergency_contact_name', 'emergency_contact_phone'];
-    editable.forEach(f => { if (updateData.details[f] !== undefined) safeDetails[f] = updateData.details[f]; });
-    child.details = { ...child.details, ...safeDetails };
+    const safeDetails = {};
+    editable.forEach(f => { if (incoming[f] !== undefined) safeDetails[f] = incoming[f]; });
+    const details = { ...(child.details || {}) };
+    details.studentDetails = { ...(details.studentDetails || {}), ...safeDetails };
+    child.details = details;
     child.changed('details', true);
   }
 
@@ -1993,7 +2035,6 @@ export const updateChildProfile = async (childId, parentId, instituteId, updateD
   await child.save();
   return getChildDetails(childId, parentId, instituteId);
 };
-
 
 const getEntityName = (entityIds) => {
   if (!entityIds) return 'Unknown';

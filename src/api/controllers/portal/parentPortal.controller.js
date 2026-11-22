@@ -17,6 +17,26 @@ const getInstituteId = (req) => {
   return req.user?.school_id || req.user?.institute_id;
 };
 
+/**
+ * AppError -> its own status (403/404/...); legacy "not authorized"/"not found"
+ * messages -> 403/404; anything else -> the handler's default.
+ */
+const handleError = (res, error, fallback = 500) => {
+  const msg = String(error?.message || 'Request failed');
+  let status = error?.statusCode;
+  if (!status) {
+    if (/not authorized/i.test(msg)) status = 403;
+    else if (/not found/i.test(msg)) status = 404;
+    else status = fallback;
+  }
+  if (status >= 500) console.error('Parent portal error:', error);
+  return sendError(res, status >= 500 ? 'Something went wrong. Please try again.' : msg, status);
+};
+
+/** Every :childId endpoint goes through this single ownership check (B8) */
+const ownChild = (req) =>
+  parentService.assertParentOwnsChild(req.user.id, req.params.childId, getInstituteId(req));
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,7 +47,7 @@ export const getDashboard = async (req, res) => {
     return sendSuccess(res, dashboard, 'Dashboard fetched successfully');
   } catch (error) {
     console.error('Dashboard error:', error);
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -40,7 +60,7 @@ export const getProfile = async (req, res) => {
     const profile = await parentService.getParentProfile(req.user.id, instituteId);
     return sendSuccess(res, profile, 'Profile fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -55,7 +75,7 @@ export const updateProfile = async (req, res) => {
     );
     return sendSuccess(res, profile, 'Profile updated successfully');
   } catch (error) {
-    return sendError(res, error.message, 400);
+    return handleError(res, error, 400);
   }
 };
 
@@ -68,7 +88,7 @@ export const getMyChildren = async (req, res) => {
     const children = await parentService.getMyChildren(req.user.id, instituteId);
     return sendSuccess(res, children, 'Children fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -76,17 +96,18 @@ export const getChildDetails = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     
     const child = await parentService.getChildDetails(childId, req.user.id, instituteId);
     return sendSuccess(res, child, 'Child details fetched successfully');
   } catch (error) {
     if (error.message.includes('not authorized')) {
-      return sendError(res, error.message, 403);
+      return handleError(res, error, 403);
     }
     if (error.message.includes('not found')) {
       return sendNotFound(res, error.message);
     }
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -97,6 +118,7 @@ export const getChildAttendance = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     
     // Get filters from query params
     const filters = {
@@ -112,7 +134,7 @@ export const getChildAttendance = async (req, res) => {
     return sendSuccess(res, attendance, 'Attendance fetched successfully');
   } catch (error) {
     console.error('Attendance error:', error);
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -121,11 +143,12 @@ export const getAttendanceMonths = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     
     const months = await parentService.getAttendanceMonths(childId, instituteId);
     return sendSuccess(res, months, 'Attendance months fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -138,6 +161,7 @@ export const getChildResults = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     
     const filters = {
       exam_type: req.query.exam_type,
@@ -151,7 +175,7 @@ export const getChildResults = async (req, res) => {
     return sendSuccess(res, results, 'Results fetched successfully');
   } catch (error) {
     console.error('Results error:', error);
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -164,12 +188,12 @@ export const getExamResultDetails = async (req, res) => {
     return sendSuccess(res, result, 'Exam result details fetched successfully');
   } catch (error) {
     if (error.message.includes('not authorized')) {
-      return sendError(res, error.message, 403);
+      return handleError(res, error, 403);
     }
     if (error.message.includes('not found')) {
       return sendNotFound(res, error.message);
     }
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -177,6 +201,7 @@ export const getResultStatistics = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     
     const results = await parentService.getChildFullResults(childId, instituteId);
     
@@ -191,7 +216,7 @@ export const getResultStatistics = async (req, res) => {
     
     return sendSuccess(res, statistics, 'Result statistics fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -214,6 +239,7 @@ export const getChildFees = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     
     const filters = {
       status: req.query.status,
@@ -229,7 +255,7 @@ export const getChildFees = async (req, res) => {
     return sendSuccess(res, fees, 'Fees fetched successfully');
   } catch (error) {
     console.error('Fees error:', error);
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -242,12 +268,12 @@ export const getVoucherDetails = async (req, res) => {
     return sendSuccess(res, voucher, 'Voucher details fetched successfully');
   } catch (error) {
     if (error.message.includes('not authorized')) {
-      return sendError(res, error.message, 403);
+      return handleError(res, error, 403);
     }
     if (error.message.includes('not found')) {
       return sendNotFound(res, error.message);
     }
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -285,7 +311,7 @@ export const getFeeSummary = async (req, res) => {
     
     return sendSuccess(res, { children: childrenFees, overall: overallSummary }, 'Fee summary fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -303,7 +329,7 @@ export const payChildFee = async (req, res) => {
     
     return sendSuccess(res, payment, 'Payment successful');
   } catch (error) {
-    return sendError(res, error.message, 400);
+    return handleError(res, error, 400);
   }
 };
 
@@ -319,7 +345,7 @@ export const getPaymentHistory = async (req, res) => {
     const history = await parentService.getPaymentHistory(req.user.id, instituteId, filters);
     return sendSuccess(res, history, 'Payment history fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -330,6 +356,7 @@ export const getChildAssignments = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     const filters = {
       status: req.query.status
     };
@@ -347,7 +374,7 @@ export const getChildAssignments = async (req, res) => {
     
     return sendPaginated(res, result.data, result.pagination, 'Assignments fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -358,11 +385,12 @@ export const getChildTimetable = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     
     const timetable = await parentService.getChildTimetable(childId, instituteId);
     return sendSuccess(res, timetable, 'Timetable fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -376,7 +404,7 @@ export const getChildrenTeachers = async (req, res) => {
     const teachers = await parentService.getChildrenTeachers(req.user.id, instituteId);
     return sendSuccess(res, teachers, 'Teachers fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -388,10 +416,10 @@ export const getNotices = async (req, res) => {
     const instituteId = getInstituteId(req);
     const { limit = 10 } = req.query;
     
-    const notices = await parentService.getParentNotices(instituteId, parseInt(limit));
+    const notices = await parentService.getParentNotices(req.user.id, instituteId, parseInt(limit));
     return sendSuccess(res, notices, 'Notices fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -399,6 +427,7 @@ export const getNoticesForChild = async (req, res) => {
   try {
     const { childId } = req.params;
     const instituteId = getInstituteId(req);
+    await ownChild(req);
     const filters = {
       type: req.query.type,
       is_read: req.query.is_read === 'true' ? true : req.query.is_read === 'false' ? false : undefined,
@@ -417,9 +446,9 @@ export const getNoticesForChild = async (req, res) => {
     return sendPaginated(res, result.data, result.pagination, 'Notices fetched successfully');
   } catch (error) {
     if (error.message.includes('Not authorized')) {
-      return sendError(res, error.message, 403);
+      return handleError(res, error, 403);
     }
-    return sendError(res, error.message, 500);
+    return handleError(res, error, 500);
   }
 };
 
@@ -429,6 +458,7 @@ export const getNoticesForChild = async (req, res) => {
 export const updateChildProfile = async (req, res) => {
   const { childId } = req.params;
   const instituteId = getInstituteId(req);
+    await ownChild(req);
   const updated = await parentService.updateChildProfile(childId, req.user.id, instituteId, req.body, req.file);
   sendSuccess(res, updated, 'Child profile updated');
 };
