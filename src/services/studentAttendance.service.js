@@ -3,6 +3,7 @@ import models from "../models/postgres/index.js";
 import { sequelize } from "../models/postgres/index.js";
 import { createNotification, broadcastNotification } from "./notification.service.js";
 import logger from "../config/logger.js";
+import { todayPkt } from "../utils/helpers/date.helper.js";
 
 const { StudentAttendance, User, Class, Section, Institute } = models;
 
@@ -342,14 +343,15 @@ export const bulkMarkAttendance = async (data, options = {}) => {
  */
 export const scanQR = async (data, options = {}) => {
   const { student_id, date, school_id, marked_by, type } = data;
-  const today = date || new Date().toISOString().slice(0, 10);
+  // Pakistan calendar day (toISOString() is UTC: before 05:00 PKT it would give yesterday)
+  const today = date || todayPkt();
   const transaction = options.transaction || (await sequelize.transaction());
 
   try {
     const student = await User.findByPk(student_id, {
       attributes: ["user_type", "details", "school_id"],
     });
-    if (!student) throw new Error("Student not found");
+    if (!student || (school_id && student.school_id !== school_id)) throw new Error("Student not found");
 
     let attendance = await StudentAttendance.findOne({
       where: { student_id, date: today },

@@ -1,6 +1,8 @@
 import cron from "node-cron";
 import { Op } from "sequelize";
-import { subDays, format } from "date-fns";
+import { subDays } from "date-fns";
+import { toPktDateString } from "../utils/helpers/date.helper.js";
+const format = (d) => toPktDateString(d); // all school days are Pakistan calendar days
 import models from "../models/postgres/index.js";
 import { sequelize } from "../models/postgres/index.js";
 

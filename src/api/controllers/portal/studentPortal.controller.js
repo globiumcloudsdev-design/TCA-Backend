@@ -168,12 +168,13 @@ export const submitAssignment = async (req, res) => {
       assignmentId,
       req.user.id,
       instituteId,
-      req.files
+      req.files,
+      req.body?.submission_text ?? req.body?.submissionText ?? null
     );
-    
+
     return sendSuccess(res, submission, 'Assignment submitted successfully');
   } catch (error) {
-    return sendError(res, error.message, 400);
+    return sendError(res, error.message, error.statusCode || 400);
   }
 };
 
@@ -257,14 +258,15 @@ export const getNotices = async (req, res) => {
   try {
     const instituteId = getInstituteId(req);
     const filters = {
-      priority: req.query.priority
+      priority: req.query.priority,
+      type: req.query.type
     };
     const pagination = {
       page: parseInt(req.query.page) || 1,
       limit: parseInt(req.query.limit) || 10
     };
-    
-    const result = await studentService.getNotices(instituteId, filters, pagination);
+
+    const result = await studentService.getNotices(req.user.id, instituteId, filters, pagination);
     return sendPaginated(res, result.data, result.pagination, 'Notices fetched successfully');
   } catch (error) {
     return sendError(res, error.message, 500);
@@ -276,7 +278,7 @@ export const getRecentNotices = async (req, res) => {
     const instituteId = getInstituteId(req);
     const { limit = 5 } = req.query;
     
-    const notices = await studentService.getRecentNotices(instituteId, parseInt(limit));
+    const notices = await studentService.getRecentNotices(req.user.id, instituteId, parseInt(limit));
     return sendSuccess(res, notices, 'Recent notices fetched successfully');
   } catch (error) {
     return sendError(res, error.message, 500);

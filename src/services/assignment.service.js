@@ -541,7 +541,7 @@ const getAssignmentStats = async (assignmentId, instituteId) => {
         school_id: instituteId,
         user_type: 'STUDENT',
         is_active: true,
-        'details.class_id': { [Op.in]: assignment.target_ids }
+        'details.studentDetails.class_id': { [Op.in]: assignment.target_ids }
       }
     });
   } else if (assignment.target_type === 'all') {

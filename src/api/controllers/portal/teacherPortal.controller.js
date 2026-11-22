@@ -284,7 +284,7 @@ export const markAttendance = async (req, res) => {
     );
     return sendSuccess(res, result, 'Attendance marked successfully');
   } catch (error) {
-    return sendError(res, error.message, 400);
+    return sendError(res, error.message, error.statusCode || 400);
   }
 };
 
@@ -317,7 +317,7 @@ export const getStudentAttendance = async (req, res) => {
     const attendance = await teacherService.getStudentAttendanceHistory(studentId, instituteId);
     return sendSuccess(res, attendance, 'Student attendance fetched successfully');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, error.statusCode || (/do not teach|not authorized/i.test(error.message) ? 403 : /not found/i.test(error.message) ? 404 : 500));
   }
 };
 
@@ -398,8 +398,7 @@ export const createExam = async (req, res) => {
         exam_date,
         exam_type: exam_type || 'PERIODIC',
         duration_minutes: duration_minutes || 60
-      },
-      { transaction: true }
+      }
     );
     
     return sendSuccess(res, result, 'Exam created successfully', 201);
@@ -523,8 +522,7 @@ export const addExamResults = async (req, res) => {
       req.user.id,
       instituteId,
       examId,
-      results,
-      { transaction: true }
+      results
     );
     
     return sendSuccess(res, result, 'Exam results saved successfully');

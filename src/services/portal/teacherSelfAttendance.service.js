@@ -24,6 +24,7 @@ import {
 import models from "../../models/postgres/index.js";
 import { createNotification, broadcastNotification } from "../notification.service.js";
 import logger from "../../config/logger.js";
+import { todayPkt, toPktDateString, toPktTimeString, pktParts } from "../../utils/helpers/date.helper.js";
 
 const { StaffAttendance, LeaveRequest, User } = models;
 
@@ -37,12 +38,23 @@ const { StaffAttendance, LeaveRequest, User } = models;
  */
 const DEFAULT_SHIFT_START = { hour: 8, minute: 30 };
 
+/**
+ * Shift end is SERVER-controlled (B16): never trust client-sent shift_end_* values,
+ * otherwise a teacher could claim arbitrary overtime.
+ */
+const DEFAULT_SHIFT_END = { hour: 17, minute: 0 };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 'YYYY-MM-DD' for today */
-const todayDateStr = () => format(new Date(), "yyyy-MM-dd");
+// All attendance dates/times are Pakistan time (server runs in UTC) — B32
+const todayDateStr = () => todayPkt();
+
+/** The instant of hh:mm Pakistan time on the same PKT calendar day as `ref` */
+const pktClock = (ref, { hour, minute }) =>
+  new Date(`${toPktDateString(ref)}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+05:00`);
 
 /**
  * How many minutes late is this timestamp vs shift start?
@@ -51,8 +63,7 @@ const todayDateStr = () => format(new Date(), "yyyy-MM-dd");
 const calcLateMinutes = (checkInDate, shiftStart = DEFAULT_SHIFT_START) => {
   if (!checkInDate) return 0;
   const dt = new Date(checkInDate);
-  const shiftDt = new Date(dt);
-  shiftDt.setHours(shiftStart.hour, shiftStart.minute, 0, 0);
+  const shiftDt = pktClock(dt, shiftStart);
   const diff = differenceInMinutes(dt, shiftDt);
   return diff > 0 ? diff : 0;
 };
@@ -191,7 +202,7 @@ export const teacherCheckIn = async (teacherId, instituteId, data = {}) => {
         branch_id: data.branch_id || null,
         recipient_type: 'ALL_ADMINS',
         title: `✅ Check-In: ${teacherName}`,
-        body: `${teacherName} checked in at ${format(now, 'HH:mm:ss')} - ${lateMinutes > 0 ? '⏰ Late' : '✓ On Time'}`,
+        body: `${teacherName} checked in at ${toPktTimeString(now)} - ${lateMinutes > 0 ? '⏰ Late' : '✓ On Time'}`,
         type: 'alert',
         channel: 'in_app',
         data: {
@@ -240,10 +251,7 @@ export const teacherCheckOut = async (teacherId, instituteId, data = {}) => {
   }
 
   // Calculate overtime / early exit vs default shift end (17:00)
-  const shiftEndHour = data.shift_end_hour ?? 17;
-  const shiftEndMinute = data.shift_end_minute ?? 0;
-  const shiftEndDt = new Date(now);
-  shiftEndDt.setHours(shiftEndHour, shiftEndMinute, 0, 0);
+  const shiftEndDt = pktClock(now, DEFAULT_SHIFT_END);
 
   const diffFromShiftEnd = differenceInMinutes(now, shiftEndDt);
   const overtimeMinutes = diffFromShiftEnd > 0 ? diffFromShiftEnd : 0;
@@ -274,7 +282,7 @@ export const teacherCheckOut = async (teacherId, instituteId, data = {}) => {
         institute_id: instituteId,
         recipient_type: 'ALL_ADMINS',
         title: `${statusEmoji} Check-Out: ${teacherName}`,
-        body: `${teacherName} checked out at ${format(now, 'HH:mm:ss')} - Overtime: ${overtimeMinutes}m, Early Exit: ${earlyExitMinutes}m`,
+        body: `${teacherName} checked out at ${toPktTimeString(now)} - Overtime: ${overtimeMinutes}m, Early Exit: ${earlyExitMinutes}m`,
         type: 'alert',
         channel: 'in_app',
         data: {
@@ -533,16 +541,10 @@ export const getAttendanceReport = async (
 
   // Average check-in / check-out times
   if (checkInCount > 0) {
-    stats.avg_check_in = format(
-      new Date(totalCheckInMs / checkInCount),
-      "HH:mm",
-    );
+    stats.avg_check_in = toPktTimeString(new Date(totalCheckInMs / checkInCount)).slice(0, 5);
   }
   if (checkOutCount > 0) {
-    stats.avg_check_out = format(
-      new Date(totalCheckOutMs / checkOutCount),
-      "HH:mm",
-    );
+    stats.avg_check_out = toPktTimeString(new Date(totalCheckOutMs / checkOutCount)).slice(0, 5);
   }
 
   // Attendance % = (present + late) / working days (excluding holiday + weekend)
@@ -613,10 +615,11 @@ const resolveDateRange = (filters = {}) => {
       toDate: format(endOfMonth(base), "yyyy-MM-dd"),
     };
   }
-  const now = new Date();
+  const { year: py, month: pm } = pktParts();
+  const base = new Date(py, pm - 1, 1);
   return {
-    fromDate: format(startOfMonth(now), "yyyy-MM-dd"),
-    toDate: format(endOfMonth(now), "yyyy-MM-dd"),
+    fromDate: format(startOfMonth(base), "yyyy-MM-dd"),
+    toDate: format(endOfMonth(base), "yyyy-MM-dd"),
   };
 };
 

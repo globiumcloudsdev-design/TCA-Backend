@@ -23,6 +23,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 import { unlink } from 'fs/promises';
 import logger from '../../config/logger.js';
+import { countAttendance, attendancePercentage } from '../../utils/helpers/attendance.helper.js';
+import { pktDayEnd, todayPkt } from '../../utils/helpers/date.helper.js';
+import { AppError } from '../../utils/lib/AppError.js';
+import { fetchNotices } from './notices.helper.js';
+
+const PUBLISHED_EXAM = { [Op.or]: [{ status: 'results_published' }, { is_published: true }] };
 
 const {
   User,
@@ -474,7 +480,7 @@ export const getStudentDashboard = async (studentId, instituteId) => {
     getRecentResults(studentId, instituteId, 3),
     getFeeSummary(studentId, instituteId),
     // Notices should never break dashboard core widgets.
-    getRecentNotices(instituteId, 5).catch(() => []),
+    getRecentNotices(studentId, instituteId, 5).catch(() => []),
     getStudentStats(studentId, instituteId)
   ]);
 
@@ -748,7 +754,7 @@ export const getMyClasses = async (studentId, instituteId) => {
     if (a.subject_name) {
       subjectAttendance[a.subject_name] = subjectAttendance[a.subject_name] || { total: 0, present: 0 };
       subjectAttendance[a.subject_name].total++;
-      if (a.status === 'present') {
+      if (a.status === 'present' || a.status === 'late') {
         subjectAttendance[a.subject_name].present++;
       }
     }
@@ -916,10 +922,10 @@ export const getMyAttendance = async (studentId, instituteId, filters = {}) => {
   };
 
   if (filters.from_date) {
-    where.date = { [Op.gte]: new Date(filters.from_date) };
+    where.date = { [Op.gte]: String(filters.from_date).slice(0, 10) };
   }
   if (filters.to_date) {
-    where.date = { ...where.date, [Op.lte]: new Date(filters.to_date) };
+    where.date = { ...where.date, [Op.lte]: String(filters.to_date).slice(0, 10) };
   }
   if (filters.subject) {
     where.subject_name = filters.subject;
@@ -933,18 +939,16 @@ export const getMyAttendance = async (studentId, instituteId, filters = {}) => {
 
   // Calculate summary
   const total = attendance.length;
-  const present = attendance.filter(a => a.status === 'present').length;
-  const absent = attendance.filter(a => a.status === 'absent').length;
-  const late = attendance.filter(a => a.status === 'late').length;
-  const leave = attendance.filter(a => a.status === 'leave').length;
+  const counts = countAttendance(attendance);
+  const { present, absent, late, leave } = counts;
 
   // Group by subject
   const subjectWise = {};
   attendance.forEach(a => {
     if (a.subject_name) {
-      subjectWise[a.subject_name] = subjectWise[a.subject_name] || { total: 0, present: 0, absent: 0, late: 0 };
+      subjectWise[a.subject_name] = subjectWise[a.subject_name] || { total: 0, present: 0, absent: 0, late: 0, leave: 0, holiday: 0, half_day: 0 };
       subjectWise[a.subject_name].total++;
-      subjectWise[a.subject_name][a.status]++;
+      subjectWise[a.subject_name][a.status] = (subjectWise[a.subject_name][a.status] || 0) + 1;
     }
   });
 
@@ -955,7 +959,7 @@ export const getMyAttendance = async (studentId, instituteId, filters = {}) => {
     present: stats.present,
     absent: stats.absent,
     late: stats.late,
-    percentage: Math.round((stats.present / stats.total) * 100) || 0
+    percentage: attendancePercentage(stats)
   }));
 
   return {
@@ -965,7 +969,7 @@ export const getMyAttendance = async (studentId, instituteId, filters = {}) => {
       absent,
       late,
       leave,
-      percentage: total ? Math.round((present / total) * 100) : 0
+      percentage: attendancePercentage(counts)
     },
     subject_wise: subjectStats,
     records: attendance.slice(0, 30).map(a => ({
@@ -988,13 +992,14 @@ export const getRecentAttendance = async (studentId, instituteId, days = 7) => {
     where: {
       school_id: instituteId,
       student_id: studentId,
-      date: { [Op.gte]: fromDate }
+      date: { [Op.gte]: format(fromDate, 'yyyy-MM-dd') }
     },
     order: [['date', 'ASC']]
   });
 
   const total = attendance.length;
-  const present = attendance.filter(a => a.status === 'present').length;
+  const recentCounts = countAttendance(attendance);
+  const present = recentCounts.present + recentCounts.late;
 
   // Group by date for chart
   const chartData = {};
@@ -1006,7 +1011,7 @@ export const getRecentAttendance = async (studentId, instituteId, days = 7) => {
   return {
     total_days: total,
     present_days: present,
-    percentage: total ? Math.round((present / total) * 100) : 0,
+    percentage: attendancePercentage(recentCounts),
     chart: chartData
   };
 };
@@ -1252,9 +1257,11 @@ export const getUpcomingAssignments = async (studentId, instituteId, limit = 5) 
  */
 export const submitAssignment = async (assignmentId, studentId, instituteId, files = [], submissionText = null) => {
   const transaction = await sequelize.transaction();
+  const tempFiles = (files || []).map(f => f.path).filter(Boolean);
 
   try {
-    // Check if assignment exists and is published
+    // Check if assignment exists and is published. The row lock serializes concurrent
+    // submissions for the same assignment so a double-tap cannot create duplicates.
     const assignment = await Assignment.findOne({
       where: {
         id: assignmentId,
@@ -1264,10 +1271,22 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
           { status: 'published' }
         ]
       },
-      transaction
+      transaction,
+      lock: transaction.LOCK.UPDATE
     });
 
-    if (!assignment) throw new Error('Assignment not found or not published');
+    if (!assignment) throw new AppError('Assignment not found or not published', 404);
+
+    // The assignment must actually be targeted at this student (class / section / everyone)
+    const me = await getStudentProfile(studentId, instituteId);
+    const targetIds = Array.isArray(assignment.target_ids) ? assignment.target_ids : [];
+    const inAudience =
+      assignment.target_type === 'all' ||
+      (assignment.target_type === 'class' && me.class_id && targetIds.includes(me.class_id)) ||
+      (assignment.target_type === 'section' && me.section_id && targetIds.includes(me.section_id)) ||
+      (assignment.class_id && assignment.class_id === me.class_id &&
+        (!assignment.section_id || assignment.section_id === me.section_id));
+    if (!inAudience) throw new AppError('Assignment not found or not published', 404);
 
     // Check if already submitted
     const existing = await AssignmentSubmission.findOne({
@@ -1276,7 +1295,12 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
     });
 
     if (existing && existing.status !== 'draft') {
-      throw new Error('You have already submitted this assignment');
+      throw new AppError('You have already submitted this assignment', 409);
+    }
+
+    const hasText = submissionText && String(submissionText).trim().length > 0;
+    if (!hasText && !(files && files.length)) {
+      throw new AppError('Attach a file or write your answer before submitting', 400);
     }
 
     // Upload files
@@ -1302,18 +1326,21 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
           uploaded_at: new Date()
         });
 
-        try { await unlink(file.path); } catch { /* ignore */ }
       }
     }
 
-    // Check if late
-    const isLate = new Date(assignment.due_date) < new Date();
+    // Check if late. due_date is a DATEONLY: the whole due day (Pakistan time) is on time,
+    // e.g. due '2026-11-20' means until 23:59:59 PKT, not 05:00 PKT (00:00 UTC).
+    const dueStr = String(assignment.due_date || '').slice(0, 10);
+    const dueEnd = /^\d{4}-\d{2}-\d{2}$/.test(dueStr) ? pktDayEnd(dueStr) : null;
+    const isLate = dueEnd ? new Date() > dueEnd : false;
     const allowLate = assignment.allow_late_submission === true;
 
-    let status = 'submitted';
-    if (isLate) {
-      status = allowLate ? 'late' : 'overdue';
+    if (isLate && !allowLate) {
+      throw new AppError('The deadline for this assignment has passed', 400);
     }
+    // 'overdue' is not a valid submission status (enum: draft|submitted|late|graded)
+    const status = isLate ? 'late' : 'submitted';
 
     // Create or update submission
     let submission;
@@ -1325,7 +1352,7 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
         submission_text: submissionText || existing.submission_text,
         submitted_at: new Date(),
         status: status,
-        attempt_number: existing.attempt_number + 1,
+        attempt_number: (existing.attempt_number || 0) + 1,
         is_resubmission: true
       }, { transaction });
       submission = existing;
@@ -1372,6 +1399,10 @@ export const submitAssignment = async (assignmentId, studentId, instituteId, fil
   } catch (error) {
     await transaction.rollback();
     throw error;
+  } finally {
+    // Always remove multer temp files, whether the submission succeeded or not
+    const { unlink: rm } = await import('fs/promises');
+    await Promise.all(tempFiles.map(p => rm(p).catch(() => {})));
   }
 };
 
@@ -1399,7 +1430,7 @@ export const getMyExamSchedule = async (studentId, instituteId) => {
     const exams = await models.Exam.findAll({
       where: {
         school_id: instituteId,
-        status: { [Op.in]: ['draft', 'scheduled', 'ongoing'] },
+        status: { [Op.in]: ['scheduled', 'ongoing'] },
         [Op.or]: [
           { class_id: studentClass },  // Exam is for this student's class
           {
@@ -1451,7 +1482,7 @@ export const getMyResults = async (studentId, instituteId, filters = {}) => {
     student_id: studentId
   };
 
-  const examWhere = {};
+  const examWhere = { school_id: instituteId, ...PUBLISHED_EXAM };
   if (filters.exam_type) examWhere.type = filters.exam_type;
   if (filters.academic_year_id) examWhere.academic_year_id = filters.academic_year_id;
 
@@ -1463,7 +1494,8 @@ export const getMyResults = async (studentId, instituteId, filters = {}) => {
         model: models.Exam,
         as: 'exam',
         attributes: ['id', 'name', 'type', 'start_date', 'total_marks', 'academic_year_id'],
-        ...(Object.keys(examWhere).length ? { where: examWhere } : {})
+        where: examWhere,
+        required: true
       }
     ]
   });
@@ -1514,7 +1546,13 @@ export const getRecentResults = async (studentId, instituteId, limit = 3) => {
     order: [['created_at', 'DESC']],
     limit,
     include: [
-      { model: models.Exam, as: 'exam', attributes: ['name', 'start_date', 'total_marks'] }
+      {
+        model: models.Exam,
+        as: 'exam',
+        attributes: ['name', 'start_date', 'total_marks'],
+        where: { school_id: instituteId, ...PUBLISHED_EXAM },
+        required: true
+      }
     ]
   });
 
@@ -1564,7 +1602,8 @@ export const getRecentResults = async (studentId, instituteId, limit = 3) => {
 export const getMyFees = async (studentId, instituteId, filters = {}) => {
   const where = {
     institute_id: instituteId,
-    student_id: studentId
+    student_id: studentId,
+    archived: false // carried-forward / deleted vouchers are not billable
   };
 
   if (filters.status) where.status = filters.status;
@@ -1574,37 +1613,60 @@ export const getMyFees = async (studentId, instituteId, filters = {}) => {
     order: [['due_date', 'ASC']]
   });
 
-  const totalDue = vouchers
-    .filter(v => v.status === 'pending' || v.status === 'overdue')
-    .reduce((sum, v) => sum + parseFloat(v.net_amount || 0), 0);
+  const payRows = vouchers.length
+    ? await models.FeePayment.findAll({
+        where: { voucher_id: { [Op.in]: vouchers.map(v => v.id) } },
+        attributes: ['voucher_id', 'amount_paid', 'payment_date'],
+        order: [['payment_date', 'DESC']]
+      })
+    : [];
+  const paidMap = {};
+  const lastPaid = {};
+  payRows.forEach(p => {
+    paidMap[p.voucher_id] = (paidMap[p.voucher_id] || 0) + (parseFloat(p.amount_paid) || 0);
+    if (!lastPaid[p.voucher_id]) lastPaid[p.voucher_id] = p.payment_date;
+  });
 
-  const totalPaid = vouchers
-    .filter(v => v.status === 'paid')
-    .reduce((sum, v) => sum + parseFloat(v.net_amount || 0), 0);
+  const net = (v) => parseFloat(v.net_amount || 0);
+  const paidOf = (v) => (v.status === 'paid' ? Math.max(paidMap[v.id] || 0, net(v)) : Math.min(paidMap[v.id] || 0, net(v)));
+  const dueOf = (v) => (v.status === 'paid' || v.status === 'cancelled' ? 0 : Math.max(net(v) - paidOf(v), 0));
+  const openStatuses = ['pending', 'overdue', 'partial'];
+
+  const totalDue = vouchers.reduce((sum, v) => sum + dueOf(v), 0);
+  const totalPaid = vouchers.reduce((sum, v) => sum + paidOf(v), 0);
 
   const nextDue = vouchers
-    .filter(v => v.status === 'pending')
+    .filter(v => openStatuses.includes(v.status))
     .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
+
+  const monthName = (m) => (m >= 1 && m <= 12 ? format(new Date(2000, m - 1, 1), 'MMMM') : '');
 
   return {
     summary: {
       total_due: totalDue,
       total_paid: totalPaid,
       pending_vouchers: vouchers.filter(v => v.status === 'pending').length,
+      partial_vouchers: vouchers.filter(v => v.status === 'partial').length,
       overdue_vouchers: vouchers.filter(v => v.status === 'overdue').length,
       paid_vouchers: vouchers.filter(v => v.status === 'paid').length,
       next_due_date: nextDue?.due_date,
-      next_due_amount: nextDue?.net_amount
+      next_due_amount: nextDue ? dueOf(nextDue) : null
     },
     vouchers: vouchers.map(v => ({
       id: v.id,
-      title: v.title,
+      voucher_number: v.voucher_number,
+      title: v.title || `${String(v.fee_type || 'fee').replace('_', ' ')} fee${v.month ? ' - ' + monthName(v.month) + ' ' + (v.year || '') : ''}`.trim(),
+      fee_type: v.fee_type,
+      month: v.month,
+      year: v.year,
       amount: v.net_amount,
+      paid_amount: Number(paidOf(v).toFixed(2)),
+      due_amount: Number(dueOf(v).toFixed(2)),
       due_date: v.due_date,
       status: v.status,
-      paid_date: v.paid_at,
-      fine: v.fine_amount,
-      discount: v.discount_amount
+      paid_date: lastPaid[v.id] || null,
+      fine: v.fine,
+      discount: v.discount
     }))
   };
 };
@@ -1616,21 +1678,32 @@ export const getFeeSummary = async (studentId, instituteId) => {
   const vouchers = await FeeVoucher.findAll({
     where: {
       institute_id: instituteId,
-      student_id: studentId
+      student_id: studentId,
+      archived: false,
+      status: { [Op.in]: ['pending', 'overdue', 'partial'] }
     },
     order: [['due_date', 'ASC']]
   });
 
-  const due = vouchers.filter(v => v.status === 'pending' || v.status === 'overdue');
-  const totalDue = due.reduce((sum, v) => sum + parseFloat(v.net_amount || 0), 0);
-  const nextDue = due[0];
+  const payRows = vouchers.length
+    ? await models.FeePayment.findAll({
+        where: { voucher_id: { [Op.in]: vouchers.map(v => v.id) } },
+        attributes: ['voucher_id', 'amount_paid']
+      })
+    : [];
+  const paidMap = {};
+  payRows.forEach(p => { paidMap[p.voucher_id] = (paidMap[p.voucher_id] || 0) + (parseFloat(p.amount_paid) || 0); });
+  const dueOf = (v) => Math.max(parseFloat(v.net_amount || 0) - (paidMap[v.id] || 0), 0);
+
+  const totalDue = vouchers.reduce((sum, v) => sum + dueOf(v), 0);
+  const nextDue = vouchers[0];
 
   return {
-    has_due: due.length > 0,
+    has_due: vouchers.length > 0,
     total_due: totalDue,
-    due_count: due.length,
+    due_count: vouchers.length,
     next_due_date: nextDue?.due_date,
-    next_due_amount: nextDue?.net_amount
+    next_due_amount: nextDue ? dueOf(nextDue) : undefined
   };
 };
 
@@ -1641,86 +1714,48 @@ export const getFeeSummary = async (studentId, instituteId) => {
 /**
  * Get notices for student
  */
-export const getNotices = async (instituteId, filters = {}, pagination = {}) => {
-  const { page = 1, limit = 10 } = pagination;
-  const offset = (page - 1) * limit;
-
-  if (!NoticeModel) {
-    return {
-      data: [],
-      pagination: {
-        total: 0,
-        page,
-        limit,
-        totalPages: 0
-      }
-    };
-  }
-
-  const isNoticeTable = NoticeModel === Notice;
-
-  const where = isNoticeTable
-    ? {
-      institute_id: instituteId,
-      is_published: true,
-      target_audience: { [Op.overlap]: ['student', 'all'] }
-    }
-    : {
-      school_id: instituteId
-    };
-
-  if (filters.priority && isNoticeTable) where.priority = filters.priority;
-
-  const { count, rows } = await NoticeModel.findAndCountAll({
-    where,
-    order: [['created_at', 'DESC']],
-    limit,
-    offset
+export const getNotices = async (studentId, instituteId, filters = {}, pagination = {}) => {
+  const student = await User.findByPk(studentId, { attributes: ['id', 'branch_id'] });
+  const result = await fetchNotices({
+    instituteId,
+    branchId: student?.branch_id,
+    userIds: [studentId],
+    type: filters.type,
+    limit: pagination.limit || 10,
+    page: pagination.page || 1
   });
-
   return {
-    data: rows.map(mapNoticeRow),
-    pagination: {
-      total: count,
-      page,
-      limit,
-      totalPages: Math.ceil(count / limit)
-    }
+    data: result.data.map(withNoticeAliases),
+    pagination: result.pagination
   };
 };
+
+/** Student notice shape kept backward compatible: content/priority/attachments */
+const withNoticeAliases = (n) => ({
+  ...n,
+  content: n.body || '',
+  attachments: []
+});
 
 /**
  * Get recent notices for dashboard
  */
-export const getRecentNotices = async (instituteId, limit = 5) => {
-  if (!NoticeModel) return [];
 
-  const isNoticeTable = NoticeModel === Notice;
-
-  const notices = await NoticeModel.findAll({
-    where: isNoticeTable
-      ? {
-        institute_id: instituteId,
-        is_published: true,
-        target_audience: { [Op.overlap]: ['student', 'all'] }
-      }
-      : {
-        school_id: instituteId
-      },
-    order: [['created_at', 'DESC']],
+export const getRecentNotices = async (studentId, instituteId, limit = 5) => {
+  const student = await User.findByPk(studentId, { attributes: ['id', 'branch_id'] });
+  const { data } = await fetchNotices({
+    instituteId,
+    branchId: student?.branch_id,
+    userIds: [studentId],
     limit
   });
-
-  return notices.map((n) => {
-    const mapped = mapNoticeRow(n);
-    return {
-      id: mapped.id,
-      title: mapped.title,
-      content: mapped.content ? `${String(mapped.content).substring(0, 100)}...` : '',
-      priority: mapped.priority,
-      date: format(new Date(mapped.created_at), 'dd MMM yyyy')
-    };
-  });
+  return data.map((n) => ({
+    id: n.id,
+    title: n.title,
+    content: n.body ? `${String(n.body).substring(0, 100)}${String(n.body).length > 100 ? '...' : ''}` : '',
+    priority: n.priority,
+    date: n.date
+  }));
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
