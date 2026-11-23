@@ -3,6 +3,7 @@
  * ES6 Module syntax
  */
 
+import './utils/lib/asyncErrors.js';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -53,7 +54,18 @@ app.use('/api', rateLimiter);
 // =============================================
 // STATIC FILES
 // =============================================
-app.use('/uploads', express.static('public/uploads'));
+// Temp uploads (multer scratch dir) are never served; everything else is served
+// as passive content only (nosniff + sandboxed CSP) so nothing uploaded can run as a page.
+app.use('/uploads/temp', (req, res) => res.status(404).json({ success: false, message: 'Not found' }));
+app.use('/uploads', express.static('public/uploads', {
+  dotfiles: 'deny',
+  index: false,
+  setHeaders: (res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'none'; sandbox");
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  },
+}));
 app.use('/downloads', express.static('public/downloads'));
 
 // =============================================

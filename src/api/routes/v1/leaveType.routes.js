@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { protect } from '../../middlewares/auth.middleware.js';
 import { validate } from '../../middlewares/validation.middleware.js';
+import { hasPermission } from '../../middlewares/permission.middleware.js';
 import * as leaveTypeController from '../../controllers/leaveType.controller.js';
 import {
   createLeaveTypeSchema,
@@ -42,6 +43,7 @@ router.get(
  */
 router.post(
   '/',
+  hasPermission('leave_type.create'),
   validate(createLeaveTypeSchema),
   leaveTypeController.createLeaveType
 );
@@ -58,6 +60,7 @@ router.get('/:id', leaveTypeController.getLeaveTypeById);
  */
 router.put(
   '/:id',
+  hasPermission('leave_type.update'),
   validate(updateLeaveTypeSchema),
   leaveTypeController.updateLeaveType
 );
@@ -66,6 +69,6 @@ router.put(
  * Delete leave type (soft delete)
  * DELETE /api/v1/leave-types/:id
  */
-router.delete('/:id', leaveTypeController.deleteLeaveType);
+router.delete('/:id', hasPermission('leave_type.delete'), leaveTypeController.deleteLeaveType);
 
 export default router;

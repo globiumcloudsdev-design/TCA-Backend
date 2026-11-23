@@ -6,18 +6,20 @@
 
 import models from '../../models/postgres/index.js';
 import * as leaveRequestService from '../leaveRequest.service.js';
+import { assertParentOwnsChild } from './parentOwnership.js';
 
 /**
  * Get my leave requests (Portal wrapper)
  */
-export const getMyLeaveRequests = async (userId, userType, filters = {}) => {
+export const getMyLeaveRequests = async (userId, userType, filters = {}, instituteId = null) => {
   let queryUserId = userId;
   let queryUserType = userType;
   
   if (userType === 'PARENT') {
     if (!filters.child_id) return { data: [], pagination: { total: 0, pages: 0, current_page: 1, limit: 10 } };
     
-    // Assume parent only queries for their own selected child here
+    // A parent may only query their own children
+    await assertParentOwnsChild(userId, filters.child_id, instituteId);
     queryUserId = filters.child_id;
     queryUserType = 'STUDENT';
   }
@@ -36,18 +38,8 @@ export const createLeaveRequest = async (userId, userType, instituteId, branchId
     if (!leaveData.child_id) {
       throw new Error('child_id is required when a parent applies for leave');
     }
-    // Verify parent owns this child
-    const parent = await models.User.findByPk(userId);
-    const childrenIds = 
-      parent?.details?.parentDetails?.student_ids ||
-      parent?.student_ids || 
-      parent?.details?.student_ids || 
-      parent?.details?.children_ids || 
-      [];
-      
-    if (!childrenIds.includes(leaveData.child_id)) {
-      throw new Error('Not authorized to apply leave for this child');
-    }
+    // Verify parent owns this child (single shared check)
+    await assertParentOwnsChild(userId, leaveData.child_id, instituteId);
     targetUserId = leaveData.child_id;
     targetUserType = 'STUDENT';
   }
@@ -72,6 +64,7 @@ export const getLeaveStatistics = async (userId, userType, instituteId, childId)
   let targetUserType = userType;
   if (userType === 'PARENT') {
     if (!childId) return { total_requests: 0, pending: 0, approved: 0, rejected: 0 };
+    await assertParentOwnsChild(userId, childId, instituteId);
     targetUserId = childId;
     targetUserType = 'STUDENT';
   }
@@ -136,6 +129,7 @@ export const getLeaveBalance = async (userId, userType, instituteId, childId) =>
   let targetUserType = userType;
   if (userType === 'PARENT') {
     if (!childId) return {};
+    await assertParentOwnsChild(userId, childId, instituteId);
     targetUserId = childId;
     targetUserType = 'STUDENT';
   }

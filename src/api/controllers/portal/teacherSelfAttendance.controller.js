@@ -102,7 +102,7 @@ export const getTodayStatus = async (req, res) => {
     );
     return sendSuccess(res, status, 'Today attendance status fetched');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -146,7 +146,7 @@ export const getHistory = async (req, res) => {
 
     return sendPaginated(res, result.data, result.pagination, 'Attendance history fetched');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };
 
@@ -184,6 +184,6 @@ export const getReport = async (req, res) => {
 
     return sendSuccess(res, report, 'Attendance report fetched');
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, error.message, errorStatus(error, 500));
   }
 };

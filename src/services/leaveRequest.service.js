@@ -376,7 +376,7 @@ export const getAllLeaveRequests = async (filters = {}) => {
 /**
  * Get leave request by ID
  */
-export const getLeaveRequestById = async (id) => {
+export const getLeaveRequestById = async (id, scope = {}) => {
   const leaveRequest = await LeaveRequest.findByPk(id, {
     include: [
       { model: models.LeaveType, as: 'leaveType' },
@@ -385,7 +385,12 @@ export const getLeaveRequestById = async (id) => {
     ],
   });
 
-  if (!leaveRequest) {
+  // Tenant isolation + owner-only for non-approvers (404 so IDs are not probeable)
+  if (
+    !leaveRequest ||
+    (scope.institute_id && leaveRequest.institute_id !== scope.institute_id) ||
+    (scope.only_user_id && leaveRequest.user_id !== scope.only_user_id)
+  ) {
     throw new Error('Leave request not found');
   }
 
@@ -434,13 +439,16 @@ export const updateLeaveRequest = async (id, updateData, userId, options = {}) =
  * Approve or reject leave request
  */
 export const approveRejectLeaveRequest = async (id, approvalData, approverId, options = {}) => {
-  const { transaction } = options;
+  const { transaction, institute_id } = options;
   const { status, approval_remarks } = approvalData;
 
   const leaveRequest = await LeaveRequest.findByPk(id, { transaction });
 
-  if (!leaveRequest) {
+  if (!leaveRequest || (institute_id && leaveRequest.institute_id !== institute_id)) {
     throw new Error('Leave request not found');
+  }
+  if (leaveRequest.user_id === approverId) {
+    throw new Error('Unauthorized: You cannot approve or reject your own leave request');
   }
 
   if (leaveRequest.status !== 'PENDING') {

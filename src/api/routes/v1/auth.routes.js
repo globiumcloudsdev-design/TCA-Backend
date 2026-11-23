@@ -10,7 +10,6 @@ import {
   forgotPassword,
   resetPassword,
   getMe,
-  selectAccount,
   getAccountsByEmail,
   loginWithAccount,
   getMyInstitute,
@@ -26,7 +25,6 @@ import { loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../../va
 const router = Router();
 
 router.post('/login', authRateLimiter, validate(loginSchema), login);
-router.post('/select-account', protect, selectAccount);
 
 // GET /auth/my-institute - Get full institute data with settings and policies
 router.get('/my-institute', protect, getMyInstitute);
@@ -42,8 +40,8 @@ router.get('/my-policies/:policyType', protect, getInstitutePolicyByType);
 // GET /auth/refresh-data - Get latest user data after updates
 router.get('/refresh-data', protect, refreshUserData);
 
-router.get('/accounts', getAccountsByEmail);  // GET /api/v1/auth/accounts?email=xxx
-router.post('/login-with-account', loginWithAccount);  // POST /api/v1/auth/login-with-account
+router.get('/accounts', authRateLimiter, getAccountsByEmail);  // GET /api/v1/auth/accounts?email=xxx
+router.post('/login-with-account', authRateLimiter, loginWithAccount);  // POST /api/v1/auth/login-with-account
 router.post('/logout', protect, logout);
 router.post('/refresh-token', refreshToken);
 router.post('/forgot-password', authRateLimiter, validate(forgotPasswordSchema), forgotPassword);

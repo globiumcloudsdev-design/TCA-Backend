@@ -8,6 +8,20 @@ import catchAsync from '../../utils/lib/catchAsync.js';
 import { AppError } from '../../utils/lib/AppError.js';
 import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
 
+/**
+ * Students see only their own vouchers, parents only their children's.
+ * Returns undefined for staff/admin roles (no owner restriction).
+ */
+const ownerStudentIds = (req) => {
+  const type = String(req.user?.user_type || '').toUpperCase();
+  if (type === 'STUDENT') return [req.user.id];
+  if (type === 'PARENT') {
+    const ids = req.user?.details?.parentDetails?.student_ids;
+    return Array.isArray(ids) ? ids : [];
+  }
+  return undefined;
+};
+
 // Helper to resolve target branch for staff and admins
 const resolveTargetBranchId = (req) => {
   let branchId = getBranchId(req);
@@ -147,7 +161,16 @@ export const getFeeVouchers = catchAsync(async (req, res) => {
   if (year) filters.year = parseInt(year);
   if (status) filters.status = status;
   const targetStudentId = student_id || studentId;
-  if (targetStudentId) filters.student_id = targetStudentId;
+  const owners = ownerStudentIds(req);
+  if (owners) {
+    // Students/parents can only list their own / their children's vouchers
+    if (targetStudentId && !owners.includes(targetStudentId)) {
+      throw new AppError('Fee voucher not found', 404);
+    }
+    filters.student_id = targetStudentId || owners;
+  } else if (targetStudentId) {
+    filters.student_id = targetStudentId;
+  }
   if (academic_year_id) filters.academic_year_id = academic_year_id;
   if (search) filters.search = search;
 
@@ -179,7 +202,8 @@ export const getFeeVoucherById = catchAsync(async (req, res) => {
   const branchId = getBranchId(req);
 
   const voucher = await feeVoucherService.getFeeVoucherById(voucherId, instituteId, {
-    branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId
+    branch_id: req.isBranchRestricted ? req.allowedBranchId : branchId,
+    student_ids: ownerStudentIds(req)
   });
 
   res.status(200).json({
@@ -290,6 +314,12 @@ export const getPaymentHistory = catchAsync(async (req, res) => {
   const instituteId = getInstituteId(req);
   const branchId = getBranchId(req);
 
+  const studentIds = ownerStudentIds(req);
+  if (studentIds) {
+    // 404 unless the voucher belongs to the caller / their child
+    await feeVoucherService.getFeeVoucherById(voucherId, instituteId, { student_ids: studentIds });
+  }
+
   const history = await feeVoucherService.getPaymentHistory(
     voucherId,
     instituteId,
@@ -396,7 +426,45 @@ export const warnFeeDefaulter = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * List payment requests submitted by parents/students (admin)
+ * GET /api/fee-vouchers/payment-requests?status=pending
+ */
+export const getPaymentRequests = catchAsync(async (req, res) => {
+  const instituteId = getInstituteId(req);
+  const rows = await feeVoucherService.getPaymentRequests(instituteId, {
+    status: req.query.status,
+    branch_id: req.isBranchRestricted ? req.allowedBranchId : getBranchId(req)
+  });
+  res.status(200).json({ success: true, message: 'Payment requests retrieved', data: rows });
+});
+
+/**
+ * Confirm or reject a payment request (admin)
+ * PATCH /api/fee-vouchers/:voucherId/payment-requests/:requestId  { action: 'confirm'|'reject', reason? }
+ */
+export const reviewPaymentRequest = catchAsync(async (req, res) => {
+  const { voucherId, requestId } = req.params;
+  const instituteId = getInstituteId(req);
+  const result = await feeVoucherService.reviewPaymentRequest(
+    voucherId,
+    requestId,
+    instituteId,
+    { id: req.user.id },
+    req.body.action,
+    { reason: req.body.reason, amount: req.body.amount },
+    { branch_id: req.isBranchRestricted ? req.allowedBranchId : getBranchId(req) }
+  );
+  res.status(200).json({
+    success: true,
+    message: req.body.action === 'confirm' ? 'Payment confirmed' : 'Payment request rejected',
+    data: result
+  });
+});
+
 export default {
+  getPaymentRequests,
+  reviewPaymentRequest,
   generateSingleVoucher,
   generateVouchersForClass,
   generateVouchersForInstitute,

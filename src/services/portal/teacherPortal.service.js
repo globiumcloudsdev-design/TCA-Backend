@@ -18,6 +18,10 @@
 import { Op } from 'sequelize';
 import models from '../../models/postgres/index.js';
 import { v4 as uuidv4 } from 'uuid';
+import { countAttendance, attendancePercentage } from '../../utils/helpers/attendance.helper.js';
+import { getStudentAcademicInfo } from '../../utils/helpers/student.helper.js';
+import { todayPkt } from '../../utils/helpers/date.helper.js';
+import { AppError } from '../../utils/lib/AppError.js';
 import { startOfDay, endOfDay, addDays, format, startOfWeek, endOfWeek, formatDistanceToNow } from 'date-fns';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
 import { unlink } from 'fs/promises';
@@ -205,7 +209,7 @@ export const updateTeacherProfile = async (teacherId, instituteId, updateData, f
   }
 
   // Update basic fields
-  const updatableFields = ['first_name', 'last_name', 'phone', 'email'];
+  const updatableFields = ['first_name', 'last_name', 'phone'];
   updatableFields.forEach(field => {
     if (updateData[field] !== undefined) {
       teacher[field] = updateData[field];
@@ -213,14 +217,23 @@ export const updateTeacherProfile = async (teacherId, instituteId, updateData, f
   });
 
   // Update teacher details in JSONB
-  if (updateData.details) {
+  // SECURITY (B16): a teacher may only edit contact/personal fields. Salary, designation,
+  // qualification-verified flags, shift/timing etc. are admin-managed and silently dropped.
+  let incomingDetails = updateData.details;
+  if (typeof incomingDetails === 'string') { try { incomingDetails = JSON.parse(incomingDetails); } catch { incomingDetails = null; } }
+  if (incomingDetails && typeof incomingDetails === 'object' && !Array.isArray(incomingDetails)) {
+    const TEACHER_EDITABLE = ['address', 'city', 'date_of_birth', 'gender', 'blood_group', 'bio',
+      'emergency_contact_name', 'emergency_contact_phone', 'qualification', 'languages'];
+    const safe = {};
+    TEACHER_EDITABLE.forEach((k) => { if (incomingDetails[k] !== undefined) safe[k] = incomingDetails[k]; });
     teacher.details = {
-      ...teacher.details,
+      ...(teacher.details || {}),
       teacherDetails: {
-        ...teacher.details?.teacherDetails,
-        ...updateData.details
+        ...(teacher.details?.teacherDetails || {}),
+        ...safe
       }
     };
+    teacher.changed('details', true);
   }
 
   if (avatarUrl) {
@@ -369,11 +382,11 @@ export const getMyClasses = async (teacherId, instituteId) => {
       school_id: instituteId,
       user_type: 'STUDENT',
       is_active: true,
-      'details.class_id': data.id
+      'details.studentDetails.class_id': data.id
     };
     const sectionIds = Array.from(data.section_ids || []);
     if (sectionIds.length) {
-      where['details.section_id'] = { [Op.in]: sectionIds };
+      where['details.studentDetails.section_id'] = { [Op.in]: sectionIds };
     }
 
     const studentCount = await User.count({ where });
@@ -495,10 +508,10 @@ export const getClassDetails = async (classId, teacherId, instituteId) => {
     school_id: instituteId,
     user_type: 'STUDENT',
     is_active: true,
-    'details.class_id': timetable.entity_ids?.class_id
+    'details.studentDetails.class_id': timetable.entity_ids?.class_id
   };
   if (timetable.entity_ids?.section_id) {
-    studentWhere['details.section_id'] = timetable.entity_ids.section_id;
+    studentWhere['details.studentDetails.section_id'] = timetable.entity_ids.section_id;
   }
 
   const students = await User.findAll({
@@ -522,7 +535,7 @@ export const getClassDetails = async (classId, teacherId, instituteId) => {
       name: `${s.first_name} ${s.last_name}`,
       registration_no: s.registration_no,
       avatar: s.avatar_url,
-      roll_number: s.details?.roll_number
+      roll_number: getStudentAcademicInfo(s).roll_no
     })),
     schedule: (timetable.slots || [])
       .filter(s => s.teacher_id === teacherId)
@@ -898,7 +911,7 @@ export const createAssignment = async (teacherId, instituteId, data, files = [])
           school_id: instituteId,
           user_type: 'STUDENT',
           is_active: true,
-          'details.class_id': { [Op.in]: normalizedTargetIds }
+          'details.studentDetails.class_id': { [Op.in]: normalizedTargetIds }
         }
       });
     }
@@ -1198,55 +1211,117 @@ export const gradeSubmission = async (submissionId, gradeData, teacherId) => {
 /**
  * Mark attendance for a class
  */
-export const markAttendance = async (teacherId, instituteId, data) => {
-  const transaction = await sequelize.transaction();
+const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'leave', 'holiday'];
 
-  try {
-    const { class_id, date, attendance: attendanceList } = data;
+export const markAttendance = async (teacherId, instituteId, data = {}) => {
+  const { class_id, section_id = null, date, attendance: attendanceList } = data;
 
-    // Verify teacher teaches this class
-    // Scan ALL active timetables (same as getMyClasses) to handle both
-    // class-level and section-level timetables correctly.
-    const allTimetables = await Timetable.findAll({
-      where: { school_id: instituteId, is_active: true }
-    });
+  if (!class_id) throw new AppError('class_id is required', 400);
+  if (!Array.isArray(attendanceList) || attendanceList.length === 0) {
+    throw new AppError('attendance list is required', 400);
+  }
+  const day = String(date || todayPkt()).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new AppError('date must be YYYY-MM-DD', 400);
+  if (day > todayPkt()) throw new AppError('Cannot mark attendance for a future date', 400);
 
-    const teacherTeachesClass = allTimetables.some(tt => {
-      const ttClassId = tt.entity_ids?.class_id;
-      if (!ttClassId || ttClassId !== class_id) return false;
-      return (tt.slots || []).some(s => s.teacher_id === teacherId);
-    });
+  // Verify teacher teaches this class (scan ALL active timetables: class- and section-level)
+  const allTimetables = await Timetable.findAll({
+    where: { school_id: instituteId, is_active: true }
+  });
+  const teachesClass = allTimetables.some(tt => {
+    const ttClassId = tt.entity_ids?.class_id;
+    if (!ttClassId || ttClassId !== class_id) return false;
+    return (tt.slots || []).some(s => s.teacher_id === teacherId);
+  });
+  if (!teachesClass) throw new AppError('You do not teach this class', 403);
 
-    if (!teacherTeachesClass) {
-      throw new Error('You do not teach this class');
+  // Roster: active students of this class (and section, when given)
+  const roster = await User.findAll({
+    where: {
+      school_id: instituteId,
+      user_type: 'STUDENT',
+      is_active: true,
+      'details.studentDetails.class_id': class_id,
+      ...(section_id ? { 'details.studentDetails.section_id': section_id } : {})
+    },
+    attributes: ['id', 'branch_id', 'details']
+  });
+  const rosterById = new Map(roster.map(s => [s.id, s]));
+
+  // Validate every row BEFORE touching the DB; one bad row rejects the request
+  const seen = new Set();
+  const rows = [];
+  for (const a of attendanceList) {
+    if (!a || !a.student_id) throw new AppError('Every attendance entry needs a student_id', 400);
+    if (!ATTENDANCE_STATUSES.includes(a.status)) {
+      throw new AppError(`Invalid status '${a.status}'. Allowed: ${ATTENDANCE_STATUSES.join(', ')}`, 400);
     }
+    if (!rosterById.has(a.student_id)) {
+      throw new AppError(`Student ${a.student_id} is not in this class${section_id ? ' / section' : ''}`, 400);
+    }
+    if (seen.has(a.student_id)) throw new AppError(`Duplicate entry for student ${a.student_id}`, 400);
+    seen.add(a.student_id);
+    rows.push(a);
+  }
 
-    // Delete existing attendance for this date and class
-    await Attendance.destroy({
-      where: {
-        school_id: instituteId,
-        class_id,
-        date
-      },
+  const transaction = await sequelize.transaction();
+  try {
+    // Upsert per student (unique index: student_id + date). Records that are NOT in the
+    // payload (other sections, approved-leave records, unsent students) are never deleted.
+    const existing = await Attendance.findAll({
+      where: { school_id: instituteId, date: day, student_id: { [Op.in]: rows.map(r => r.student_id) } },
       transaction
     });
+    const existingByStudent = new Map(existing.map(e => [e.student_id, e]));
 
-    // Create new attendance records
-    const attendanceRecords = attendanceList.map(a => ({
-      id: uuidv4(),
-      school_id: instituteId,
-      class_id,
-      student_id: a.student_id,
-      date,
-      status: a.status,
-      marked_by: teacherId,
-      marked_at: new Date()
-    }));
-
-    await Attendance.bulkCreate(attendanceRecords, { transaction });
+    let created = 0;
+    let updated = 0;
+    let skippedLeave = 0;
+    for (const a of rows) {
+      const student = rosterById.get(a.student_id);
+      const sd = student.details?.studentDetails || {};
+      const prev = existingByStudent.get(a.student_id);
+      if (prev) {
+        // Do not let a teacher's roll call silently override an approved leave record
+        if (prev.status === 'leave' && a.status !== 'leave' && prev.leave_request_id) {
+          skippedLeave += 1;
+          continue;
+        }
+        await prev.update({
+          status: a.status,
+          remarks: a.remarks ?? prev.remarks,
+          class_id,
+          section_id: section_id || sd.section_id || prev.section_id || null,
+          marked_by: teacherId,
+          marked_at: new Date()
+        }, { transaction });
+        updated += 1;
+      } else {
+        await Attendance.create({
+          id: uuidv4(),
+          school_id: instituteId,
+          branch_id: student.branch_id || null,
+          class_id,
+          section_id: section_id || sd.section_id || null,
+          student_id: a.student_id,
+          date: day,
+          status: a.status,
+          remarks: a.remarks || null,
+          marked_by: teacherId,
+          marked_at: new Date()
+        }, { transaction });
+        created += 1;
+      }
+    }
 
     await transaction.commit();
-    return { message: 'Attendance marked successfully', count: attendanceRecords.length };
+    return {
+      message: 'Attendance marked successfully',
+      count: created + updated,
+      created,
+      updated,
+      skipped_approved_leave: skippedLeave
+    };
   } catch (error) {
     await transaction.rollback();
     throw error;
@@ -1699,44 +1774,36 @@ const getTeacherStats = async (teacherId, instituteId) => {
 };
 
 const getStudentAttendanceStats = async (studentId, instituteId) => {
-  const total = await Attendance.count({
-    where: { school_id: instituteId, student_id: studentId }
-  });
-  
-  const present = await Attendance.count({
-    where: { school_id: instituteId, student_id: studentId, status: 'present' }
-  });
-
-  const lastAttendance = await Attendance.findOne({
+  const records = await Attendance.findAll({
     where: { school_id: instituteId, student_id: studentId },
-    order: [['date', 'DESC']]
+    attributes: ['status', 'date'],
+    order: [['date', 'DESC']],
+    raw: true
   });
 
   return {
-    percentage: total ? Math.round((present / total) * 100) : 0,
-    last_date: lastAttendance?.date
+    percentage: attendancePercentage(countAttendance(records)),
+    last_date: records[0]?.date
   };
 };
 
-const getStudentAttendanceHistory = async (studentId, instituteId) => {
+export const getStudentAttendanceHistory = async (studentId, instituteId) => {
   const attendance = await Attendance.findAll({
     where: { school_id: instituteId, student_id: studentId },
     order: [['date', 'DESC']],
     limit: 30
   });
 
-  const total = attendance.length;
-  const present = attendance.filter(a => a.status === 'present').length;
-  const absent = attendance.filter(a => a.status === 'absent').length;
-  const late = attendance.filter(a => a.status === 'late').length;
+  const counts = countAttendance(attendance);
 
   return {
     summary: {
-      total,
-      present,
-      absent,
-      late,
-      percentage: total ? Math.round((present / total) * 100) : 0
+      total: attendance.length,
+      present: counts.present,
+      absent: counts.absent,
+      late: counts.late,
+      leave: counts.leave,
+      percentage: attendancePercentage(counts)
     },
     recent: attendance.slice(0, 10).map(a => ({
       date: format(new Date(a.date), 'dd MMM yyyy'),
@@ -1765,34 +1832,56 @@ const getStudentAssignments = async (studentId, instituteId) => {
 };
 
 const getStudentResults = async (studentId, instituteId) => {
-  // This would query exam results
-  return [
-    {
-      exam: 'Mid Term 2024',
-      subjects: [
-        { name: 'Mathematics', marks: 85, total: 100, grade: 'A' },
-        { name: 'Physics', marks: 78, total: 100, grade: 'B+' }
-      ],
-      percentage: 81.5,
-      rank: 15
-    }
-  ];
+  const { ExamResult, Exam } = models;
+  const rows = await ExamResult.findAll({
+    where: { student_id: studentId },
+    include: [{
+      model: Exam,
+      as: 'exam',
+      attributes: ['id', 'name', 'type', 'start_date'],
+      where: { school_id: instituteId, [Op.or]: [{ status: 'results_published' }, { is_published: true }] },
+      required: true
+    }],
+    order: [['created_at', 'DESC']],
+    limit: 10
+  });
+
+  return rows.map((r) => {
+    let marks = r.subject_marks;
+    if (typeof marks === 'string') { try { marks = JSON.parse(marks); } catch { marks = []; } }
+    marks = Array.isArray(marks) ? marks : [];
+    return {
+      exam: r.exam?.name,
+      exam_id: r.exam_id,
+      date: r.exam?.start_date,
+      subjects: marks.map(sm => ({
+        name: sm.subject_name || sm.subject,
+        marks: sm.marks_obtained,
+        total: sm.total_marks,
+        grade: sm.grade
+      })),
+      percentage: Number(r.percentage) || 0,
+      rank: r.rank ?? null
+    };
+  });
 };
 
 const getStudentProfile = async (studentId, instituteId) => {
   const student = await User.findOne({
     where: { id: studentId, school_id: instituteId, user_type: 'STUDENT' }
   });
+  if (!student) throw new AppError('Student not found', 404);
+  const academic = getStudentAcademicInfo(student);
 
   return {
     id: student.id,
     name: `${student.first_name} ${student.last_name}`,
     registration_no: student.registration_no,
-    class: student.details?.class_name,
-    section: student.details?.section_name,
-    roll_number: student.details?.roll_number,
+    class: academic.class_name,
+    section: academic.section_name,
+    roll_number: academic.roll_no,
     avatar: student.avatar_url,
-    guardian: student.details?.guardian_name
+    guardian: student.details?.studentDetails?.father_name || student.details?.guardian_name
   };
 };
 
@@ -1915,8 +2004,10 @@ export const getTeacherAssignments = async (teacherId, instituteId) => {
  */
 export const createTeacherExam = async (teacherId, instituteId, examData, options = {}) => {
   const { Exam } = models;
-  const transaction = options.transaction || await sequelize.transaction();
-  let shouldCommit = !options.transaction;
+  // options.transaction must be a real Sequelize transaction; anything else (e.g. `true`) => open our own
+  const given = options.transaction && typeof options.transaction === 'object' ? options.transaction : null;
+  const transaction = given || await sequelize.transaction();
+  let shouldCommit = !given;
 
   try {
     // Verify teacher is assigned to this class/subject
@@ -1938,8 +2029,8 @@ export const createTeacherExam = async (teacherId, instituteId, examData, option
     // Verify all subjects are assigned to teacher
     const examSubjects = examData.subject_schedules || [];
     examSubjects.forEach(subject => {
-      const hasSubject = classAssignment.subjects.find(s => s === subject.subject_name) ||
-                        examSubjects.some(s => s.subject_id === subject.subject_id);
+      // (previously compared the subject with itself, so the check always passed)
+      const hasSubject = classAssignment.subjects.includes(subject.subject_name);
       if (!hasSubject) {
         throw new Error(`You are not assigned to subject: ${subject.subject_name}`);
       }
@@ -2058,8 +2149,9 @@ export const getTeacherExams = async (teacherId, instituteId, filters = {}, pagi
  */
 export const addTeacherExamResults = async (teacherId, instituteId, examId, results, options = {}) => {
   const { Exam, ExamResult, User } = models;
-  const transaction = options.transaction || await sequelize.transaction();
-  let shouldCommit = !options.transaction;
+  const given = options.transaction && typeof options.transaction === 'object' ? options.transaction : null;
+  const transaction = given || await sequelize.transaction();
+  let shouldCommit = !given;
 
   try {
     // Verify teacher created or is assigned to this exam
@@ -2100,6 +2192,14 @@ export const addTeacherExamResults = async (teacherId, instituteId, examId, resu
 
     const allowedStudentIds = new Set(allowedStudents.map(s => s.id));
 
+    // Teachers may only enter marks for subjects of this exam that they teach in this class
+    const teacherClass = assignments.classes.find(c => c.id === exam.class_id);
+    const teachableSubjectIds = new Set(
+      (exam.subject_schedules || [])
+        .filter(s => teacherClass && teacherClass.subjects.includes(s.subject_name))
+        .map(s => s.subject_id)
+    );
+
     const processed = [];
     const errors = [];
 
@@ -2113,7 +2213,12 @@ export const addTeacherExamResults = async (teacherId, instituteId, examId, resu
         // Validate marks
         const subjectMarksMap = {};
         (result.subject_marks || []).forEach(sm => {
-          subjectMarksMap[sm.subject_id] = sm.marks_obtained;
+          if (!teachableSubjectIds.has(sm.subject_id)) {
+            throw new Error(`You are not assigned to enter marks for subject ${sm.subject_name || sm.subject_id}`);
+          }
+          const obtained = Number(sm.marks_obtained);
+          if (!Number.isFinite(obtained) || obtained < 0) throw new Error('Marks must be a non-negative number');
+          subjectMarksMap[sm.subject_id] = obtained;
         });
 
         if (result.is_present !== false) {

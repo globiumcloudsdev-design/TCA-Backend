@@ -19,6 +19,27 @@ export const getMyProfile = async (req, res) => {
 };
 
 /**
+ * Keys a user may edit in their OWN profile `details`. Anything else
+ * (studentDetails, parentDetails, teacherDetails, salary, fee/concession
+ * fields, view_own_data, ...) is silently dropped.
+ */
+const SELF_EDITABLE_DETAIL_KEYS = [
+  'address', 'city', 'state', 'country', 'postal_code', 'date_of_birth', 'gender',
+  'blood_group', 'nationality', 'religion', 'bio', 'cnic', 'qualification',
+  'emergency_contact', 'emergency_contact_name', 'emergency_contact_phone',
+  'social_links', 'preferences', 'notification_preferences', 'language', 'theme',
+];
+
+export const pickSelfEditableDetails = (details) => {
+  const out = {};
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return out;
+  for (const key of SELF_EDITABLE_DETAIL_KEYS) {
+    if (details[key] !== undefined) out[key] = details[key];
+  }
+  return out;
+};
+
+/**
  * Update current user's profile
  * Allowed fields: first_name, last_name, email, phone, details (JSONB)
  */
@@ -53,7 +74,9 @@ export const updateMyProfile = async (req, res) => {
 
   // Update details JSONB (safe merge)
   if (req.body.details) {
-    user.details = { ...user.details, ...req.body.details };
+    let incoming = req.body.details;
+    if (typeof incoming === 'string') { try { incoming = JSON.parse(incoming); } catch { incoming = {}; } }
+    user.details = { ...(user.details || {}), ...pickSelfEditableDetails(incoming) };
     user.changed('details', true);
   }
 

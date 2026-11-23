@@ -1015,8 +1015,8 @@ export const getStudentExams = async (instituteId, studentId) => {
   const student = await User.findByPk(studentId);
   if (!student) throw new Error('Student not found');
 
-  const studentClass = student.details?.class_id;
-  const studentSection = student.details?.section_id;
+  const studentClass = student.details?.studentDetails?.class_id || student.details?.class_id;
+  const studentSection = student.details?.studentDetails?.section_id || student.details?.section_id;
 
   const where = {
     school_id: instituteId,

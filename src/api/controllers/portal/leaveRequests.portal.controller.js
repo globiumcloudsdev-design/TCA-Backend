@@ -63,7 +63,7 @@ export const getMyLeaveRequests = async (req, res) => {
       sortOrder: req.query.sortOrder || 'DESC',
     };
 
-    const result = await leaveRequestsPortalService.getMyLeaveRequests(userId, userType, filters);
+    const result = await leaveRequestsPortalService.getMyLeaveRequests(userId, userType, filters, getInstituteId(req));
 
     return sendPaginated(
       res,
@@ -72,7 +72,7 @@ export const getMyLeaveRequests = async (req, res) => {
       'Leave requests fetched successfully'
     );
   } catch (error) {
-    return sendError(res, error.message || 'Failed to fetch leave requests');
+    return sendError(res, error.message || 'Failed to fetch leave requests', error.statusCode || 500);
   }
 };
 
@@ -119,7 +119,7 @@ export const createLeaveRequest = async (req, res) => {
     return sendCreated(res, leaveRequest, 'Leave request created successfully');
   } catch (error) {
     await transaction.rollback();
-    return sendError(res, error.message || 'Failed to create leave request');
+    return sendError(res, error.message || 'Failed to create leave request', error.statusCode || 400);
   }
 };
 
@@ -142,7 +142,7 @@ export const getMyLeaveStatistics = async (req, res) => {
 
     return sendSuccess(res, stats, 'Leave statistics fetched successfully');
   } catch (error) {
-    return sendError(res, error.message || 'Failed to fetch leave statistics');
+    return sendError(res, error.message || 'Failed to fetch leave statistics', error.statusCode || 500);
   }
 };
 
@@ -165,7 +165,7 @@ export const getLeaveBalance = async (req, res) => {
 
     return sendSuccess(res, balance, 'Leave balance fetched successfully');
   } catch (error) {
-    return sendError(res, error.message || 'Failed to fetch leave balance');
+    return sendError(res, error.message || 'Failed to fetch leave balance', error.statusCode || 500);
   }
 };
 

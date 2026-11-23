@@ -5,6 +5,7 @@ import { body, param, query } from 'express-validator';
 import * as branchController from '../../controllers/branch.controller.js';
 import { validate } from '../../middlewares/validation.middleware.js'; // ✅ Using your validation middleware
 import { protect } from '../../middlewares/auth.middleware.js'; // ✅ Using your protect middleware
+import { hasPermission } from '../../middlewares/permission.middleware.js';
 import Joi from 'joi';
 
 const router = Router();
@@ -161,6 +162,7 @@ router.get(
  */
 router.post(
   '/',
+  hasPermission('branch.create'),
   validate(createBranchSchema, 'body'), // ✅ Using your validate middleware
   branchController.createBranch
 );
@@ -171,6 +173,7 @@ router.post(
  */
 router.put(
   '/:id',
+  hasPermission('branch.update'),
   validate(branchIdSchema, 'params'), // ✅ Validate ID first
   validate(updateBranchSchema, 'body'), // ✅ Then validate body
   branchController.updateBranch
@@ -182,6 +185,7 @@ router.put(
  */
 router.patch(
   '/:id/toggle-status',
+  hasPermission('branch.update'),
   validate(branchIdSchema, 'params'), // ✅ Validate ID
   validate(toggleStatusSchema, 'body'), // ✅ Validate status
   branchController.toggleBranchStatus
@@ -193,6 +197,7 @@ router.patch(
  */
 router.post(
   '/:id/settings',
+  hasPermission('branch.update'),
   validate(branchIdSchema, 'params'), // ✅ Validate ID
   validate(Joi.object().required(), 'body'), // ✅ Settings must be an object
   branchController.updateBranchSettings
@@ -204,6 +209,7 @@ router.post(
  */
 router.delete(
   '/:id',
+  hasPermission('branch.delete'),
   validate(branchIdSchema, 'params'), // ✅ Validate ID
   branchController.deleteBranch
 );

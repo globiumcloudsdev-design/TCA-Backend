@@ -10,6 +10,14 @@ import {
 import * as leaveRequestService from '../../services/leaveRequest.service.js';
 import models from '../../models/postgres/index.js';
 import { getInstituteId, getBranchId } from '../../utils/helpers/request.helper.js';
+import { checkPermission } from '../middlewares/permission.middleware.js';
+
+/** Approvers (admins or users holding leave.approve) may see other people's requests */
+const isLeaveApprover = async (req) => {
+  const t = String(req.user?.user_type || '').toUpperCase();
+  if (['MASTER_ADMIN', 'INSTITUTE_ADMIN', 'SUPER_ADMIN', 'BRANCH_ADMIN', 'CAMPUS_ADMIN'].includes(t)) return true;
+  return checkPermission(req, 'leave.approve');
+};
 
 const { sequelize } = models;
 
@@ -155,7 +163,11 @@ export const getAllLeaveRequests = async (req, res) => {
  */
 export const getLeaveRequestById = async (req, res) => {
   try {
-    const leaveRequest = await leaveRequestService.getLeaveRequestById(req.params.id);
+    const approver = await isLeaveApprover(req);
+    const leaveRequest = await leaveRequestService.getLeaveRequestById(req.params.id, {
+      institute_id: getInstituteId(req),
+      only_user_id: approver ? undefined : req.user.id,
+    });
     return sendSuccess(res, leaveRequest, 'Leave request fetched successfully');
   } catch (error) {
     return sendNotFound(res, error.message || 'Leave request not found');
@@ -201,7 +213,7 @@ export const approveRejectLeaveRequest = async (req, res) => {
       req.params.id,
       req.body,
       req.user.id,
-      { transaction }
+      { transaction, institute_id: getInstituteId(req) }
     );
 
     await transaction.commit();

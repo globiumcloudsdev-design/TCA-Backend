@@ -74,10 +74,9 @@ const startServer = async () => {
   }
 };
 
-// Handle unhandled promise rejections
+// Handle unhandled promise rejections (log only: one bad request must never take the server down)
 process.on("unhandledRejection", (err) => {
   logger.error("UNHANDLED REJECTION:", err);
-  httpServer.close(() => process.exit(1));
 });
 
 // Handle uncaught exceptions

@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { protect } from '../../middlewares/auth.middleware.js';
 import { validate } from '../../middlewares/validation.middleware.js';
+import { hasPermission, hasAnyPermission } from '../../middlewares/permission.middleware.js';
 import * as leaveRequestController from '../../controllers/leaveRequest.controller.js';
 import {
   createLeaveRequestSchema,
@@ -43,6 +44,7 @@ router.post(
 // Admin: Mark leave for staff/student (creates approved or pending leave)
 router.post(
   '/admin/mark-leave',
+  hasPermission('leave.approve'),
   validate(adminMarkLeaveSchema),
   leaveRequestController.adminMarkLeave
 );
@@ -71,11 +73,13 @@ router.patch(
 // Approve or reject leave request
 router.patch(
   '/:id/status',
+  hasPermission('leave.approve'),
   validate(approveRejectLeaveSchema),
   leaveRequestController.approveRejectLeaveRequest
 );
 router.patch(
   '/:id/approve-reject',
+  hasPermission('leave.approve'),
   validate(approveRejectLeaveSchema),
   leaveRequestController.approveRejectLeaveRequest
 );
@@ -87,6 +91,7 @@ router.patch(
 // Get all leave requests (with filters)
 router.get(
   '/',
+  hasAnyPermission(['leave.read', 'leave.approve']),
   validate(getLeaveRequestsQuerySchema, 'query'),
   leaveRequestController.getAllLeaveRequests
 );

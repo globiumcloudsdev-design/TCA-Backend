@@ -17,7 +17,7 @@
  */
 
 import crypto from 'crypto';
-import { Op } from 'sequelize';
+import { Op, fn, col, where as sqlWhere } from 'sequelize';
 import sequelize from '../config/database.js';
 import User from '../models/postgres/User.model.js';
 import Role from '../models/postgres/Role.model.js';
@@ -438,7 +438,7 @@ export const loginService = async (loginId, password) => {
   let users;
   if (loginId.includes('@')) {
     users = await User.unscoped().findAll({ 
-      where: { email: { [Op.iLike]: loginId.trim() } },
+      where: sqlWhere(fn('lower', col('User.email')), loginId.trim().toLowerCase()),
       include: [
         { model: Role, as: 'Role' },
         { model: Institute, as: 'institute' },
@@ -567,38 +567,6 @@ export const loginService = async (loginId, password) => {
   };
 };
 
-export const selectAccountService = async (accountId, email, registrationNo) => {
-  const user = await User.unscoped().findByPk(accountId, {
-    include: [
-      { model: Role, as: 'Role' },
-      { model: Institute, as: 'institute' },
-      { model: Branch, as: 'branch' }
-    ]
-  });
-  
-  if (!user) throw new AppError('Account not found.', 404);
-  if (!user.is_active) throw new AppError('Account is deactivated.', 403);
-  if (user.school_id && user.institute && !user.institute.is_active) {
-    throw new AppError('Your institute account is currently inactive. Please contact support.', 403);
-  }
-  
-  await user.update({ last_login_at: new Date() });
-  
-  const userProfile = await getUserProfile(user.id);
-
-  const tokenPayload = {
-    userId: user.id,
-    schoolId: user.school_id,
-    userType: user.user_type,
-    branchId: userProfile?.branch_id || user.branch_id,
-  };
-  
-  const accessToken = signAccessToken(tokenPayload);
-  const refreshToken = signRefreshToken({ userId: user.id });
-  
-  return { accessToken, refreshToken, user: userProfile };
-};
-
 export const refreshTokenService = async (refreshToken) => {
   if (!refreshToken) throw new AppError('Refresh token required.', 401);
   let decoded;
@@ -679,7 +647,7 @@ export const getAccountsByEmailService = async (email) => {
     throw new AppError('Valid email is required', 400);
   }
   const users = await User.unscoped().findAll({
-    where: { email: email.toLowerCase() },
+    where: sqlWhere(fn('lower', col('User.email')), email.trim().toLowerCase()),
     attributes: ['id', 'first_name', 'last_name', 'email', 'user_type', 'staff_type', 'school_id', 'branch_id', 'avatar_url', 'is_active'],
     include: [{ model: Institute, as: 'institute', attributes: ['id', 'institute_name', 'institute_code', 'institute_logo_url'] }]
   });
@@ -793,7 +761,6 @@ export default {
   refreshTokenService, 
   forgotPasswordService, 
   resetPasswordService,
-  selectAccountService, 
   getAccountsByEmailService, 
   loginWithAccountService,
   getInstituteDataService,

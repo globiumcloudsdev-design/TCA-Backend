@@ -2,6 +2,18 @@
  * The Clouds Academy - Standard Response Helper
  */
 
+/**
+ * Best HTTP status for a thrown error: an explicit statusCode (AppError) wins,
+ * otherwise common service messages map to 404/403 instead of a blanket 500 (B32).
+ */
+export const errorStatus = (error, fallback = 500) => {
+  if (error?.statusCode) return error.statusCode;
+  const msg = String(error?.message || '');
+  if (/not found/i.test(msg)) return 404;
+  if (/not authorized|unauthorized|do not teach|not assigned|access denied|forbidden|not allowed/i.test(msg)) return 403;
+  return fallback;
+};
+
 export const sendSuccess = (res, data = null, message = 'Success', statusCode = 200) =>
   res.status(statusCode).json({ success: true, message, data, timestamp: new Date().toISOString() });
 

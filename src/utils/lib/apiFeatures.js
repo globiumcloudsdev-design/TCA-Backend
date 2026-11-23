@@ -7,8 +7,12 @@ import { Op } from 'sequelize';
 
 class APIFeatures {
   constructor(modelQuery, queryString) {
-    this.modelQuery = modelQuery; // Sequelize findAll options object
-    this.queryString = queryString;
+    this.modelQuery = modelQuery; // base where (e.g. { school_id }) OR { where: {...} }
+    // SECURITY: the base where (tenant filter) is always merged last in build()
+    // so user-supplied query params can never widen or override it.
+    this.baseWhere = { ...((modelQuery && modelQuery.where) || (modelQuery && !modelQuery.where ? modelQuery : {})) };
+    this.queryString = queryString || {};
+    this.allowedSort = null;
     this.whereClause = {};
     this.orderClause = [];
     this.offsetVal = 0;
@@ -17,15 +21,20 @@ class APIFeatures {
   }
 
   /**
-   * Filter - exclude reserved params
+   * Filter - only keys listed in `allowedFields` are applied (default: none).
+   * Values must be primitives or { like | gte | lte } objects.
+   * @param {string[]} allowedFields - whitelisted column names
    */
-  filter() {
-    const excludedFields = ['page', 'limit', 'sort', 'fields', 'search'];
-    const queryObj = { ...this.queryString };
-    excludedFields.forEach((f) => delete queryObj[f]);
+  filter(allowedFields = []) {
+    const queryObj = {};
+    for (const key of allowedFields) {
+      if (Object.prototype.hasOwnProperty.call(this.queryString, key)) queryObj[key] = this.queryString[key];
+    }
 
     Object.keys(queryObj).forEach((key) => {
       const val = queryObj[key];
+      if (val === null || val === undefined || val === '') return;
+      if (typeof val === 'object' && !val.like && !val.gte && !val.lte) return; // ignore unknown operator objects
       if (typeof val === 'object' && val.like) {
         this.whereClause[key] = { [Op.like]: `%${val.like}%` };
       } else if (typeof val === 'object' && val.gte) {
@@ -41,12 +50,20 @@ class APIFeatures {
   }
 
   /**
+   * Restrict ?sort= to known column names
+   */
+  allowSort(fields = []) {
+    this.allowedSort = fields;
+    return this;
+  }
+
+  /**
    * Search across multiple fields
    * @param {string[]} fields - Fields to search in
    */
   search(fields = ['name']) {
     if (this.queryString.search) {
-      const term = `%${this.queryString.search}%`;
+      const term = `%${String(this.queryString.search).replace(/[%_\\]/g, '\\$&')}%`;
       this.whereClause[Op.or] = fields.map((f) => ({ [f]: { [Op.iLike]: term } }));
     }
     return this;
@@ -57,10 +74,14 @@ class APIFeatures {
    */
   sort() {
     if (this.queryString.sort) {
-      this.orderClause = this.queryString.sort.split(',').map((field) => {
-        if (field.startsWith('-')) return [field.substring(1), 'DESC'];
-        return [field, 'ASC'];
-      });
+      const parsed = String(this.queryString.sort).split(',').map((field) => {
+        const desc = field.startsWith('-');
+        const name = desc ? field.substring(1) : field;
+        return { name, desc };
+      }).filter(({ name }) => /^[a-zA-Z_]+$/.test(name) && (!this.allowedSort || this.allowedSort.includes(name)));
+      this.orderClause = parsed.length
+        ? parsed.map(({ name, desc }) => [name, desc ? 'DESC' : 'ASC'])
+        : [['created_at', 'DESC']];
     } else {
       this.orderClause = [['created_at', 'DESC']];
     }
@@ -87,7 +108,7 @@ class APIFeatures {
    */
   build() {
     return {
-      where: this.whereClause,
+      where: { ...this.whereClause, ...this.baseWhere },
       order: this.orderClause,
       offset: this.offsetVal,
       limit: this.limitVal,

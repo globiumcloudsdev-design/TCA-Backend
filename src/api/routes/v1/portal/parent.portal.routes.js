@@ -61,7 +61,7 @@ router.get('/results/:resultId', parentPortal.getExamResultDetails);
 router.get('/children/:childId/fees', parentPortal.getChildFees);
 router.get('/fees/summary', parentPortal.getFeeSummary);
 router.get('/fees/voucher/:voucherId', parentPortal.getVoucherDetails);
-router.post('/fees/pay/:voucherId', parentPortal.payChildFee);
+router.post('/fees/pay/:voucherId', uploadSingle('proof'), parentPortal.payChildFee);
 router.get('/payments/history', parentPortal.getPaymentHistory);
 // ─────────────────────────────────────────────────────────────────────────────
 // CHILD ASSIGNMENTS
