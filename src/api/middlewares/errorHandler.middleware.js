@@ -8,6 +8,7 @@
 import { AppError } from '../../utils/lib/AppError.js';
 import logger from '../../config/logger.js';
 import { errorStatus } from '../../utils/helpers/response.helper.js';
+import { exposeErrorDetails } from '../../utils/helpers/errorExposure.js';
 
 /**
  * Handle Sequelize unique constraint violations
@@ -84,6 +85,11 @@ export const errorHandler = (err, req, res, next) => {
   if (err.name === 'JsonWebTokenError') error = handleJWTError();
   if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();
 
+  // Body-parser / multer errors: safe, human-readable client errors (no parser internals)
+  if (err.type === 'entity.parse.failed') error = new AppError('Malformed JSON in request body.', 400);
+  else if (err.type === 'entity.too.large') error = new AppError('Request body is too large.', 413);
+  else if (err.name === 'MulterError') error = new AppError(`Upload error: ${String(err.code || 'invalid upload').replace(/_/g, ' ').toLowerCase()}`, 400);
+
   // Not an AppError — wrap it
   if (!(error instanceof AppError)) {
     const status = errorStatus(error, error.statusCode || 500);
@@ -91,9 +97,10 @@ export const errorHandler = (err, req, res, next) => {
     error = new AppError(error.message || 'Server error', status, status < 500);
   }
 
-  // Stack traces / details ONLY when NODE_ENV is explicitly 'development'.
-  // Anything else (production, unset on Render, test, ...) gets the safe response.
-  if (process.env.NODE_ENV === 'development') {
+  // Always log the full error server-side; only an explicit EXPOSE_ERROR_DETAILS=true
+  // opt-in puts details in the response (NODE_ENV is ignored on purpose).
+  if (exposeErrorDetails()) {
+    logger.error(`${req.method} ${req.originalUrl.split('?')[0]} -> ${error.statusCode}: ${error.message}`, { stack: error.stack });
     sendErrorDev(error, res);
   } else {
     sendErrorProd(error, req, res);
