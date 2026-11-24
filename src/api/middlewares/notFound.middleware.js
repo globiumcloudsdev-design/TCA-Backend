@@ -5,7 +5,8 @@
 import { AppError } from '../../utils/lib/AppError.js';
 
 export const notFound = (req, res, next) => {
-  next(new AppError(`Route ${req.originalUrl} not found`, 404));
+  // Do not echo the URL/query string back (information leak / reflected content)
+  next(new AppError('The requested endpoint does not exist.', 404));
 };
 
 export default notFound;

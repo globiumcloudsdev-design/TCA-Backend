@@ -53,18 +53,21 @@ const sendErrorDev = (err, res) => {
 /**
  * Send error in production (limited info)
  */
-const sendErrorProd = (err, res) => {
-  if (err.isOperational) {
-    res.status(err.statusCode).json({
-      success: false,
-      message: err.message,
-      errors: err.errors,
-    });
-  } else {
-    // Programming/unknown errors - don't leak details
-    logger.error('💥 CRITICAL ERROR:', err);
-    res.status(500).json({ success: false, message: 'Something went wrong.' });
+const GENERIC_5XX = 'Something went wrong. Please try again.';
+
+const sendErrorProd = (err, req, res) => {
+  const status = err.statusCode || 500;
+  if (status >= 500 || !err.isOperational) {
+    // Never expose internals (messages, stack, paths, SQL): log server-side, answer generically
+    logger.error(`💥 ${req.method} ${req.originalUrl.split('?')[0]} -> ${status}: ${err.message}`, { stack: err.stack });
+    return res.status(status >= 500 ? status : 500).json({ success: false, message: GENERIC_5XX });
   }
+  // 4xx operational errors: human-readable message (and Joi-style field errors) are safe to show
+  return res.status(status).json({
+    success: false,
+    message: err.message,
+    ...(err.errors ? { errors: err.errors } : {}),
+  });
 };
 
 export const errorHandler = (err, req, res, next) => {
@@ -88,10 +91,12 @@ export const errorHandler = (err, req, res, next) => {
     error = new AppError(error.message || 'Server error', status, status < 500);
   }
 
+  // Stack traces / details ONLY when NODE_ENV is explicitly 'development'.
+  // Anything else (production, unset on Render, test, ...) gets the safe response.
   if (process.env.NODE_ENV === 'development') {
     sendErrorDev(error, res);
   } else {
-    sendErrorProd(error, res);
+    sendErrorProd(error, req, res);
   }
 };
 
