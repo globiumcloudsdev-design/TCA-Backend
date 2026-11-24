@@ -42,6 +42,8 @@ import GlobalAnnouncement from "./GlobalAnnouncement.model.js";
 import GlobalSetting from "./GlobalSetting.model.js";
 import WebsiteCms from "./WebsiteCms.model.js";
 import SupportTicket from "./SupportTicket.model.js";
+import TestRecord from "./TestRecord.model.js";
+import TestMark from "./TestMark.model.js";
 
 const models = {
   sequelize,
@@ -84,6 +86,8 @@ const models = {
   GlobalSetting,
   WebsiteCms,
   SupportTicket,
+  TestRecord,
+  TestMark,
 };
 
 // Run associations — deduplicate so alias School: Institute doesn't call associate twice
