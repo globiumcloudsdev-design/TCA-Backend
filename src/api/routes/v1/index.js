@@ -23,6 +23,7 @@ import branchRoutes from './branch.routes.js'
 import parentRoutes from './parent.routes.js';
 import portalRoutes from './portal/index.js'; // ✅ Portal routes aggregator
 import ExamRoutes from './exam.routes.js'; // ✅ Import exam routes
+import testRecordRoutes from './testRecord.routes.js'; // Test Records (class tests)
 import reportRoutes from './report.routes.js'; // ✅ Import report routes
 import expenseRoutes from './expense.routes.js'; // ✅ Import expense routes
 import vendorRoutes from './vendor.routes.js'; // ✅ Import vendor routes
@@ -118,6 +119,9 @@ router.use('/portal', portalRoutes);
 
 // ── Exam Routes ─────────────────────────────────────────────────────────────
 router.use('/exams', ExamRoutes); // ✅ Mount exam routes
+
+// ── Test Records (class tests, separate from formal exams) ─────────────────
+router.use('/test-records', testRecordRoutes);
 
 // ── Report Routes ─────────────────────────────────────────────────────────
 router.use('/reports', reportRoutes); // ✅ Mount report routes
