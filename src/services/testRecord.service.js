@@ -595,6 +595,97 @@ export const deleteTest = async (ctx, id) => {
 // MARKS
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Validate ONE marks entry against a test. Throws AppError (message has no row prefix). */
+const parseMarkEntry = (e, total, rosterIds) => {
+  if (!e || !e.student_id || !UUID_RE.test(String(e.student_id))) throw new AppError('valid student_id is required', 400);
+  if (!rosterIds.has(e.student_id)) throw new AppError("student is not in this test's class/section", 400);
+
+  const absent = e.is_absent === true || e.is_absent === 'true';
+  const remark = e.remark === undefined ? undefined : (isBlank(e.remark) ? null : String(e.remark).trim());
+  if (remark && remark.length > 255) throw new AppError('remark must be 255 characters or less', 400);
+
+  let marks = null;
+  if (!absent && !isBlank(e.marks_obtained)) {
+    marks = Number(e.marks_obtained);
+    if (!Number.isFinite(marks)) throw new AppError('marks_obtained must be a number', 400);
+    if (marks < 0 || marks > total) throw new AppError(`marks_obtained must be between 0 and ${total}`, 400);
+    marks = round2(marks);
+  }
+  return { student_id: e.student_id, absent, marks, remark, clear: e.clear === true || e.clear === 'true' };
+};
+
+const assertMarksEntryOpen = (ctx, test) => {
+  assertTeacherCanEdit(ctx, test);
+  if (test.test_date > todayPkt()) {
+    throw new AppError(`Marks can only be entered on or after the test date (${test.test_date})`, 400);
+  }
+};
+
+/** Upsert the validated rows of one test (never deletes rows that are not in the payload) */
+const applyMarkRows = async (ctx, test, rows, transaction) => {
+  const existing = await TestMark.findAll({
+    where: { test_record_id: test.id, student_id: { [Op.in]: rows.map((r) => r.student_id) } },
+    transaction,
+  });
+  const existingByStudent = new Map(existing.map((m) => [m.student_id, m]));
+
+  const result = { created: 0, updated: 0, cleared: 0, skipped_blank: 0 };
+  for (const r of rows) {
+    const prev = existingByStudent.get(r.student_id);
+    const entered = r.absent || r.marks !== null;
+
+    if (r.clear) {
+      if (prev) { await prev.destroy({ transaction }); result.cleared += 1; }
+      continue;
+    }
+    if (!entered) {
+      // Blank means "not entered yet": never stored as 0. Only a remark on an existing row may change.
+      if (prev && r.remark !== undefined) {
+        await prev.update({ remark: r.remark, entered_by: ctx.actorId }, { transaction });
+        result.updated += 1;
+      } else {
+        result.skipped_blank += 1;
+      }
+      continue;
+    }
+    if (prev) {
+      await prev.update({
+        marks_obtained: r.absent ? null : r.marks,
+        is_absent: r.absent,
+        ...(r.remark !== undefined ? { remark: r.remark } : {}),
+        entered_by: ctx.actorId,
+      }, { transaction });
+      result.updated += 1;
+    } else {
+      await TestMark.create({
+        test_record_id: test.id,
+        institute_id: ctx.instituteId,
+        student_id: r.student_id,
+        marks_obtained: r.absent ? null : r.marks,
+        is_absent: r.absent,
+        remark: r.remark ?? null,
+        entered_by: ctx.actorId,
+      }, { transaction });
+      result.created += 1;
+    }
+  }
+  return result;
+};
+
+/** draft <-> marks_entered follows whether any marks exist. Published stays published. */
+const refreshStatus = async (ctx, test, transaction) => {
+  const enteredCount = await TestMark.count({
+    where: { test_record_id: test.id, [Op.or]: [{ is_absent: true }, { marks_obtained: { [Op.ne]: null } }] },
+    transaction,
+  });
+  let status = test.status;
+  if (status !== 'published') {
+    status = enteredCount > 0 ? 'marks_entered' : 'draft';
+    if (status !== test.status) await test.update({ status, updated_by: ctx.actorId }, { transaction });
+  }
+  return { status, entered_count: enteredCount };
+};
+
 export const saveMarks = async (ctx, id, entries) => {
   if (!Array.isArray(entries) || entries.length === 0) throw new AppError('marks must be a non-empty array', 400);
   if (entries.length > MAX_MARK_ROWS) throw new AppError(`At most ${MAX_MARK_ROWS} rows per request`, 400);
@@ -607,11 +698,7 @@ export const saveMarks = async (ctx, id, entries) => {
       lock: transaction.LOCK.UPDATE,
     });
     if (!test) throw new AppError('Test record not found', 404);
-    assertTeacherCanEdit(ctx, test);
-
-    if (test.test_date > todayPkt()) {
-      throw new AppError(`Marks can only be entered on or after the test date (${test.test_date})`, 400);
-    }
+    assertMarksEntryOpen(ctx, test);
 
     const total = Number(test.total_marks);
     const roster = await getRoster(ctx.instituteId, test.class_id, test.section_id);
@@ -619,87 +706,302 @@ export const saveMarks = async (ctx, id, entries) => {
 
     // Validate everything first; one bad row rejects the whole request (nothing is half-saved)
     const seen = new Set();
-    const rows = [];
-    entries.forEach((e, i) => {
-      const where = `marks[${i}]`;
-      if (!e || !e.student_id || !UUID_RE.test(String(e.student_id))) throw new AppError(`${where}: valid student_id is required`, 400);
-      if (!rosterIds.has(e.student_id)) throw new AppError(`${where}: student is not in this test's class/section`, 400);
-      if (seen.has(e.student_id)) throw new AppError(`${where}: duplicate student_id`, 400);
-      seen.add(e.student_id);
-
-      const absent = e.is_absent === true || e.is_absent === 'true';
-      let remark = e.remark === undefined ? undefined : (isBlank(e.remark) ? null : String(e.remark).trim());
-      if (remark && remark.length > 255) throw new AppError(`${where}: remark must be 255 characters or less`, 400);
-
-      let marks = null;
-      if (!absent && !isBlank(e.marks_obtained)) {
-        marks = Number(e.marks_obtained);
-        if (!Number.isFinite(marks)) throw new AppError(`${where}: marks_obtained must be a number`, 400);
-        if (marks < 0 || marks > total) throw new AppError(`${where}: marks_obtained must be between 0 and ${total}`, 400);
-        marks = round2(marks);
+    const rows = entries.map((e, i) => {
+      try {
+        const row = parseMarkEntry(e, total, rosterIds);
+        if (seen.has(row.student_id)) throw new AppError('duplicate student_id', 400);
+        seen.add(row.student_id);
+        return row;
+      } catch (err) {
+        throw new AppError(`marks[${i}]: ${err.message}`, err.statusCode || 400);
       }
-      rows.push({ student_id: e.student_id, absent, marks, remark, clear: e.clear === true || e.clear === 'true' });
     });
 
-    const existing = await TestMark.findAll({
-      where: { test_record_id: test.id, student_id: { [Op.in]: rows.map((r) => r.student_id) } },
-      transaction,
-    });
-    const existingByStudent = new Map(existing.map((m) => [m.student_id, m]));
+    const result = await applyMarkRows(ctx, test, rows, transaction);
+    const { status, entered_count } = await refreshStatus(ctx, test, transaction);
+    return { ...result, status, entered_count, total_students: roster.length };
+  });
+};
 
-    const result = { created: 0, updated: 0, cleared: 0, skipped_blank: 0 };
-    for (const r of rows) {
-      const prev = existingByStudent.get(r.student_id);
-      const entered = r.absent || r.marks !== null;
+// ─────────────────────────────────────────────────────────────────────────────
+// MONTHLY SHEET (paper "Test Record Sheet": students x tests for one
+// class + section + subject + teacher + month + year)
+// ─────────────────────────────────────────────────────────────────────────────
 
-      if (r.clear) {
-        if (prev) { await prev.destroy({ transaction }); result.cleared += 1; }
-        continue;
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MAX_SHEET_CELLS = 2000;
+
+const parseMonthYear = (q = {}) => {
+  const now = new Date(`${todayPkt()}T00:00:00Z`);
+  const month = q.month === undefined || q.month === '' ? now.getUTCMonth() + 1 : parseInt(q.month, 10);
+  const year = q.year === undefined || q.year === '' ? now.getUTCFullYear() : parseInt(q.year, 10);
+  if (!Number.isInteger(month) || month < 1 || month > 12) throw new AppError('month must be 1-12', 400);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new AppError('year must be a valid 4-digit year', 400);
+  const mm = String(month).padStart(2, '0');
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return { month, year, from: `${year}-${mm}-01`, to: `${year}-${mm}-${String(lastDay).padStart(2, '0')}` };
+};
+
+/** Resolve + authorize the class/section/subject/teacher selector shared by sheet GET and publish */
+const resolveSheetSelector = async (ctx, q = {}) => {
+  const teacherId = isTeacher(ctx) ? ctx.actorId : q.teacher_id;
+  if (!teacherId) throw new AppError('teacher_id is required', 400);
+  assertUuid(teacherId, 'teacher_id');
+  assertUuid(q.class_id, 'class_id');
+
+  const cls = await Class.findOne({ where: { id: q.class_id, school_id: ctx.instituteId }, attributes: ['id', 'name', 'branch_id'] });
+  if (!cls || (ctx.branchId && cls.branch_id && cls.branch_id !== ctx.branchId)) throw new AppError('Class not found', 404);
+
+  const sectionCount = await Section.count({ where: { class_id: cls.id, school_id: ctx.instituteId } });
+  let section = null;
+  if (sectionCount > 0) {
+    if (!q.section_id) throw new AppError('section_id is required for this class', 400);
+    assertUuid(q.section_id, 'section_id');
+    section = await Section.findOne({ where: { id: q.section_id, class_id: cls.id, school_id: ctx.instituteId }, attributes: ['id', 'name'] });
+    if (!section) throw new AppError('Section not found in this class', 404);
+  }
+
+  const subjectId = q.subject_id || null;
+  if (subjectId) assertUuid(subjectId, 'subject_id');
+  const subjectName = q.subject_name || q.subject ? String(q.subject_name || q.subject).trim() : null;
+  if (!subjectId && !subjectName) throw new AppError('subject is required (subject_id or subject)', 400);
+
+  const teacher = await User.findOne({
+    where: { id: teacherId, school_id: ctx.instituteId, user_type: 'TEACHER' },
+    attributes: ['id', 'first_name', 'last_name', 'branch_id'],
+  });
+  if (!teacher || (ctx.branchId && teacher.branch_id && teacher.branch_id !== ctx.branchId)) throw new AppError('Teacher not found', 404);
+
+  let resolvedSubjectName = subjectName;
+  if (isTeacher(ctx)) {
+    // A teacher may only open sheets of classes/sections/subjects assigned to them (also protects the roster)
+    const scope = await getTeacherScope(teacherId, ctx.instituteId);
+    if (subjectId && !resolvedSubjectName) {
+      resolvedSubjectName = scope.find((e) => e.subject_id === subjectId)?.subject_name || null;
+    }
+    assertTeacherMayTest(scope, { class_id: cls.id, section_id: section?.id || null, subject_id: subjectId, subject_name: resolvedSubjectName });
+  }
+  return { cls, section, subjectId, subjectName: resolvedSubjectName, teacher };
+};
+
+const sheetTestWhere = (ctx, sel, period) => {
+  const where = {
+    institute_id: ctx.instituteId,
+    ...(ctx.branchId ? { branch_id: ctx.branchId } : {}),
+    teacher_id: sel.teacher.id,
+    class_id: sel.cls.id,
+    section_id: sel.section ? sel.section.id : null,
+    test_date: { [Op.between]: [period.from, period.to] },
+  };
+  if (sel.subjectId) {
+    where.subject_id = sel.subjectId;
+  } else {
+    where[Op.and] = [sequelize.where(sequelize.fn('lower', sequelize.col('TestRecord.subject_name')), lc(sel.subjectName))];
+  }
+  return where;
+};
+
+const sumSheet = (testsById, marksOfStudent) => {
+  let obtained = 0;
+  let possible = 0;
+  let attended = 0;
+  let absent = 0;
+  for (const [testId, m] of Object.entries(marksOfStudent)) {
+    const t = testsById.get(testId);
+    if (!t) continue;
+    if (m.is_absent) { absent += 1; continue; }
+    if (m.marks_obtained === null) continue;
+    obtained += m.marks_obtained;
+    possible += Number(t.total_marks);
+    attended += 1;
+  }
+  return {
+    total_obtained: round2(obtained),
+    total_possible: round2(possible),
+    percentage: possible > 0 ? pct(obtained, possible) : null,
+    tests_attended: attended,
+    tests_absent: absent,
+  };
+};
+
+export const getSheet = async (ctx, q = {}) => {
+  const period = parseMonthYear(q);
+  const sel = await resolveSheetSelector(ctx, q);
+
+  const [tests, roster, institute] = await Promise.all([
+    TestRecord.findAll({ where: sheetTestWhere(ctx, sel, period), order: [['test_date', 'ASC'], ['created_at', 'ASC']] }),
+    getRoster(ctx.instituteId, sel.cls.id, sel.section ? sel.section.id : null),
+    models.Institute.findByPk(ctx.instituteId, { attributes: ['institute_name'] }),
+  ]);
+
+  const testIds = tests.map((t) => t.id);
+  const marks = testIds.length ? await TestMark.findAll({ where: { test_record_id: { [Op.in]: testIds } } }) : [];
+  const marksByStudent = new Map();
+  marks.forEach((m) => {
+    if (!marksByStudent.has(m.student_id)) marksByStudent.set(m.student_id, {});
+    marksByStudent.get(m.student_id)[m.test_record_id] = {
+      marks_obtained: m.marks_obtained === null ? null : Number(m.marks_obtained),
+      is_absent: m.is_absent,
+      remark: m.remark || null,
+    };
+  });
+  const testsById = new Map(tests.map((t) => [t.id, t]));
+
+  const subjectName = tests[0]?.subject_name || sel.subjectName
+    || (await Subject.findOne({ where: { id: sel.subjectId, school_id: ctx.instituteId }, attributes: ['name'] }))?.name || null;
+
+  const students = roster.map((s, i) => {
+    const cells = {};
+    const own = marksByStudent.get(s.student_id) || {};
+    tests.forEach((t) => { cells[t.id] = own[t.id] || { marks_obtained: null, is_absent: false, remark: null }; });
+    return {
+      s_no: i + 1,
+      student_id: s.student_id,
+      name: s.name,
+      roll_number: s.roll_no,
+      registration_no: s.registration_no,
+      marks: cells,
+      summary: sumSheet(testsById, own),
+    };
+  });
+
+  const editable = (t) => !(isTeacher(ctx) && t.status === 'published');
+  return {
+    header: {
+      school_name: institute?.institute_name || null,
+      class_id: sel.cls.id, class: sel.cls.name,
+      section_id: sel.section?.id || null, section: sel.section?.name || null,
+      subject_id: sel.subjectId || tests[0]?.subject_id || null, subject: subjectName,
+      teacher_id: sel.teacher.id, teacher: `${sel.teacher.first_name || ''} ${sel.teacher.last_name || ''}`.trim(),
+      month: period.month, month_name: MONTH_NAMES[period.month - 1], year: period.year,
+    },
+    tests: tests.map((t) => ({
+      id: t.id,
+      title: t.title,
+      test_date: t.test_date,
+      total_marks: Number(t.total_marks),
+      passing_marks: Number(t.passing_marks),
+      status: t.status,
+      can_edit: editable(t),
+      marks_entry_open: t.test_date <= todayPkt(),
+    })),
+    students,
+    totals: {
+      tests: tests.length,
+      total_marks_all_tests: round2(tests.reduce((a, t) => a + Number(t.total_marks), 0)),
+      students: students.length,
+    },
+  };
+};
+
+/**
+ * Bulk save of cells across the tests of a sheet.
+ * All-or-nothing: if ANY cell is invalid nothing is saved and every bad cell is reported
+ * (HTTP 422, body.errors = [{ index, test_record_id, student_id, message }]).
+ */
+export const saveSheetMarks = async (ctx, cells) => {
+  if (!Array.isArray(cells) || cells.length === 0) throw new AppError('cells must be a non-empty array', 400);
+  if (cells.length > MAX_SHEET_CELLS) throw new AppError(`At most ${MAX_SHEET_CELLS} cells per request`, 400);
+
+  return sequelize.transaction(async (transaction) => {
+    const testIds = [...new Set(cells.map((c) => c?.test_record_id).filter((v) => v && UUID_RE.test(String(v))))].sort();
+
+    // Lock in a stable order (no deadlocks between two teachers saving the same sheet)
+    const tests = testIds.length
+      ? await TestRecord.findAll({
+          where: { id: { [Op.in]: testIds }, ...baseWhere(ctx) },
+          order: [['id', 'ASC']],
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        })
+      : [];
+    const testById = new Map(tests.map((t) => [t.id, t]));
+
+    const errors = [];
+    const rosterCache = new Map();
+    const rosterIdsFor = async (test) => {
+      const key = `${test.class_id}|${test.section_id || ''}`;
+      if (!rosterCache.has(key)) {
+        const roster = await getRoster(ctx.instituteId, test.class_id, test.section_id);
+        rosterCache.set(key, new Set(roster.map((s) => s.student_id)));
       }
-      if (!entered) {
-        // Blank means "not entered yet": never stored as 0. Only a remark on an existing row may change.
-        if (prev && r.remark !== undefined) {
-          await prev.update({ remark: r.remark, entered_by: ctx.actorId }, { transaction });
-          result.updated += 1;
-        } else {
-          result.skipped_blank += 1;
-        }
-        continue;
+      return rosterCache.get(key);
+    };
+
+    const rowsByTest = new Map();
+    const seen = new Set();
+    const testProblem = new Map(); // test id -> message (reported once per cell)
+
+    for (let i = 0; i < cells.length; i += 1) {
+      const c = cells[i] || {};
+      const fail = (message) => errors.push({ index: i, test_record_id: c.test_record_id || null, student_id: c.student_id || null, message });
+
+      if (!c.test_record_id || !UUID_RE.test(String(c.test_record_id))) { fail('valid test_record_id is required'); continue; }
+      const test = testById.get(c.test_record_id);
+      if (!test) { fail('Test record not found'); continue; }
+
+      if (!testProblem.has(test.id)) {
+        try { assertMarksEntryOpen(ctx, test); testProblem.set(test.id, null); } catch (err) { testProblem.set(test.id, err.message); }
       }
-      if (prev) {
-        await prev.update({
-          marks_obtained: r.absent ? null : r.marks,
-          is_absent: r.absent,
-          ...(r.remark !== undefined ? { remark: r.remark } : {}),
-          entered_by: ctx.actorId,
-        }, { transaction });
-        result.updated += 1;
-      } else {
-        await TestMark.create({
-          test_record_id: test.id,
-          institute_id: ctx.instituteId,
-          student_id: r.student_id,
-          marks_obtained: r.absent ? null : r.marks,
-          is_absent: r.absent,
-          remark: r.remark ?? null,
-          entered_by: ctx.actorId,
-        }, { transaction });
-        result.created += 1;
+      if (testProblem.get(test.id)) { fail(testProblem.get(test.id)); continue; }
+
+      try {
+        const row = parseMarkEntry(c, Number(test.total_marks), await rosterIdsFor(test));
+        const key = `${test.id}|${row.student_id}`;
+        if (seen.has(key)) throw new AppError('duplicate cell for this test and student', 400);
+        seen.add(key);
+        if (!rowsByTest.has(test.id)) rowsByTest.set(test.id, []);
+        rowsByTest.get(test.id).push(row);
+      } catch (err) {
+        fail(err.message);
       }
     }
 
-    // draft <-> marks_entered follows whether any marks exist. Published stays published.
-    const enteredCount = await TestMark.count({
-      where: { test_record_id: test.id, [Op.or]: [{ is_absent: true }, { marks_obtained: { [Op.ne]: null } }] },
-      transaction,
-    });
-    let status = test.status;
-    if (status !== 'published') {
-      status = enteredCount > 0 ? 'marks_entered' : 'draft';
-      if (status !== test.status) await test.update({ status, updated_by: ctx.actorId }, { transaction });
+    if (errors.length) {
+      const err = new AppError(`${errors.length} cell(s) are invalid. Nothing was saved.`, 422);
+      err.errors = errors;
+      throw err; // rolls the transaction back
     }
 
-    return { ...result, status, entered_count: enteredCount, total_students: roster.length };
+    const totals = { created: 0, updated: 0, cleared: 0, skipped_blank: 0 };
+    const perTest = [];
+    for (const test of tests) {
+      const rows = rowsByTest.get(test.id);
+      if (!rows) continue;
+      const r = await applyMarkRows(ctx, test, rows, transaction);
+      Object.keys(totals).forEach((k) => { totals[k] += r[k]; });
+      const { status, entered_count } = await refreshStatus(ctx, test, transaction);
+      perTest.push({ test_record_id: test.id, status, entered_count });
+    }
+    return { ...totals, tests: perTest };
+  });
+};
+
+/** Admin: publish every marks_entered test of a sheet. Drafts (no marks) are skipped, not failed. */
+export const publishSheet = async (ctx, body = {}) => {
+  const period = parseMonthYear(body);
+  const sel = await resolveSheetSelector(ctx, body);
+
+  return sequelize.transaction(async (transaction) => {
+    const tests = await TestRecord.findAll({
+      where: sheetTestWhere(ctx, sel, period),
+      order: [['id', 'ASC']],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const published = [];
+    const skipped = [];
+    for (const t of tests) {
+      if (t.status === 'published') { skipped.push({ id: t.id, reason: 'already published' }); continue; }
+      const entered = await TestMark.count({
+        where: { test_record_id: t.id, [Op.or]: [{ is_absent: true }, { marks_obtained: { [Op.ne]: null } }] },
+        transaction,
+      });
+      if (entered === 0) { skipped.push({ id: t.id, reason: 'no marks entered' }); continue; }
+      await t.update({ status: 'published', published_at: new Date(), published_by: ctx.actorId, updated_by: ctx.actorId }, { transaction });
+      published.push(t.id);
+    }
+    return { published_count: published.length, published, skipped };
   });
 };
 
@@ -835,6 +1137,89 @@ export const listPublishedForStudent = async (instituteId, studentId, filters = 
   };
 };
 
+/**
+ * Parent/student monthly view: published tests of one month grouped by subject (+teacher),
+ * with monthly totals. Caller must already have verified ownership of studentId.
+ */
+export const listMonthlyForStudent = async (instituteId, studentId, q = {}) => {
+  const period = parseMonthYear(q);
+  const marks = await TestMark.findAll({
+    where: {
+      student_id: studentId,
+      institute_id: instituteId,
+      [Op.or]: [{ is_absent: true }, { marks_obtained: { [Op.ne]: null } }],
+    },
+    include: [{
+      model: TestRecord,
+      as: 'test',
+      required: true,
+      where: { institute_id: instituteId, status: 'published', test_date: { [Op.between]: [period.from, period.to] } },
+      include: [{ model: User, as: 'teacher', attributes: ['id', 'first_name', 'last_name'], required: false }],
+    }],
+    order: [[{ model: TestRecord, as: 'test' }, 'test_date', 'ASC']],
+  });
+
+  const groups = new Map();
+  const overall = { obtained: 0, possible: 0, tests: 0, absent: 0 };
+  for (const m of marks) {
+    const t = m.test;
+    const key = `${lc(t.subject_name)}|${t.teacher_id}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        subject_id: t.subject_id,
+        subject_name: t.subject_name,
+        teacher_id: t.teacher_id,
+        teacher_name: t.teacher ? `${t.teacher.first_name || ''} ${t.teacher.last_name || ''}`.trim() : null,
+        tests: [],
+        _obtained: 0,
+        _possible: 0,
+      });
+    }
+    const g = groups.get(key);
+    const total = Number(t.total_marks);
+    const obtained = m.marks_obtained === null ? null : Number(m.marks_obtained);
+    g.tests.push({
+      id: t.id,
+      title: t.title,
+      date: t.test_date,
+      total_marks: total,
+      passing_marks: Number(t.passing_marks),
+      marks_obtained: obtained,
+      is_absent: m.is_absent,
+      percentage: obtained === null ? null : pct(obtained, total),
+      result: m.is_absent ? 'absent' : (obtained >= Number(t.passing_marks) ? 'pass' : 'fail'),
+      remark: m.remark,
+    });
+    overall.tests += 1;
+    if (m.is_absent) { overall.absent += 1; continue; }
+    g._obtained += obtained;
+    g._possible += total;
+    overall.obtained += obtained;
+    overall.possible += total;
+  }
+
+  return {
+    month: period.month,
+    month_name: MONTH_NAMES[period.month - 1],
+    year: period.year,
+    subjects: [...groups.values()]
+      .map(({ _obtained, _possible, ...g }) => ({
+        ...g,
+        monthly_total_obtained: round2(_obtained),
+        monthly_total_possible: round2(_possible),
+        monthly_percentage: _possible > 0 ? pct(_obtained, _possible) : null,
+      }))
+      .sort((a, b) => a.subject_name.localeCompare(b.subject_name)),
+    overall: {
+      tests: overall.tests,
+      absent: overall.absent,
+      total_obtained: round2(overall.obtained),
+      total_possible: round2(overall.possible),
+      percentage: overall.possible > 0 ? pct(overall.obtained, overall.possible) : null,
+    },
+  };
+};
+
 export default {
   getRoster,
   getTeacherScope,
@@ -846,6 +1231,10 @@ export default {
   updateTest,
   deleteTest,
   saveMarks,
+  getSheet,
+  saveSheetMarks,
+  publishSheet,
+  listMonthlyForStudent,
   publishTest,
   unpublishTest,
   listPublishedForStudent,

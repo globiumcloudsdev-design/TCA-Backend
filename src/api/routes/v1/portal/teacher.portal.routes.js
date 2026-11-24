@@ -31,6 +31,8 @@ router.use(isTeacher);
 
 // ── Test Records (own tests only; classes/sections/subjects limited to assignments) ──
 router.get("/test-records/options", testRecords.teacherOptions);
+router.get("/test-records/sheet", testRecords.teacherSheetGet);
+router.put("/test-records/sheet/marks", testRecords.teacherSheetSaveMarks);
 router.get("/test-records", testRecords.teacherList);
 router.post("/test-records", testRecords.teacherCreate);
 router.get("/test-records/:id", testRecords.teacherGet);

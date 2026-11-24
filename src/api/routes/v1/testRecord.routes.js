@@ -22,6 +22,11 @@ router.use(restrictTo('INSTITUTE_ADMIN', 'SUPER_ADMIN', 'BRANCH_ADMIN', 'CAMPUS_
 const can = (action) => hasAnyPermission([`test_record.${action}`, `exam.${action === 'read' ? 'read' : action}`]);
 
 router.get('/options', can('read'), ctrl.adminOptions); // before /:id
+
+// Monthly sheet (must be before /:id)
+router.get('/sheet', can('read'), ctrl.adminSheetGet);
+router.put('/sheet/marks', can('update'), ctrl.adminSheetSaveMarks);
+router.post('/sheet/publish', hasAnyPermission(['test_record.publish', 'exam.publish']), ctrl.adminSheetPublish);
 router.get('/', can('read'), ctrl.adminList);
 router.post('/', can('create'), ctrl.adminCreate);
 

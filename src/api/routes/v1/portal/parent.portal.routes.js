@@ -22,6 +22,8 @@ router.use(isParent);
 
 // Test Records: published only, ownership-checked child
 router.get('/children/:childId/test-records', testRecords.parentChildList);
+router.get('/children/:childId/test-records/monthly', testRecords.parentChildMonthly);
+router.get('/test-records/monthly', testRecords.parentChildMonthly); // ?child_id=
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD

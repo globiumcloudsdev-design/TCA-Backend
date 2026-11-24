@@ -73,6 +73,31 @@ const handlers = (ctxOf) => ({
   }),
 });
 
+// ── Monthly sheet (shared by admin + teacher; role comes from the context) ─────
+const sheetHandlers = (ctxOf) => ({
+  get: catchAsync(async (req, res) => {
+    const ctx = requireInstitute(ctxOf(req));
+    sendSuccess(res, await service.getSheet(ctx, req.query), 'Test record sheet fetched');
+  }),
+  saveMarks: catchAsync(async (req, res) => {
+    const ctx = requireInstitute(ctxOf(req));
+    const cells = Array.isArray(req.body) ? req.body : (req.body?.cells ?? req.body?.marks);
+    sendSuccess(res, await service.saveSheetMarks(ctx, cells), 'Sheet marks saved');
+  }),
+});
+
+const adminSheet = sheetHandlers(adminCtx);
+export const adminSheetGet = adminSheet.get;
+export const adminSheetSaveMarks = adminSheet.saveMarks;
+export const adminSheetPublish = catchAsync(async (req, res) => {
+  const ctx = requireInstitute(adminCtx(req));
+  sendSuccess(res, await service.publishSheet(ctx, req.body), 'Sheet published');
+});
+
+const teacherSheet = sheetHandlers(teacherCtx);
+export const teacherSheetGet = teacherSheet.get;
+export const teacherSheetSaveMarks = teacherSheet.saveMarks;
+
 // ── Admin ────────────────────────────────────────────────────────────────────
 const admin = handlers(adminCtx);
 export const adminList = admin.list;
@@ -134,6 +159,21 @@ export const studentList = catchAsync(async (req, res) => {
     { page: req.query.page, limit: req.query.limit }
   );
   sendStudentList(res, result);
+});
+
+export const studentMonthly = catchAsync(async (req, res) => {
+  const instituteId = getInstituteId(req);
+  if (!instituteId) throw new AppError('Institute context required', 400);
+  sendSuccess(res, await service.listMonthlyForStudent(instituteId, req.user.id, req.query), 'Monthly test records fetched');
+});
+
+/** GET /portal/parent/children/:childId/test-records/monthly  (or ?child_id= on /portal/parent/test-records/monthly) */
+export const parentChildMonthly = catchAsync(async (req, res) => {
+  const instituteId = getInstituteId(req);
+  if (!instituteId) throw new AppError('Institute context required', 400);
+  const childId = req.params.childId || req.query.child_id || req.query.child;
+  await assertParentOwnsChild(req.user.id, childId, instituteId);
+  sendSuccess(res, await service.listMonthlyForStudent(instituteId, childId, req.query), 'Monthly test records fetched');
 });
 
 export const parentChildList = catchAsync(async (req, res) => {

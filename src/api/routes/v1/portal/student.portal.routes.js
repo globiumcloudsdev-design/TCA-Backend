@@ -23,6 +23,7 @@ router.use(isStudent);
 
 // Test Records: published only, own results
 router.get('/test-records', testRecords.studentList);
+router.get('/test-records/monthly', testRecords.studentMonthly);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD
