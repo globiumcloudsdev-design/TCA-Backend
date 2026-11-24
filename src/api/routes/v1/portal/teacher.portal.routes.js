@@ -23,10 +23,20 @@ import {
 } from "../../../validators/leaveRequest.validator.js";
 import * as teacherPayroll from "../../../controllers/portal/teacherPayroll.controller.js";
 import * as eventController from '../../../controllers/event.controller.js';
+import * as testRecords from "../../../controllers/testRecord.controller.js";
 
 const router = Router();
 router.use(protect);
 router.use(isTeacher);
+
+// ── Test Records (own tests only; classes/sections/subjects limited to assignments) ──
+router.get("/test-records/options", testRecords.teacherOptions);
+router.get("/test-records", testRecords.teacherList);
+router.post("/test-records", testRecords.teacherCreate);
+router.get("/test-records/:id", testRecords.teacherGet);
+router.put("/test-records/:id", testRecords.teacherUpdate);
+router.delete("/test-records/:id", testRecords.teacherRemove);
+router.put("/test-records/:id/marks", testRecords.teacherSaveMarks);
 
 // DASHBOARD
 router.get("/dashboard", teacherPortal.getDashboard);

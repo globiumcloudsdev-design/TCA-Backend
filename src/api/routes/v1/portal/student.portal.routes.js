@@ -6,6 +6,7 @@
 
 import { Router } from 'express';
 import { protect, isStudent } from '../../../middlewares/auth.middleware.js';
+import * as testRecords from '../../../controllers/testRecord.controller.js';
 import { uploadMultiple, uploadSingle } from '../../../middlewares/upload.middleware.js';
 import { validate } from '../../../middlewares/validation.middleware.js';
 import * as studentPortal from '../../../controllers/portal/studentPortal.controller.js';
@@ -19,6 +20,9 @@ const router = Router();
 // All routes require authentication and student role
 router.use(protect);
 router.use(isStudent);
+
+// Test Records: published only, own results
+router.get('/test-records', testRecords.studentList);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD

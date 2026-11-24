@@ -12,12 +12,16 @@ import * as parentPortal from '../../../controllers/portal/parentPortal.controll
 import * as leaveRequestsPortal from '../../../controllers/portal/leaveRequests.portal.controller.js';
 import { createLeaveRequestSchema, getMyLeaveRequestsQuerySchema, cancelLeaveRequestSchema } from '../../../validators/leaveRequest.validator.js';
 import * as eventController from '../../../controllers/event.controller.js';
+import * as testRecords from '../../../controllers/testRecord.controller.js';
 
 const router = Router();
 
 // All routes require authentication and parent role
 router.use(protect);
 router.use(isParent);
+
+// Test Records: published only, ownership-checked child
+router.get('/children/:childId/test-records', testRecords.parentChildList);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD
