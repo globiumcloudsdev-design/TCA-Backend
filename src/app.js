@@ -19,6 +19,7 @@ import { corsOptions } from './config/cors.js';
 import { morganMiddleware } from './config/logger.js';
 import { rateLimiter } from './api/middlewares/rateLimit.middleware.js';
 import { errorHandler } from './api/middlewares/errorHandler.middleware.js';
+import { responseScrub } from './api/middlewares/responseScrub.middleware.js';
 import { notFound } from './api/middlewares/notFound.middleware.js';
 import v1Routes from './api/routes/v1/index.js';
 
@@ -28,6 +29,7 @@ const app = express();
 // SECURITY MIDDLEWARES
 // =============================================
 app.use(helmet());
+app.use(responseScrub); // never leak 5xx details / stacks (EXPOSE_ERROR_DETAILS opt-in)
 app.use(cors(corsOptions));
 app.use(mongoSanitize());
 app.use(xss());
