@@ -88,39 +88,125 @@ const countRoster = async (instituteId, classId, sectionId) =>
 // TEACHER SCOPE (classes / sections / subjects a teacher may use)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Flat list of { class_id, section_id|null, subject_id|null, subject_name } from active timetables */
-export const getTeacherScope = async (teacherId, instituteId) => {
-  const timetables = await Timetable.findAll({ where: { school_id: instituteId, is_active: true } });
+/**
+ * PURE builder (no DB): merges every way a teacher is assigned into one flat scope of
+ * { class_id, section_id|null, subject_id|null, subject_name }.
+ *
+ * Sources (all combined):
+ *   1. timetable slots            -> class + section + subject                   (sources.timetable)
+ *   2. Subject.teacher_id         -> class (all sections) + subject              (sources.subjectsTaught)
+ *   3. Class.class_teacher_id     -> class (all sections) + the class subjects   (sources.classTeacherClasses)
+ *   4. Section.section_teacher_id -> that section + the class subjects           (sources.sectionTeacherSections)
+ *   5. details.teacherDetails.subjects (profile) -> those subjects in every class/section the
+ *      teacher already has from sources 1-4                                      (sources.profileSubjects)
+ * classSubjects: Map(classId -> [{ id, name }]) used by 3 and 4.
+ */
+export const buildTeacherScope = (sources = {}) => {
+  const {
+    timetable = [],
+    subjectsTaught = [],
+    classTeacherClasses = [],
+    sectionTeacherSections = [],
+    profileSubjects = [],
+    classSubjects = new Map(),
+  } = sources;
+
   const seen = new Set();
   const entries = [];
+  const add = (class_id, section_id, subject_id, subject_name) => {
+    if (!class_id || (!subject_id && !subject_name)) return;
+    const key = `${class_id}|${section_id || ''}|${subject_id || ''}|${lc(subject_name)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({ class_id, section_id: section_id || null, subject_id: subject_id || null, subject_name: subject_name || null });
+  };
+
+  timetable.forEach((e) => add(e.class_id, e.section_id, e.subject_id, e.subject_name));
+  subjectsTaught.forEach((s) => add(s.class_id, null, s.id, s.name));
+  classTeacherClasses.forEach((c) => (classSubjects.get(c.id) || []).forEach((s) => add(c.id, null, s.id, s.name)));
+  sectionTeacherSections.forEach((sec) => (classSubjects.get(sec.class_id) || []).forEach((s) => add(sec.class_id, sec.id, s.id, s.name)));
+
+  // Profile-declared subjects apply to the class/section pairs the teacher already has
+  if (profileSubjects.length) {
+    const pairs = new Map();
+    entries.forEach((e) => pairs.set(`${e.class_id}|${e.section_id || ''}`, e));
+    classTeacherClasses.forEach((c) => pairs.set(`${c.id}|`, { class_id: c.id, section_id: null }));
+    sectionTeacherSections.forEach((sec) => pairs.set(`${sec.class_id}|${sec.id}`, { class_id: sec.class_id, section_id: sec.id }));
+    for (const p of pairs.values()) profileSubjects.forEach((s) => add(p.class_id, p.section_id, s.id, s.name));
+  }
+  return entries;
+};
+
+/** Normalise details.teacherDetails.subjects: strings (names or uuids) / { id, name } objects */
+const readProfileSubjects = async (teacher, instituteId) => {
+  const raw = teacher?.details?.teacherDetails?.subjects;
+  const list = Array.isArray(raw) ? raw : [];
+  const out = [];
+  const ids = [];
+  for (const item of list) {
+    if (item && typeof item === 'object') {
+      const validId = item.id && UUID_RE.test(String(item.id)) ? item.id : null;
+      if (validId) ids.push(validId);
+      if (item.name) out.push({ id: validId, name: String(item.name) });
+    } else if (typeof item === 'string' && item.trim()) {
+      if (UUID_RE.test(item.trim())) ids.push(item.trim());
+      else out.push({ id: null, name: item.trim() });
+    }
+  }
+  if (ids.length) {
+    const rows = await Subject.findAll({ where: { id: { [Op.in]: ids }, school_id: instituteId }, attributes: ['id', 'name'] });
+    rows.forEach((r) => out.push({ id: r.id, name: r.name }));
+  }
+  return out;
+};
+
+/** Everything a teacher is assigned to (timetable, subject/class/section teacher, profile subjects). Read-only. */
+export const getTeacherScope = async (teacherId, instituteId) => {
+  const [timetables, subjectsTaught, classTeacherClasses, sectionTeacherSections, teacher] = await Promise.all([
+    Timetable.findAll({ where: { school_id: instituteId, is_active: true } }),
+    Subject.findAll({ where: { school_id: instituteId, teacher_id: teacherId, is_active: true }, attributes: ['id', 'name', 'class_id'] }),
+    Class.findAll({ where: { school_id: instituteId, class_teacher_id: teacherId }, attributes: ['id'] }),
+    Section.findAll({ where: { school_id: instituteId, section_teacher_id: teacherId }, attributes: ['id', 'class_id'] }),
+    User.findOne({ where: { id: teacherId, school_id: instituteId }, attributes: ['id', 'details'] }),
+  ]);
+
+  const timetable = [];
   for (const tt of timetables) {
     const classId = tt.entity_ids?.class_id;
     if (!classId) continue;
     const ttSection = tt.entity_ids?.section_id || null;
     for (const slot of tt.slots || []) {
       if (slot.teacher_id !== teacherId || slot.is_break) continue;
-      if (!slot.subject_id && !slot.subject_name) continue;
-      const entry = {
-        class_id: classId,
-        section_id: slot.section_id || ttSection,
-        subject_id: slot.subject_id || null,
-        subject_name: slot.subject_name || null,
-      };
-      const key = `${entry.class_id}|${entry.section_id || ''}|${entry.subject_id || ''}|${lc(entry.subject_name)}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        entries.push(entry);
-      }
+      timetable.push({ class_id: classId, section_id: slot.section_id || ttSection, subject_id: slot.subject_id, subject_name: slot.subject_name });
     }
   }
-  return entries;
+
+  // Subjects of the classes the teacher is class/section teacher of
+  const headClassIds = [...new Set([...classTeacherClasses.map((c) => c.id), ...sectionTeacherSections.map((s) => s.class_id)])];
+  const classSubjects = new Map();
+  if (headClassIds.length) {
+    const rows = await Subject.findAll({ where: { school_id: instituteId, class_id: { [Op.in]: headClassIds }, is_active: true }, attributes: ['id', 'name', 'class_id'] });
+    rows.forEach((r) => {
+      if (!classSubjects.has(r.class_id)) classSubjects.set(r.class_id, []);
+      classSubjects.get(r.class_id).push({ id: r.id, name: r.name });
+    });
+  }
+
+  return buildTeacherScope({
+    timetable,
+    subjectsTaught: subjectsTaught.map((s) => ({ id: s.id, name: s.name, class_id: s.class_id })),
+    classTeacherClasses: classTeacherClasses.map((c) => ({ id: c.id })),
+    sectionTeacherSections: sectionTeacherSections.map((s) => ({ id: s.id, class_id: s.class_id })),
+    profileSubjects: await readProfileSubjects(teacher, instituteId),
+    classSubjects,
+  });
 };
 
 const subjectMatches = (entry, subject) =>
   (subject.subject_id && entry.subject_id && entry.subject_id === subject.subject_id) ||
   (subject.subject_name && entry.subject_name && lc(entry.subject_name) === lc(subject.subject_name));
 
-const assertTeacherMayTest = (scope, { class_id, section_id, subject_id, subject_name }) => {
+export const assertTeacherMayTest = (scope, { class_id, section_id, subject_id, subject_name }, forAdmin = false) => {
   const ok = scope.some(
     (e) =>
       e.class_id === class_id &&
@@ -129,7 +215,12 @@ const assertTeacherMayTest = (scope, { class_id, section_id, subject_id, subject
       subjectMatches(e, { subject_id, subject_name })
   );
   if (!ok) {
-    throw new AppError('You can only create tests for the classes, sections and subjects assigned to you', 403);
+    throw new AppError(
+      forAdmin
+        ? 'The selected teacher is not assigned to this class, section and subject. Pick one of the assigned classes, sections and subjects.'
+        : 'You can only create tests for the classes, sections and subjects assigned to you',
+      403
+    );
   }
 };
 
@@ -386,11 +477,10 @@ export const createTest = async (ctx, body = {}) => {
     sectionId = section.id;
   }
 
-  const scope = isTeacher(ctx) ? await getTeacherScope(teacherId, ctx.instituteId) : null;
+  // Same rule for admins and teachers: class/section/subject must be assigned to the (selected) teacher
+  const scope = await getTeacherScope(teacherId, ctx.instituteId);
   const subject = await resolveSubject(ctx, body, scope);
-  if (isTeacher(ctx)) {
-    assertTeacherMayTest(scope, { class_id: cls.id, section_id: sectionId, ...subject });
-  }
+  assertTeacherMayTest(scope, { class_id: cls.id, section_id: sectionId, ...subject }, !isTeacher(ctx));
 
   const testDate = parseTestDate(body.test_date);
   assertNotPast(testDate);
@@ -544,9 +634,9 @@ export const updateTest = async (ctx, id, body = {}) => {
     const subjectBody = body.subject_id !== undefined || body.subject_name !== undefined
       ? body
       : { subject_id: test.subject_id, subject_name: test.subject_name };
-    const scope = isTeacher(ctx) ? await getTeacherScope(ctx.actorId, ctx.instituteId) : null;
+    const scope = await getTeacherScope(teacherId, ctx.instituteId);
     const subject = await resolveSubject(ctx, subjectBody, scope);
-    if (isTeacher(ctx)) assertTeacherMayTest(scope, { class_id: cls.id, section_id: sectionId, ...subject });
+    assertTeacherMayTest(scope, { class_id: cls.id, section_id: sectionId, ...subject }, !isTeacher(ctx));
 
     Object.assign(updates, {
       class_id: cls.id,
@@ -1223,6 +1313,8 @@ export const listMonthlyForStudent = async (instituteId, studentId, q = {}) => {
 export default {
   getRoster,
   getTeacherScope,
+  buildTeacherScope,
+  assertTeacherMayTest,
   getTeacherOptions,
   getAdminOptions,
   createTest,
