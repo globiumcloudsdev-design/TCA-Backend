@@ -33,18 +33,18 @@ async function getPayrollPolicy(instituteId) {
 // ─────────────────────────────────────────────────────────────
 // Helper: Create payroll notification for staff
 // ─────────────────────────────────────────────────────────────
-async function sendPayrollNotification(staff, instituteId, salaryData, month, year) {
+async function sendPayrollNotification(staff, instituteId, salaryData, month, year, payslipId = null) {
   try {
     const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthName = monthNames[month];
     
+    // No salary amounts in the notification (push text/data show on lock screens): amounts live in the payroll screen
     const notificationData = {
+      type: 'payslip',
+      entity_id: payslipId,
+      route: 'payroll',
       month,
       year,
-      basicSalary: salaryData.basicSalary,
-      totalAllowances: salaryData.totalAllowances,
-      totalDeductions: salaryData.totalDeductions,
-      netSalary: salaryData.netSalary,
     };
 
     await notificationService.createNotification(
@@ -53,12 +53,13 @@ async function sendPayrollNotification(staff, instituteId, salaryData, month, ye
         branch_id: staff.branch_id || null,
         user_id: staff.id,
         title: `🎉 Payroll Generated - ${monthName} ${year}`,
-        body: `Your payslip for ${monthName} ${year} has been generated. Net Salary: PKR ${salaryData.netSalary.toLocaleString('en-PK')}`,
+        body: `Your payslip for ${monthName} ${year} is available.`,
         type: 'payroll',
         channel: 'in_app',
         data: notificationData,
       },
-      true // emitRealtime
+      true, // emitRealtime
+      { push: true }
     );
 
     logger.info(`📬 Payroll notification sent to ${staff.first_name} ${staff.last_name}`);
@@ -291,7 +292,7 @@ export async function generatePayroll(instituteId, userId, options = {}) {
         result.generated++;
         
         // Send notification to staff (outside transaction to avoid rollback)
-        setImmediate(() => sendPayrollNotification(staff, instituteId, salaryData, month, year));
+        setImmediate(() => sendPayrollNotification(staff, instituteId, salaryData, month, year, payslipData.id));
       } catch (err) {
         result.failed++;
         result.errors.push({ staff_id: staff.id, name: `${staff.first_name} ${staff.last_name}`, error: err.message });

@@ -14,6 +14,7 @@ import Notification from '../models/postgres/Notification.model.js';
 import sequelize from '../config/database.js';
 import { getIO, emitToUser, emitToSchool } from '../sockets/index.js';
 import logger from '../config/logger.js';
+import { pushForRows, runInBackground } from './push/notify.service.js';
 
 // ─────────────────────────────────────────────────────────────────
 // ✅ SINGLE USER NOTIFICATION
@@ -24,8 +25,11 @@ import logger from '../config/logger.js';
  * @param {Object} data - { institute_id, branch_id?, user_id, title, body, type, channel, data }
  * @param {Boolean} emitRealtime - Should emit socket event
  */
-export const createNotification = async (data, emitRealtime = true) => {
+export const createNotification = async (data, emitRealtime = true, options = {}) => {
   const notification = await Notification.create(data);
+
+  // Opt-in push (FCM) for the events on the approved list. Fire-and-forget: never blocks or throws.
+  if (options.push) runInBackground('createNotification push', () => pushForRows([notification]));
 
   // Emit real-time event
   if (emitRealtime && data.user_id) {
@@ -73,6 +77,7 @@ export const broadcastNotification = async ({
   channel = 'in_app',
   data = {},
   emitRealtime = true,
+  push = false,
 }) => {
   try {
     let userIds = [];
@@ -128,6 +133,9 @@ export const broadcastNotification = async ({
         data,
       }))
     );
+
+    // Opt-in push (FCM), fire-and-forget
+    if (push) runInBackground('broadcastNotification push', () => pushForRows(notifications));
 
     // Emit real-time events to each user
     if (emitRealtime) {

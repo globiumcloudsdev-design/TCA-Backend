@@ -28,6 +28,15 @@ import {
 import { protect } from '../../middlewares/auth.middleware.js';
 import { hasPermission } from '../../middlewares/permission.middleware.js';
 import { schoolContext } from '../../middlewares/schoolContext.middleware.js';
+import { restrictTo } from '../../middlewares/auth.middleware.js';
+import { hasAnyPermission } from '../../middlewares/permission.middleware.js';
+import {
+  registerDevice,
+  unregisterDevice,
+  pushStatus,
+  previewAudience,
+  sendNotificationRouter,
+} from '../../controllers/pushNotification.controller.js';
 import { getActiveAnnouncements } from '../../controllers/announcement.controller.js';
 
 const router = Router();
@@ -44,6 +53,18 @@ router.use(protect, schoolContext);
  * Get paginated notifications for current user
  * Query: ?page=1&limit=20&type=fee&is_read=false&sort=DESC
  */
+// ── Push: devices + status (any logged-in user). Registered before the generic /:id routes. ──
+router.post('/devices', registerDevice);
+router.delete('/devices', unregisterDevice);
+router.get('/push-status', pushStatus);
+
+// ── Senders (admin composer / legacy single + broadcast): admins and staff with the permission only ──
+const canSend = [
+  restrictTo('INSTITUTE_ADMIN', 'SUPER_ADMIN', 'BRANCH_ADMIN', 'CAMPUS_ADMIN', 'STAFF'),
+  hasAnyPermission(['notification.send', 'notification.broadcast']),
+];
+router.post('/audience/preview', ...canSend, previewAudience);
+
 router.get('/', getNotificationsController);
 
 /**
@@ -107,7 +128,7 @@ router.delete('/cleanup-old', cleanupOldNotificationsController);
  * Body: { user_id, title, body, type, channel, data }
  * Permission: For authenticated users
  */
-router.post('/send', sendNotificationController);
+router.post('/send', ...canSend, sendNotificationRouter(sendNotificationController));
 
 /**
  * POST /api/v1/notifications/broadcast
@@ -115,6 +136,6 @@ router.post('/send', sendNotificationController);
  * Body: { recipient_type, title, body, type, channel, data, branch_id? }
  * Permission: For authenticated users
  */
-router.post('/broadcast', broadcastNotificationController);
+router.post('/broadcast', ...canSend, broadcastNotificationController);
 
 export default router;

@@ -147,6 +147,7 @@ export const createAssignment = async (data, files = [], options = {}) => {
   await updateAssignmentStats(assignment.id, data.institute_id);
 
   console.log(`✅ Assignment created: ${assignment.id}`);
+  if (assignment.is_published && !transaction) notifyAssignmentPublished(assignment); // fire-and-forget
   return assignment;
 };
 
@@ -459,6 +460,11 @@ export const gradeSubmission = async (submissionId, gradeData, options = {}) => 
 
   // Update assignment stats
   await updateAssignmentStats(submission.assignment_id);
+
+  try {
+    const assignment = await models.Assignment.findByPk(submission.assignment_id, { attributes: ['id', 'institute_id', 'title', 'total_marks'] });
+    if (assignment) notifyHomeworkGraded({ instituteId: assignment.institute_id, assignment, submission });
+  } catch { /* push is best effort */ }
 
   return submission;
 };

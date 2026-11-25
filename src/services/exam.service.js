@@ -747,6 +747,8 @@ export const updateExamResult = async (resultId, instituteId, updateData, option
 /**
  * Publish exam results
  */
+import { notifyExamResultsPublished } from './push/events.js';
+
 export const publishExamResults = async (examId, instituteId, publishDate) => {
   const transaction = await sequelize.transaction();
 
@@ -765,6 +767,8 @@ export const publishExamResults = async (examId, instituteId, publishDate) => {
 
     await exam.save({ transaction });
     await transaction.commit();
+
+    notifyExamResultsPublished(instituteId, exam.id); // fire-and-forget push + inbox
 
     return exam;
   } catch (error) {

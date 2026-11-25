@@ -3,6 +3,7 @@ import models from '../models/postgres/index.js';
 import { Op } from 'sequelize';
 import { createNotification, broadcastNotification } from './notification.service.js';
 import logger from '../config/logger.js';
+import { notifyAdmins, notifyUsers, notifyStudentsAndParents } from './push/events.js';
 
 const { LeaveRequest, LeaveType, User, StaffAttendance, StudentAttendance, sequelize } = models;
 
@@ -12,7 +13,7 @@ const { LeaveRequest, LeaveType, User, StaffAttendance, StudentAttendance, seque
 const notifyLeaveRequest = async (leaveRequest, eventType = 'created') => {
   try {
     const requester = await User.findByPk(leaveRequest.user_id, {
-      attributes: ['id', 'first_name', 'last_name', 'school_id']
+      attributes: ['id', 'first_name', 'last_name', 'school_id', 'user_type', 'branch_id']
     });
 
     if (!requester) return;
@@ -23,68 +24,36 @@ const notifyLeaveRequest = async (leaveRequest, eventType = 'created') => {
     let targetUserId = leaveRequest.reporting_officer_id || leaveRequest.approved_by;
 
     if (eventType === 'created') {
-      // If no reporting officer or approved_by, we should still notify the school admin
-      if (!targetUserId) {
-        // Find an admin for this school to notify if no specific person is assigned
-        const admin = await User.findOne({
-          where: { school_id: requester.school_id, user_type: 'INSTITUTE_ADMIN' },
-          attributes: ['id']
-        });
-        targetUserId = admin?.id;
+      // New request -> institute admins + the requester's branch admins (push + inbox)
+      notifyAdmins({
+        instituteId: requester.school_id,
+        branchId: leaveRequest.branch_id || requester.branch_id || null,
+        label: 'new leave request',
+        payload: {
+          type: 'admin_leave_request',
+          title: `New leave request from ${requesterName}`,
+          body: `${requesterName} requested ${daysCount} day(s) leave from ${new Date(leaveRequest.from_date).toLocaleDateString()}`,
+          entity_id: leaveRequest.id,
+          data: { requester_id: leaveRequest.user_id, requester_type: leaveRequest.user_type || requester.user_type },
+        },
+      });
+    } else if (eventType === 'approved' || eventType === 'rejected') {
+      // Outcome -> the requester. A parent applies for a child (requester is the student): notify the student AND the parents.
+      const approved = eventType === 'approved';
+      const payload = {
+        type: 'leave',
+        title: approved ? 'Leave request approved' : 'Leave request rejected',
+        body: approved
+          ? `The leave request for ${daysCount} day(s) has been approved`
+          : `The leave request has been rejected. Reason: ${leaveRequest.approval_remarks || 'Not specified'}`,
+        entity_id: leaveRequest.id,
+        data: { status: approved ? 'APPROVED' : 'REJECTED', from_date: leaveRequest.from_date, to_date: leaveRequest.to_date },
+      };
+      if (requester.user_type === 'STUDENT') {
+        notifyStudentsAndParents({ instituteId: requester.school_id, studentIds: [requester.id], payload: { ...payload, data: { ...payload.data, student_id: requester.id } }, label: 'leave outcome' });
+      } else {
+        notifyUsers({ instituteId: requester.school_id, userIds: [leaveRequest.user_id], payload, label: 'leave outcome' });
       }
-
-      if (!targetUserId) {
-        logger.warn(`No target user found for leave request notification (request: ${leaveRequest.id})`);
-        return;
-      }
-
-      // Notify HOD/Admin about new leave request
-      await createNotification({
-        institute_id: requester.school_id,
-        user_id: targetUserId,
-        title: `📋 New Leave Request from ${requesterName}`,
-        body: `${requesterName} requested ${daysCount} day(s) leave from ${new Date(leaveRequest.from_date).toLocaleDateString()}`,
-        type: 'alert',
-        channel: 'in_app',
-        data: {
-          requestId: leaveRequest.id,
-          requesterName,
-          fromDate: leaveRequest.from_date,
-          toDate: leaveRequest.to_date,
-          reason: leaveRequest.reason,
-          daysCount
-        }
-      }, true);
-    } else if (eventType === 'approved') {
-      // Notify requester when leave is approved
-      await createNotification({
-        institute_id: requester.school_id,
-        user_id: leaveRequest.user_id,
-        title: `✅ Leave Request Approved`,
-        body: `Your leave request for ${daysCount} day(s) has been approved`,
-        type: 'general',
-        channel: 'in_app',
-        data: {
-          requestId: leaveRequest.id,
-          fromDate: leaveRequest.from_date,
-          toDate: leaveRequest.to_date
-        }
-      }, true);
-    } else if (eventType === 'rejected') {
-      // Notify requester when leave is rejected
-      await createNotification({
-        institute_id: requester.school_id,
-        user_id: leaveRequest.user_id,
-        title: `❌ Leave Request Rejected`,
-        body: `Your leave request has been rejected. Reason: ${leaveRequest.approval_remarks || 'Not specified'}`,
-        type: 'alert',
-        channel: 'in_app',
-        data: {
-          requestId: leaveRequest.id,
-          fromDate: leaveRequest.from_date,
-          remarks: leaveRequest.approval_remarks
-        }
-      }, true);
     } else if (eventType === 'cancelled') {
       // Notify HOD/Admin when requester cancels
       if (!targetUserId) {

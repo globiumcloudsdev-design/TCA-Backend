@@ -4,6 +4,7 @@ import { sequelize } from "../models/postgres/index.js";
 import { createNotification, broadcastNotification } from "./notification.service.js";
 import logger from "../config/logger.js";
 import { todayPkt } from "../utils/helpers/date.helper.js";
+import { notifyAttendanceMarked } from "./push/events.js";
 
 const { StudentAttendance, User, Class, Section, Institute } = models;
 
@@ -110,6 +111,9 @@ const sendAttendanceNotification = async (studentId, attendanceData, schoolId, s
         className: student?.details?.studentDetails?.class_name || 'N/A'
       }
     }, true);
+
+    // Parents of the child (push + inbox) - only for absent / late
+    notifyAttendanceMarked({ instituteId: schoolId, studentId, studentName, status, date: attendanceData.date, attendanceId: attendanceData.id });
 
   } catch (error) {
     logger.error(`Failed to send attendance notification: ${error.message}`);

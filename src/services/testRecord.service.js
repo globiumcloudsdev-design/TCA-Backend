@@ -21,6 +21,7 @@ import models from '../models/postgres/index.js';
 import { AppError } from '../utils/lib/AppError.js';
 import { todayPkt } from '../utils/helpers/date.helper.js';
 import { getStudentAcademicInfo } from '../utils/helpers/student.helper.js';
+import { notifyTestRecordsPublished } from './push/events.js';
 
 const { TestRecord, TestMark, User, Class, Section, Subject, Timetable, sequelize } = models;
 
@@ -1069,6 +1070,12 @@ export const saveSheetMarks = async (ctx, cells) => {
 
 /** Admin: publish every marks_entered test of a sheet. Drafts (no marks) are skipped, not failed. */
 export const publishSheet = async (ctx, body = {}) => {
+  const result = await publishSheetTx(ctx, body);
+  if (result.published?.length) notifyTestRecordsPublished(ctx.instituteId, result.published);
+  return result;
+};
+
+const publishSheetTx = async (ctx, body = {}) => {
   const period = parseMonthYear(body);
   const sel = await resolveSheetSelector(ctx, body);
 
@@ -1099,7 +1106,7 @@ export const publishSheet = async (ctx, body = {}) => {
 // PUBLISH / UNPUBLISH (admin)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const publishTest = async (ctx, id) =>
+const publishTestTx = async (ctx, id) =>
   sequelize.transaction(async (transaction) => {
     const test = await TestRecord.findOne({
       where: { id: (assertUuid(id, 'test record id'), id), ...baseWhere(ctx) },
@@ -1118,6 +1125,13 @@ export const publishTest = async (ctx, id) =>
     await test.update({ status: 'published', published_at: new Date(), published_by: ctx.actorId, updated_by: ctx.actorId }, { transaction });
     return { id: test.id, status: 'published', published_at: test.published_at };
   });
+
+/** Publish one test, then notify students + parents (fire-and-forget, never blocks/throws) */
+export const publishTest = async (ctx, id) => {
+  const result = await publishTestTx(ctx, id);
+  notifyTestRecordsPublished(ctx.instituteId, [result.id]);
+  return result;
+};
 
 export const unpublishTest = async (ctx, id) =>
   sequelize.transaction(async (transaction) => {
