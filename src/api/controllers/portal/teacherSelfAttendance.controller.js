@@ -20,6 +20,19 @@ import {
 
 const getInstituteId = (req) => req.user?.school_id || req.user?.institute_id;
 
+/**
+ * GET /portal/teacher/self-attendance/campus
+ * -> { branch_name, latitude, longitude, radius_m, has_location }  (so the app can show the live distance)
+ */
+export const getCampus = async (req, res) => {
+  try {
+    const data = await attendanceService.getCampusInfo(req.user.id, getInstituteId(req));
+    return sendSuccess(res, data, 'Campus location fetched');
+  } catch (error) {
+    return sendError(res, error.message, error.statusCode || 500);
+  }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CHECK IN
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,10 +40,10 @@ const getInstituteId = (req) => req.user?.school_id || req.user?.institute_id;
 /**
  * POST /api/v1/teacher/self-attendance/check-in
  *
- * Body (all optional):
+ * Body (location REQUIRED - mobile app only):
  * {
- *   remarks: "string",
- *   branch_id: "uuid"   // agar multi-branch school ho
+ *   latitude: number, longitude: number, accuracy_m: number, is_mocked: boolean,
+ *   remarks?: "string"
  * }
  */
 export const checkIn = async (req, res) => {
@@ -39,12 +52,14 @@ export const checkIn = async (req, res) => {
     const record = await attendanceService.teacherCheckIn(
       req.user.id,
       instituteId,
-      req.body
+      req.body,
+      req.get('user-agent')
     );
     return sendCreated(res, record, 'Checked in successfully');
   } catch (error) {
     const status =
-      error.message.toLowerCase().includes('already checked in') ? 409
+      error.statusCode ? error.statusCode
+      : error.message.toLowerCase().includes('already checked in') ? 409
       : error.message.toLowerCase().includes('approved leave') ? 403
       : 400;
     return sendError(res, error.message, status);
@@ -58,10 +73,7 @@ export const checkIn = async (req, res) => {
 /**
  * POST /api/v1/teacher/self-attendance/check-out
  *
- * Body (all optional):
- * {
- *   remarks: "string"
- * }
+ * Body (location REQUIRED): { latitude, longitude, accuracy_m, is_mocked, remarks? }
  */
 export const checkOut = async (req, res) => {
   try {
@@ -69,12 +81,14 @@ export const checkOut = async (req, res) => {
     const record = await attendanceService.teacherCheckOut(
       req.user.id,
       instituteId,
-      req.body
+      req.body,
+      req.get('user-agent')
     );
     return sendSuccess(res, record, 'Checked out successfully');
   } catch (error) {
     const status =
-      error.message.toLowerCase().includes('already checked out') ? 409
+      error.statusCode ? error.statusCode
+      : error.message.toLowerCase().includes('already checked out') ? 409
       : 400;
     return sendError(res, error.message, status);
   }

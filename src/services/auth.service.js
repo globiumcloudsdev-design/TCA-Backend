@@ -500,6 +500,7 @@ export const loginService = async (loginId, password) => {
         staff_type: user.staff_type,
         school_id: user.school_id,
         branch_id: user.branch_id,
+        branch: user.branch ? { id: user.branch.id, name: user.branch.name } : null,
         avatar_url: user.avatar_url,
         permissions: permissions,
         institute: instituteData ? {
@@ -649,7 +650,10 @@ export const getAccountsByEmailService = async (email) => {
   const users = await User.unscoped().findAll({
     where: sqlWhere(fn('lower', col('User.email')), email.trim().toLowerCase()),
     attributes: ['id', 'first_name', 'last_name', 'email', 'user_type', 'staff_type', 'school_id', 'branch_id', 'avatar_url', 'is_active'],
-    include: [{ model: Institute, as: 'institute', attributes: ['id', 'institute_name', 'institute_code', 'institute_logo_url'] }]
+    include: [
+      { model: Institute, as: 'institute', attributes: ['id', 'institute_name', 'institute_code', 'institute_logo_url'] },
+      { model: Branch, as: 'branch', attributes: ['id', 'name'], required: false }
+    ]
   });
   if (!users || users.length === 0) {
     return { accounts: [], hasAccounts: false };
@@ -664,6 +668,8 @@ export const getAccountsByEmailService = async (email) => {
     display_name: `${user.first_name} ${user.last_name}`,
     display_role: getUserTypeDisplay(user.user_type, user.staff_type),
     display_icon: getUserTypeIcon(user.user_type),
+    branch_id: user.branch_id,
+    branch: user.branch ? { id: user.branch.id, name: user.branch.name } : null,
     institute: user.institute ? {
       id: user.institute.id,
       name: user.institute.institute_name,
