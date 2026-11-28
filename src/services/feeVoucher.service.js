@@ -17,6 +17,7 @@ import logger from '../config/logger.js';
 import { broadcastNotification, createNotification } from './notification.service.js';
 import FeePayment from '../models/postgres/FeePayment.model.js';
 import { v4 as uuidv4 } from 'uuid';
+import { notifyAdmins } from './push/events.js';
 
 const PAYMENT_METHODS = ['cash', 'cheque', 'bank_transfer', 'jazzcash', 'easypaisa', 'stripe', 'other'];
 const newReceiptNumber = () => `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -410,12 +411,13 @@ Total Amount Due: PKR ${netAmount.toFixed(2)}
                     type: 'fee',
                     channel: 'in_app',
                     data: {
+                        type: 'fee_voucher', entity_id: voucher.id, route: 'fees', student_id: studentId, voucher_number: voucher.voucher_number,
                         voucherId: voucher.id,
                         voucherNumber: voucher.voucher_number,
                         feeType: resolvedFeeType,
                         amount: netAmount
                     }
-                }, true);
+                }, true, { push: true });
 
                 // Notify linked parents
                 const parents = options.allParents || [];
@@ -433,11 +435,12 @@ Total Amount Due: PKR ${netAmount.toFixed(2)}
                         type: 'fee',
                         channel: 'in_app',
                         data: {
+                        type: 'fee_voucher', entity_id: voucher.id, route: 'fees', student_id: studentId, voucher_number: voucher.voucher_number,
                             voucherId: voucher.id,
                             studentId,
                             studentName: `${student.first_name} ${student.last_name}`
                         }
-                    }, true);
+                    }, true, { push: true });
                 }
 
                 // Notify institute admins
@@ -475,12 +478,13 @@ Total Amount Due: PKR ${netAmount.toFixed(2)}
                 type: 'fee',
                 channel: 'in_app',
                 data: {
+                        type: 'fee_voucher', entity_id: voucher.id, route: 'fees', student_id: studentId, voucher_number: voucher.voucher_number,
                     voucherId: voucher.id,
                     voucherNumber: voucher.voucher_number,
                     feeType: resolvedFeeType,
                     amount: netAmount
                 }
-            }, true);
+            }, true, { push: true });
 
             // Notify linked parents (preloaded option used if present to optimize DB)
             const { User: UserModel } = sequelize.models;
@@ -507,11 +511,12 @@ Total Amount Due: PKR ${netAmount.toFixed(2)}
                     type: 'fee',
                     channel: 'in_app',
                     data: {
+                        type: 'fee_voucher', entity_id: voucher.id, route: 'fees', student_id: studentId, voucher_number: voucher.voucher_number,
                         voucherId: voucher.id,
                         studentId,
                         studentName: `${student.first_name} ${student.last_name}`
                     }
-                }, true);
+                }, true, { push: true });
             }
 
             // Notify institute admins (matching attendance notification pattern)
@@ -1918,16 +1923,18 @@ export const createPaymentRequest = async (voucherId, instituteId, requester, da
         await voucher.save({ transaction });
 
         try {
-            await broadcastNotification({
-                institute_id: instituteId,
-                branch_id: voucher.branch_id || undefined,
-                recipient_type: 'ALL_ADMINS',
-                title: '💳 Fee payment awaiting confirmation',
-                body: `${requester.name || 'A parent'} reported a payment of PKR ${request.amount} for voucher #${voucher.voucher_number}.`,
-                type: 'fee',
-                channel: 'in_app',
-                data: { voucherId: voucher.id, requestId: request.id, studentId: voucher.student_id }
-            }, true);
+            notifyAdmins({
+                instituteId,
+                branchId: voucher.branch_id || null,
+                label: 'new payment request',
+                payload: {
+                    type: 'admin_payment_request',
+                    title: 'Fee payment awaiting confirmation',
+                    body: `${requester.name || 'A parent'} reported a payment of PKR ${request.amount} for voucher #${voucher.voucher_number}.`,
+                    entity_id: voucher.id,
+                    data: { request_id: request.id, student_id: voucher.student_id, amount: request.amount },
+                },
+            });
         } catch (err) {
             logger.error(`Failed to notify admins of payment request: ${err.message}`);
         }
@@ -2027,8 +2034,12 @@ export const reviewPaymentRequest = async (voucherId, requestId, instituteId, re
                     : `Your payment request for voucher #${voucher.voucher_number} was rejected${request.reject_reason ? ': ' + request.reject_reason : '.'}`,
                 type: 'fee',
                 channel: 'in_app',
-                data: { voucherId: voucher.id, requestId: request.id, status: request.status }
-            }, true);
+                data: {
+                    voucherId: voucher.id, requestId: request.id, status: request.status,
+                    type: 'payment', entity_id: voucher.id, route: 'fees',
+                    student_id: voucher.student_id, request_id: request.id, voucher_number: voucher.voucher_number
+                }
+            }, true, { push: true });
         } catch (err) {
             logger.error(`Failed to notify payment request outcome: ${err.message}`);
         }

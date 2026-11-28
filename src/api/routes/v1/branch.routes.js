@@ -38,7 +38,8 @@ const createBranchSchema = Joi.object({
     latitude: Joi.number().min(-90).max(90).optional().allow(null),
     longitude: Joi.number().min(-180).max(180).optional().allow(null),
     address: Joi.string().optional().allow('', null),
-    place_id: Joi.string().optional().allow('', null)
+    place_id: Joi.string().optional().allow('', null),
+    attendance_radius_m: Joi.number().integer().min(10).max(500).optional() // geofence radius for teacher check-in (default 50)
   }).optional(),
   settings: Joi.object({
     has_hostel: Joi.boolean().optional(),
@@ -85,7 +86,8 @@ const updateBranchSchema = Joi.object({
     latitude: Joi.number().min(-90).max(90).optional().allow(null),
     longitude: Joi.number().min(-180).max(180).optional().allow(null),
     address: Joi.string().optional().allow('', null),
-    place_id: Joi.string().optional().allow('', null)
+    place_id: Joi.string().optional().allow('', null),
+    attendance_radius_m: Joi.number().integer().min(10).max(500).optional()
   }).optional(),
   head: Joi.object({
     first_name: Joi.string().min(2).optional(),

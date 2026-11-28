@@ -140,9 +140,10 @@ export const sendNotificationController = catchAsync(async (req, res) => {
       body,
       type,
       channel,
-      data: data || {},
+      data: { type: 'notice', entity_id: null, route: 'notices', ...(data || {}) },
     },
-    true // emitRealtime
+    true, // emitRealtime
+    { push: true }
   );
 
   sendCreated(res, notification, 'Notification sent successfully');
@@ -186,8 +187,9 @@ export const broadcastNotificationController = catchAsync(async (req, res) => {
     body,
     type,
     channel,
-    data: data || {},
+    data: { type: 'notice', entity_id: null, route: 'notices', ...(data || {}) },
     emitRealtime: true,
+    push: true,
   });
 
   sendCreated(res, result, `Broadcast notification sent to ${result.count} users`);

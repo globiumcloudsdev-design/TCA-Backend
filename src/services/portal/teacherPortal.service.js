@@ -21,6 +21,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { countAttendance, attendancePercentage } from '../../utils/helpers/attendance.helper.js';
 import { getStudentAcademicInfo } from '../../utils/helpers/student.helper.js';
 import { todayPkt } from '../../utils/helpers/date.helper.js';
+import { notifyAttendanceMarked, notifyAssignmentPublished, notifyHomeworkGraded } from '../push/events.js';
 import { AppError } from '../../utils/lib/AppError.js';
 import { startOfDay, endOfDay, addDays, format, startOfWeek, endOfWeek, formatDistanceToNow } from 'date-fns';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../config/cloudinary.js';
@@ -952,6 +953,7 @@ export const createAssignment = async (teacherId, instituteId, data, files = [])
     }, { transaction });
 
     await transaction.commit();
+    if (assignment.is_published) notifyAssignmentPublished(assignment); // fire-and-forget
     return assignment;
   } catch (error) {
     await transaction.rollback();
@@ -1201,6 +1203,8 @@ export const gradeSubmission = async (submissionId, gradeData, teacherId) => {
   // Update assignment stats
   await updateAssignmentStats(submission.assignment_id);
 
+  notifyHomeworkGraded({ instituteId: submission.assignment.institute_id, assignment: submission.assignment, submission });
+
   return submission;
 };
 
@@ -1244,7 +1248,7 @@ export const markAttendance = async (teacherId, instituteId, data = {}) => {
       'details.studentDetails.class_id': class_id,
       ...(section_id ? { 'details.studentDetails.section_id': section_id } : {})
     },
-    attributes: ['id', 'branch_id', 'details']
+    attributes: ['id', 'first_name', 'last_name', 'branch_id', 'details']
   });
   const rosterById = new Map(roster.map(s => [s.id, s]));
 
@@ -1315,6 +1319,14 @@ export const markAttendance = async (teacherId, instituteId, data = {}) => {
     }
 
     await transaction.commit();
+
+    // Parents of absent / late students (fire-and-forget; never blocks or fails the save)
+    const nameById = new Map(roster.map((s) => [s.id, `${s.first_name || ''} ${s.last_name || ''}`.trim()]));
+    for (const a of rows) {
+      if (a.status === 'absent' || a.status === 'late') {
+        notifyAttendanceMarked({ instituteId, studentId: a.student_id, studentName: nameById.get(a.student_id), status: a.status, date: day });
+      }
+    }
     return {
       message: 'Attendance marked successfully',
       count: created + updated,

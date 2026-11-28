@@ -1,6 +1,8 @@
 /**
  * The Clouds Academy - Standard Response Helper
  */
+import logger from '../../config/logger.js';
+import { exposeErrorDetails } from './errorExposure.js';
 
 /**
  * Best HTTP status for a thrown error: an explicit statusCode (AppError) wins,
@@ -26,6 +28,11 @@ export const sendPaginated = (res, data, pagination, message = 'Success') =>
 export const sendNoContent = (res) => res.status(204).send();
 
 export const sendError = (res, message = 'Error', statusCode = 500, errors = null) => {
+  // 5xx: never leak internal messages (SQL, paths, ...) unless EXPOSE_ERROR_DETAILS=true; log them instead
+  if (statusCode >= 500 && !exposeErrorDetails()) {
+    logger.error(`💥 ${res.req?.method || ''} ${(res.req?.originalUrl || '').split('?')[0]} -> ${statusCode}: ${message}`);
+    return res.status(statusCode).json({ success: false, message: 'Something went wrong. Please try again.', timestamp: new Date().toISOString() });
+  }
   const payload = { success: false, message, timestamp: new Date().toISOString() };
   if (errors) payload.errors = errors;
   return res.status(statusCode).json(payload);

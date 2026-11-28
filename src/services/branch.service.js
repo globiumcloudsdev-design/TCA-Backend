@@ -416,6 +416,12 @@ export const updateBranch = async (id, institute_id, updateData) => {
     );
   }
 
+  // location is stored as one JSON object: merge so updating coordinates never wipes
+  // attendance_radius_m (and vice versa)
+  if (updateData.location && typeof updateData.location === 'object') {
+    updateData.location = { ...(branch.location || {}), ...updateData.location };
+  }
+
   // Update fields
   const updatableFields = [
     'name', 'code', 'phone', 'email', 'address', 'city',

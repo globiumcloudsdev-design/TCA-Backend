@@ -25,8 +25,86 @@ import models from "../../models/postgres/index.js";
 import { createNotification, broadcastNotification } from "../notification.service.js";
 import logger from "../../config/logger.js";
 import { todayPkt, toPktDateString, toPktTimeString, pktParts } from "../../utils/helpers/date.helper.js";
+import { AppError } from "../../utils/lib/AppError.js";
+import { evaluateGeofence, readCampusLocation } from "../../utils/helpers/geofence.js";
 
-const { StaffAttendance, LeaveRequest, User } = models;
+const { StaffAttendance, LeaveRequest, User, Branch, StaffAttendanceGeoLog } = models;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GEOFENCE (mobile only): check-in / check-out need the device location
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Teacher's campus = their branch (name + branch.location). null when they have no branch. */
+export const getTeacherCampus = async (teacherId, instituteId) => {
+  const teacher = await User.findOne({ where: { id: teacherId, school_id: instituteId }, attributes: ['id', 'branch_id'] });
+  if (!teacher?.branch_id) return null;
+  const branch = await Branch.findOne({ where: { id: teacher.branch_id, institute_id: instituteId }, attributes: ['id', 'name', 'location'] });
+  if (!branch) return null;
+  return { branch_id: branch.id, name: branch.name, location: branch.location };
+};
+
+/** Best-effort attempt log: DB row when the table exists, always the server log. Never throws. */
+const logGeoAttempt = async ({ teacherId, instituteId, campus, action, decision, attendanceId = null, client = null }) => {
+  const entry = {
+    institute_id: instituteId,
+    branch_id: campus?.branch_id || null,
+    staff_id: teacherId,
+    staff_attendance_id: attendanceId,
+    action: action === 'check-out' ? 'check_out' : 'check_in',
+    outcome: decision.ok ? 'accepted' : 'rejected',
+    reason: decision.ok ? 'OK' : decision.code,
+    latitude: decision.reading?.latitude ?? null,
+    longitude: decision.reading?.longitude ?? null,
+    accuracy_m: decision.reading?.accuracy_m ?? null,
+    distance_m: decision.distance_m ?? null,
+    radius_m: decision.radius_m ?? null,
+    is_mocked: decision.reading?.is_mocked ?? null,
+    message: decision.ok ? null : decision.message,
+    client: client ? String(client).slice(0, 255) : null,
+  };
+  if (!decision.ok) logger.warn(`GEOFENCE rejected ${entry.action} staff=${teacherId} reason=${entry.reason} distance=${entry.distance_m} radius=${entry.radius_m} mocked=${entry.is_mocked}`);
+  try {
+    await StaffAttendanceGeoLog.create(entry);
+  } catch (err) {
+    logger.warn(`GEOFENCE log table unavailable (run the migration): ${err.message}`);
+  }
+};
+
+/**
+ * Enforce the geofence. Throws AppError(400|403|409) with a human message when rejected;
+ * returns the accepted decision (distance, radius, reading) plus the campus.
+ */
+const enforceGeofence = async (teacherId, instituteId, data, action, client) => {
+  const campus = await getTeacherCampus(teacherId, instituteId);
+  const decision = evaluateGeofence({ body: data, campus, action });
+  if (!decision.ok) {
+    await logGeoAttempt({ teacherId, instituteId, campus, action, decision, client });
+    throw new AppError(decision.message, decision.status);
+  }
+  return { campus, decision };
+};
+
+/** After the attendance row is saved: log the accepted attempt and attach the geo info to the response */
+const withGeo = async (row, geo, teacherId, instituteId, action, client) => {
+  await logGeoAttempt({ teacherId, instituteId, campus: geo.campus, action, decision: geo.decision, attendanceId: row.id, client });
+  return {
+    ...row,
+    geo: {
+      campus: geo.campus.name,
+      distance_m: geo.decision.distance_m,
+      radius_m: geo.decision.radius_m,
+      accuracy_m: geo.decision.reading.accuracy_m,
+    },
+  };
+};
+
+/** GET /self-attendance/campus */
+export const getCampusInfo = async (teacherId, instituteId) => {
+  const campus = await getTeacherCampus(teacherId, instituteId);
+  if (!campus) return { branch_name: null, latitude: null, longitude: null, radius_m: readCampusLocation(null).radius_m, has_location: false };
+  const site = readCampusLocation(campus.location);
+  return { branch_name: campus.name, latitude: site.latitude, longitude: site.longitude, radius_m: site.radius_m, has_location: site.has_location };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -129,9 +207,12 @@ const formatRow = (record) => {
  * - Agar row exist hai par check_in null → update (admin ne absent pre-mark kiya tha)
  * - Agar row nahi hai → create
  */
-export const teacherCheckIn = async (teacherId, instituteId, data = {}) => {
+export const teacherCheckIn = async (teacherId, instituteId, data = {}, client = null) => {
   const date = todayDateStr();
   const now = new Date();
+
+  // Geofence first: location is REQUIRED (latitude, longitude, accuracy_m, is_mocked)
+  const geo = await enforceGeofence(teacherId, instituteId, data, 'check-in', client);
 
   // Check approved leave for today
   const leaveToday = await getApprovedLeaveForDate(
@@ -165,14 +246,14 @@ export const teacherCheckIn = async (teacherId, instituteId, data = {}) => {
     if (data.remarks) existing.remarks = data.remarks;
     await existing.save();
 
-    return formatRow(existing);
+    return withGeo(formatRow(existing), geo, teacherId, instituteId, 'check-in', client);
   }
 
   // Create new row
   const lateMinutes = calcLateMinutes(now);
   const record = await StaffAttendance.create({
     institute_id: instituteId,
-    branch_id: data.branch_id || null,
+    branch_id: geo.campus.branch_id, // from the teacher's own campus; never from the client
     staff_id: teacherId,
     date,
     status: resolveStatus(now),
@@ -199,7 +280,7 @@ export const teacherCheckIn = async (teacherId, instituteId, data = {}) => {
       const teacherName = `${teacher.first_name} ${teacher.last_name}`;
       await broadcastNotification({
         institute_id: instituteId,
-        branch_id: data.branch_id || null,
+        branch_id: geo.campus.branch_id,
         recipient_type: 'ALL_ADMINS',
         title: `✅ Check-In: ${teacherName}`,
         body: `${teacherName} checked in at ${toPktTimeString(now)} - ${lateMinutes > 0 ? '⏰ Late' : '✓ On Time'}`,
@@ -218,7 +299,7 @@ export const teacherCheckIn = async (teacherId, instituteId, data = {}) => {
     logger.error(`Notification error in teacherCheckIn: ${notifError.message}`);
   }
 
-  return formatRow(record);
+  return withGeo(formatRow(record), geo, teacherId, instituteId, 'check-in', client);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,9 +311,12 @@ export const teacherCheckIn = async (teacherId, instituteId, data = {}) => {
  *
  * Same row update — check_out + overtime/early_exit calculation.
  */
-export const teacherCheckOut = async (teacherId, instituteId, data = {}) => {
+export const teacherCheckOut = async (teacherId, instituteId, data = {}, client = null) => {
   const date = todayDateStr();
   const now = new Date();
+
+  // Geofence first: location is REQUIRED for check-out too
+  const geo = await enforceGeofence(teacherId, instituteId, data, 'check-out', client);
 
   const existing = await StaffAttendance.findOne({
     where: { staff_id: teacherId, institute_id: instituteId, date },
@@ -299,7 +383,7 @@ export const teacherCheckOut = async (teacherId, instituteId, data = {}) => {
     logger.error(`Notification error in teacherCheckOut: ${notifError.message}`);
   }
 
-  return formatRow(existing);
+  return withGeo(formatRow(existing), geo, teacherId, instituteId, 'check-out', client);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

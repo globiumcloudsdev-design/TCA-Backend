@@ -93,6 +93,7 @@ router.get(
 // SELF ATTENDANCE  (teacher apna check-in/out — StaffAttendance model)
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/self-attendance/today", selfAttendance.getTodayStatus);
+router.get("/self-attendance/campus", selfAttendance.getCampus);
 router.post("/self-attendance/check-in", selfAttendance.checkIn);
 router.post("/self-attendance/check-out", selfAttendance.checkOut);
 router.get("/self-attendance/history", selfAttendance.getHistory);

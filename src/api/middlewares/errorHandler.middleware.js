@@ -8,6 +8,7 @@
 import { AppError } from '../../utils/lib/AppError.js';
 import logger from '../../config/logger.js';
 import { errorStatus } from '../../utils/helpers/response.helper.js';
+import { exposeErrorDetails } from '../../utils/helpers/errorExposure.js';
 
 /**
  * Handle Sequelize unique constraint violations
@@ -53,18 +54,21 @@ const sendErrorDev = (err, res) => {
 /**
  * Send error in production (limited info)
  */
-const sendErrorProd = (err, res) => {
-  if (err.isOperational) {
-    res.status(err.statusCode).json({
-      success: false,
-      message: err.message,
-      errors: err.errors,
-    });
-  } else {
-    // Programming/unknown errors - don't leak details
-    logger.error('💥 CRITICAL ERROR:', err);
-    res.status(500).json({ success: false, message: 'Something went wrong.' });
+const GENERIC_5XX = 'Something went wrong. Please try again.';
+
+const sendErrorProd = (err, req, res) => {
+  const status = err.statusCode || 500;
+  if (status >= 500 || !err.isOperational) {
+    // Never expose internals (messages, stack, paths, SQL): log server-side, answer generically
+    logger.error(`💥 ${req.method} ${req.originalUrl.split('?')[0]} -> ${status}: ${err.message}`, { stack: err.stack });
+    return res.status(status >= 500 ? status : 500).json({ success: false, message: GENERIC_5XX });
   }
+  // 4xx operational errors: human-readable message (and Joi-style field errors) are safe to show
+  return res.status(status).json({
+    success: false,
+    message: err.message,
+    ...(err.errors ? { errors: err.errors } : {}),
+  });
 };
 
 export const errorHandler = (err, req, res, next) => {
@@ -81,6 +85,11 @@ export const errorHandler = (err, req, res, next) => {
   if (err.name === 'JsonWebTokenError') error = handleJWTError();
   if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();
 
+  // Body-parser / multer errors: safe, human-readable client errors (no parser internals)
+  if (err.type === 'entity.parse.failed') error = new AppError('Malformed JSON in request body.', 400);
+  else if (err.type === 'entity.too.large') error = new AppError('Request body is too large.', 413);
+  else if (err.name === 'MulterError') error = new AppError(`Upload error: ${String(err.code || 'invalid upload').replace(/_/g, ' ').toLowerCase()}`, 400);
+
   // Not an AppError — wrap it
   if (!(error instanceof AppError)) {
     const status = errorStatus(error, error.statusCode || 500);
@@ -88,10 +97,13 @@ export const errorHandler = (err, req, res, next) => {
     error = new AppError(error.message || 'Server error', status, status < 500);
   }
 
-  if (process.env.NODE_ENV === 'development') {
+  // Always log the full error server-side; only an explicit EXPOSE_ERROR_DETAILS=true
+  // opt-in puts details in the response (NODE_ENV is ignored on purpose).
+  if (exposeErrorDetails()) {
+    logger.error(`${req.method} ${req.originalUrl.split('?')[0]} -> ${error.statusCode}: ${error.message}`, { stack: error.stack });
     sendErrorDev(error, res);
   } else {
-    sendErrorProd(error, res);
+    sendErrorProd(error, req, res);
   }
 };
 

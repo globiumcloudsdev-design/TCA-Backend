@@ -44,6 +44,8 @@ import WebsiteCms from "./WebsiteCms.model.js";
 import SupportTicket from "./SupportTicket.model.js";
 import TestRecord from "./TestRecord.model.js";
 import TestMark from "./TestMark.model.js";
+import StaffAttendanceGeoLog from "./StaffAttendanceGeoLog.model.js";
+import DeviceToken from "./DeviceToken.model.js";
 
 const models = {
   sequelize,
@@ -88,6 +90,8 @@ const models = {
   SupportTicket,
   TestRecord,
   TestMark,
+  StaffAttendanceGeoLog,
+  DeviceToken,
 };
 
 // Run associations — deduplicate so alias School: Institute doesn't call associate twice
